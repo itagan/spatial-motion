@@ -1,4 +1,4 @@
-import { PerspectiveCamera, Scene, WebGLRenderer } from 'three'
+import { Euler, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three'
 import type { Layout, MotionItem, QualityLevel, Transform, TransitionOptions } from './types'
 import { easing, identityTransform, interpolateTransform } from './math'
 import { InstancedCardRenderer } from '../renderers/InstancedCardRenderer'
@@ -19,6 +19,26 @@ export interface MotionStageOptions {
   cameraZ?: number
   adaptivePerformance?: boolean
   onQualityChange?: (quality: QualityLevel, stats: PerformanceStats) => void
+  onItemClick?: (item: MotionItem, index: number) => void
+}
+
+export interface UpdateItemsOptions {
+  layout?: Layout
+  duration?: number
+}
+
+export interface FocusItemsOptions extends TransitionOptions {
+  columns?: number
+  gap?: number
+  scale?: number
+  z?: number
+  dimOpacity?: number
+}
+
+export interface PickResult {
+  item: MotionItem
+  index: number
+  distance: number
 }
 
 export class MotionStage {
@@ -27,6 +47,8 @@ export class MotionStage {
   private readonly renderer: WebGLRenderer
   private readonly cards: InstancedCardRenderer
   private readonly resizeObserver: ResizeObserver
+  private readonly projectionVector = new Vector3()
+  private readonly groupEuler = new Euler()
   private items: MotionItem[] = []
   private transforms: Transform[] = []
   private frameId = 0
@@ -46,6 +68,8 @@ export class MotionStage {
   private activeEffect: { effect: StreamingEffect; startedAt: number } | null = null
   private quality: QualityLevel
   private readonly performanceManager: AdaptivePerformanceManager
+  private lastLayout: Layout | null = null
+  private visibleRatio = 1
 
   constructor(private readonly options: MotionStageOptions) {
     this.quality = options.quality === 'auto' || !options.quality ? detectQuality() : options.quality
@@ -56,6 +80,7 @@ export class MotionStage {
     this.renderer = new WebGLRenderer({ alpha: true, antialias: profile.antialias, powerPreference: 'high-performance' })
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
     this.options.container.appendChild(this.renderer.domElement)
+    this.renderer.domElement.addEventListener('pointerup', this.handlePointerUp)
     this.cards = new InstancedCardRenderer(this.scene)
     this.resizeObserver = new ResizeObserver(() => this.resize())
     this.resizeObserver.observe(this.options.container)
@@ -73,10 +98,17 @@ export class MotionStage {
     this.transforms = this.items.map(identityTransform)
     await this.cards.setItems(this.items)
     this.cards.setTransforms(this.transforms)
-    this.cards.setVisibleRatio(visibleRatios[this.quality])
+    this.visibleRatio = visibleRatios[this.quality]
+    this.cards.setVisibleRatio(this.visibleRatio)
   }
 
   async to(layout: Layout, options: TransitionOptions = {}): Promise<boolean> {
+    const completed = await this.transitionTo(layout, options)
+    if (completed) this.lastLayout = layout
+    return completed
+  }
+
+  private async transitionTo(layout: Layout, options: TransitionOptions = {}): Promise<boolean> {
     const now = performance.now()
     this.transforms = this.resolveCurrentTransforms(now)
     if (this.activeEffect) {
@@ -130,7 +162,7 @@ export class MotionStage {
   ): Promise<boolean> {
     effect.prepare(this.items.length)
     const target = effect.calculateTransforms(this.items.length, 0)
-    const entered = await this.to(
+    const entered = await this.transitionTo(
       {
         name: `${effect.name}-entry`,
         orientation: 'camera',
@@ -143,6 +175,101 @@ export class MotionStage {
     enableEffect()
     this.activeEffect = { effect, startedAt: performance.now() }
     return true
+  }
+
+  async updateItems(items: MotionItem[], options: UpdateItemsOptions = {}): Promise<boolean> {
+    const now = performance.now()
+    const current = this.resolveCurrentTransforms(now)
+    const previousById = new Map(this.items.map((item, index) => [item.id, current[index]]))
+    this.transitionToken += 1
+    this.activeTransition = null
+    this.activeEffect = null
+    this.cards.disableEffect()
+
+    const maxItems = qualityProfiles[this.quality].maxVisibleItems
+    this.items = items.slice(0, maxItems)
+    this.transforms = this.items.map((item) => {
+      const previous = previousById.get(item.id)
+      return previous ? { ...previous } : identityTransform()
+    })
+    await this.cards.setItems(this.items)
+    this.cards.setTransforms(this.transforms)
+    this.cards.setVisibleRatio(this.visibleRatio)
+
+    const targetLayout = options.layout ?? this.lastLayout
+    if (!targetLayout) return true
+    const completed = await this.transitionTo(targetLayout, { duration: options.duration ?? 800 })
+    if (completed && options.layout) this.lastLayout = options.layout
+    return completed
+  }
+
+  async focusItems(ids: string[], options: FocusItemsOptions = {}): Promise<boolean> {
+    const selected = new Set(ids)
+    const selectedIndices = this.items
+      .map((item, index) => (selected.has(item.id) ? index : -1))
+      .filter((index) => index >= 0)
+    if (!selectedIndices.length) return false
+
+    const current = this.resolveCurrentTransforms(performance.now())
+    const selectedOrder = new Map(selectedIndices.map((index, order) => [index, order]))
+    const columns = Math.max(1, options.columns ?? Math.ceil(Math.sqrt(selectedIndices.length)))
+    const rows = Math.ceil(selectedIndices.length / columns)
+    const gap = options.gap ?? 1.7
+    const focusScale = options.scale ?? 1.45
+    const z = options.z ?? 8
+    const dimOpacity = options.dimOpacity ?? 0.08
+
+    return this.transitionTo(
+      {
+        name: 'focus',
+        orientation: 'camera',
+        calculate: () => current.map((transform, index) => {
+          const order = selectedOrder.get(index)
+          if (order === undefined) {
+            return { ...transform, scale: Math.min(transform.scale, 0.35), opacity: dimOpacity }
+          }
+          return {
+            x: (order % columns - (columns - 1) / 2) * gap,
+            y: ((rows - 1) / 2 - Math.floor(order / columns)) * gap,
+            z,
+            scale: focusScale,
+            rotationX: 0,
+            rotationY: 0,
+            rotationZ: 0,
+            opacity: 1,
+          }
+        }),
+      },
+      options,
+    )
+  }
+
+  restoreLayout(options: TransitionOptions = {}): Promise<boolean> {
+    if (!this.lastLayout) return Promise.resolve(false)
+    return this.transitionTo(this.lastLayout, options)
+  }
+
+  pick(clientX: number, clientY: number, radius = 56): PickResult | null {
+    const rect = this.renderer.domElement.getBoundingClientRect()
+    const transforms = this.resolveCurrentTransforms(performance.now())
+    this.groupEuler.set(this.rotateX, this.rotateY, 0, 'XYZ')
+    let closest: PickResult | null = null
+
+    transforms.forEach((transform, index) => {
+      if (transform.opacity < 0.05 || visibilityRank(index) > this.visibleRatio) return
+      this.projectionVector
+        .set(transform.x, transform.y, transform.z)
+        .applyEuler(this.groupEuler)
+        .project(this.camera)
+      if (this.projectionVector.z < -1 || this.projectionVector.z > 1) return
+      const screenX = rect.left + (this.projectionVector.x + 1) * rect.width / 2
+      const screenY = rect.top + (1 - this.projectionVector.y) * rect.height / 2
+      const distance = Math.hypot(clientX - screenX, clientY - screenY)
+      if (distance <= radius && (!closest || distance < closest.distance)) {
+        closest = { item: this.items[index], index, distance }
+      }
+    })
+    return closest
   }
 
   autoRotate(options: { x?: number; y?: number } = {}): void {
@@ -177,6 +304,7 @@ export class MotionStage {
     this.transitionToken += 1
     cancelAnimationFrame(this.frameId)
     this.resizeObserver.disconnect()
+    this.renderer.domElement.removeEventListener('pointerup', this.handlePointerUp)
     this.cards.dispose()
     this.renderer.dispose()
     this.renderer.domElement.remove()
@@ -232,7 +360,17 @@ export class MotionStage {
     const profile = qualityProfiles[quality]
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
     this.cards.setVisibleRatio(visibleRatios[quality])
+    this.visibleRatio = visibleRatios[quality]
     this.resize()
     this.options.onQualityChange?.(quality, this.performanceManager.getStats())
   }
+
+  private readonly handlePointerUp = (event: PointerEvent) => {
+    const result = this.pick(event.clientX, event.clientY)
+    if (result) this.options.onItemClick?.(result.item, result.index)
+  }
+}
+
+function visibilityRank(index: number): number {
+  return (index * 0.618033988749895) % 1
 }
