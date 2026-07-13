@@ -10,7 +10,7 @@ import {
 import { Timeline } from './Timeline'
 import { TunnelEffect } from '../effects/TunnelEffect'
 import { LinearShooterEffect } from '../effects/LinearShooterEffect'
-import type { StreamingEffect } from '../effects/types'
+import type { StreamingEffect, StreamingEffectGpuData } from '../effects/types'
 
 export interface MotionStageOptions {
   container: HTMLElement
@@ -41,6 +41,13 @@ export interface PickResult {
   distance: number
 }
 
+export interface PickOptions {
+  /** Extra hit area around the projected card in CSS pixels. */
+  padding?: number
+  /** Prefer the closest card center instead of resolving overlap by camera depth. */
+  includeOccluded?: boolean
+}
+
 export type QualityMode = QualityLevel | 'auto'
 
 export interface StagePerformanceStats extends PerformanceStats {
@@ -53,6 +60,8 @@ export interface StagePerformanceStats extends PerformanceStats {
   textureBytes: number
   pixelRatio: number
   paused: boolean
+  effect: string | null
+  activeEffectItems: number
 }
 
 export class MotionStage {
@@ -79,12 +88,18 @@ export class MotionStage {
     duration: number
     easing: (value: number) => number
   } | null = null
-  private activeEffect: { effect: StreamingEffect; startedAt: number } | null = null
+  private activeEffect: {
+    effect: StreamingEffect
+    gpuData: StreamingEffectGpuData
+    startedAt: number
+  } | null = null
   private quality: QualityLevel
   private performanceManager: AdaptivePerformanceManager
   private qualityMode: QualityMode
   private lastLayout: Layout | null = null
   private visibleRatio = 1
+  private currentOrientation: 'surface' | 'camera' = 'surface'
+  private hideBackHemisphere = false
   private inputItemCount = 0
   private itemsToken = 0
   private destroyed = false
@@ -158,8 +173,10 @@ export class MotionStage {
     const token = ++this.transitionToken
     const from = this.transforms
     const target = layout.calculate(this.items.length, this.context())
-    this.cards.setOrientation(layout.orientation ?? 'surface')
-    this.cards.setHideBackHemisphere(layout.hideBackHemisphere ?? false)
+    this.currentOrientation = layout.orientation ?? 'surface'
+    this.hideBackHemisphere = layout.hideBackHemisphere ?? false
+    this.cards.setOrientation(this.currentOrientation)
+    this.cards.setHideBackHemisphere(this.hideBackHemisphere)
     const duration = Math.max(0, options.duration ?? 1200)
     const ease = options.easing ?? easing.cubicInOut
     if (duration === 0) {
@@ -188,21 +205,23 @@ export class MotionStage {
   }
 
   enterTunnel(effect: TunnelEffect, options: TransitionOptions = {}): Promise<boolean> {
-    this.assertActive()
-    return this.enterStreamingEffect(effect, () => this.cards.enableTunnel(effect.getGpuData()), options)
+    return this.enterEffect(effect, options)
   }
 
   enterLinearShooter(effect: LinearShooterEffect, options: TransitionOptions = {}): Promise<boolean> {
+    return this.enterEffect(effect, options)
+  }
+
+  enterEffect(effect: StreamingEffect, options: TransitionOptions = {}): Promise<boolean> {
     this.assertActive()
-    return this.enterStreamingEffect(effect, () => this.cards.enableLinearShooter(effect.getGpuData()), options)
+    return this.enterStreamingEffect(effect, options)
   }
 
   private async enterStreamingEffect(
     effect: StreamingEffect,
-    enableEffect: () => void,
     options: TransitionOptions,
   ): Promise<boolean> {
-    effect.prepare(this.items.length)
+    effect.prepare(this.items.length, qualityProfiles[this.quality].maxActiveEffectItems)
     const target = effect.calculateTransforms(this.items.length, 0)
     const entered = await this.transitionTo(
       {
@@ -214,8 +233,9 @@ export class MotionStage {
       options,
     )
     if (!entered) return false
-    enableEffect()
-    this.activeEffect = { effect, startedAt: performance.now() }
+    const gpuData = effect.getGpuData()
+    this.cards.enableEffect(gpuData)
+    this.activeEffect = { effect, gpuData, startedAt: performance.now() }
     return true
   }
 
@@ -310,29 +330,56 @@ export class MotionStage {
     return this.transitionTo(this.lastLayout, options)
   }
 
-  pick(clientX: number, clientY: number, radius = 56): PickResult | null {
+  pick(clientX: number, clientY: number, options: number | PickOptions = {}): PickResult | null {
     this.assertActive()
     const rect = this.renderer.domElement.getBoundingClientRect()
+    if (!rect.width || !rect.height) return null
     const transforms = this.resolveCurrentTransforms(performance.now())
     this.camera.updateMatrixWorld()
     this.groupEuler.set(this.rotateX, this.rotateY, 0, 'XYZ')
-    let closest: PickResult | null = null
+    const legacyRadius = typeof options === 'number' ? Math.max(0, options) : null
+    const pickOptions = typeof options === 'number' ? {} : options
+    const padding = Math.max(0, pickOptions.padding ?? 0)
+    const billboard = this.currentOrientation === 'camera' || Boolean(this.activeEffect)
+    const candidates: Array<PickResult & { depth: number }> = []
+    const groupOrigin = new Vector3(0, 0, 0)
+    const groupOriginViewZ = groupOrigin.clone().applyMatrix4(this.camera.matrixWorldInverse).z
 
     transforms.forEach((transform, index) => {
       if (transform.opacity < 0.05 || visibilityRank(index) > this.visibleRatio) return
-      this.projectionVector
-        .set(transform.x, transform.y, transform.z)
-        .applyEuler(this.groupEuler)
-        .project(this.camera)
-      if (this.projectionVector.z < -1 || this.projectionVector.z > 1) return
-      const screenX = rect.left + (this.projectionVector.x + 1) * rect.width / 2
-      const screenY = rect.top + (1 - this.projectionVector.y) * rect.height / 2
+      const center = new Vector3(transform.x, transform.y, transform.z).applyEuler(this.groupEuler)
+      const centerViewZ = center.clone().applyMatrix4(this.camera.matrixWorldInverse).z
+      if (this.hideBackHemisphere && centerViewZ < groupOriginViewZ) return
+      const projectedCenter = this.projectToScreen(center, rect)
+      if (!projectedCenter) return
+      const screenX = projectedCenter.x
+      const screenY = projectedCenter.y
       const distance = Math.hypot(clientX - screenX, clientY - screenY)
-      if (distance <= radius && (!closest || distance < closest.distance)) {
-        closest = { item: this.items[index], index, distance }
+      if (legacyRadius !== null) {
+        if (distance <= legacyRadius) {
+          candidates.push({ item: this.items[index], index, distance, depth: center.distanceTo(this.camera.position) })
+        }
+        return
       }
+
+      const halfScale = Math.max(0, transform.scale) / 2
+      const corners = billboard
+        ? this.billboardCorners(center, halfScale)
+        : this.surfaceCorners(center, halfScale, transform)
+      if (!billboard && !isFrontFacing(corners, center, this.camera.position)) return
+      const screenCorners = corners.map((corner) => this.projectToScreen(corner, rect))
+      if (screenCorners.some((corner) => !corner)) return
+      const quad = screenCorners as ScreenPoint[]
+      if (!pointHitsQuad(clientX, clientY, quad, padding)) return
+      candidates.push({ item: this.items[index], index, distance, depth: center.distanceTo(this.camera.position) })
     })
-    return closest
+
+    if (!candidates.length) return null
+    candidates.sort((a, b) => pickOptions.includeOccluded
+      ? a.distance - b.distance || a.depth - b.depth
+      : a.depth - b.depth || a.distance - b.distance)
+    const { depth: _depth, ...result } = candidates[0]
+    return result
   }
 
   autoRotate(options: { x?: number; y?: number } = {}): void {
@@ -428,12 +475,18 @@ export class MotionStage {
       qualityMode: this.qualityMode,
       inputItems: this.inputItemCount,
       renderedItems: cardStats.instanceCount,
-      visibleItems: countVisibleItems(cardStats.instanceCount, this.visibleRatio),
+      visibleItems: this.activeEffect
+        ? countVisibleEffectItems(this.activeEffect.gpuData.speedFactors, this.visibleRatio)
+        : countVisibleItems(cardStats.instanceCount, this.visibleRatio),
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       textureBytes: cardStats.textureBytes,
       pixelRatio: this.renderer.getPixelRatio(),
       paused: this.isPaused(),
+      effect: this.activeEffect?.effect.name ?? null,
+      activeEffectItems: this.activeEffect
+        ? countActiveEffectItems(this.activeEffect.gpuData.speedFactors)
+        : 0,
     }
   }
 
@@ -460,10 +513,12 @@ export class MotionStage {
     const rawFrameMs = now - this.lastFrame || 0
     const delta = Math.min(0.05, rawFrameMs / 1000)
     this.lastFrame = now
-    if (this.qualityMode === 'auto' && this.options.adaptivePerformance !== false) {
-      const nextQuality = this.performanceManager.recordFrame(rawFrameMs, now)
-      if (nextQuality) this.applyQuality(nextQuality)
-    }
+    const nextQuality = this.performanceManager.recordFrame(
+      rawFrameMs,
+      now,
+      this.qualityMode === 'auto' && this.options.adaptivePerformance !== false,
+    )
+    if (nextQuality) this.applyQuality(nextQuality)
     this.rotateX += this.rotateSpeedX * delta
     this.rotateY += this.rotateSpeedY * delta
     this.cards.setGroupRotation(this.rotateX, this.rotateY)
@@ -480,6 +535,13 @@ export class MotionStage {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
     this.cards.setVisibleRatio(visibleRatios[quality])
     this.visibleRatio = visibleRatios[quality]
+    if (this.activeEffect) {
+      const elapsedSeconds = Math.max(0, (performance.now() - this.activeEffect.startedAt) / 1000)
+      this.activeEffect.effect.prepare(this.items.length, profile.maxActiveEffectItems)
+      this.activeEffect.gpuData = this.activeEffect.effect.getGpuData()
+      this.cards.enableEffect(this.activeEffect.gpuData)
+      this.cards.setEffectTime(elapsedSeconds)
+    }
     this.resizeInternal()
     this.options.onQualityChange?.(quality, this.performanceManager.getStats())
   }
@@ -516,6 +578,77 @@ export class MotionStage {
   private assertActive(): void {
     if (this.destroyed) throw new Error('MotionStage has been destroyed')
   }
+
+  private projectToScreen(point: Vector3, rect: DOMRect): ScreenPoint | null {
+    this.projectionVector.copy(point).project(this.camera)
+    if (this.projectionVector.z < -1 || this.projectionVector.z > 1) return null
+    return {
+      x: rect.left + (this.projectionVector.x + 1) * rect.width / 2,
+      y: rect.top + (1 - this.projectionVector.y) * rect.height / 2,
+    }
+  }
+
+  private billboardCorners(center: Vector3, halfScale: number): Vector3[] {
+    const right = new Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion)
+    const up = new Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion)
+    return [
+      center.clone().addScaledVector(right, -halfScale).addScaledVector(up, -halfScale),
+      center.clone().addScaledVector(right, halfScale).addScaledVector(up, -halfScale),
+      center.clone().addScaledVector(right, halfScale).addScaledVector(up, halfScale),
+      center.clone().addScaledVector(right, -halfScale).addScaledVector(up, halfScale),
+    ]
+  }
+
+  private surfaceCorners(center: Vector3, halfScale: number, transform: Transform): Vector3[] {
+    const itemEuler = new Euler(transform.rotationX, transform.rotationY, transform.rotationZ, 'XYZ')
+    return [
+      [-halfScale, -halfScale],
+      [halfScale, -halfScale],
+      [halfScale, halfScale],
+      [-halfScale, halfScale],
+    ].map(([x, y]) => new Vector3(x, y, 0)
+      .applyEuler(itemEuler)
+      .applyEuler(this.groupEuler)
+      .add(center))
+  }
+}
+
+interface ScreenPoint {
+  x: number
+  y: number
+}
+
+function isFrontFacing(corners: Vector3[], center: Vector3, cameraPosition: Vector3): boolean {
+  const edgeA = corners[1].clone().sub(corners[0])
+  const edgeB = corners[3].clone().sub(corners[0])
+  const normal = edgeA.cross(edgeB)
+  return normal.dot(cameraPosition.clone().sub(center)) > 0
+}
+
+function pointHitsQuad(x: number, y: number, corners: ScreenPoint[], padding: number): boolean {
+  let hasPositive = false
+  let hasNegative = false
+  for (let index = 0; index < corners.length; index += 1) {
+    const start = corners[index]
+    const end = corners[(index + 1) % corners.length]
+    const cross = (end.x - start.x) * (y - start.y) - (end.y - start.y) * (x - start.x)
+    hasPositive ||= cross > 0
+    hasNegative ||= cross < 0
+  }
+  if (!(hasPositive && hasNegative)) return true
+  if (!padding) return false
+  return corners.some((start, index) =>
+    distanceToSegment(x, y, start, corners[(index + 1) % corners.length]) <= padding,
+  )
+}
+
+function distanceToSegment(x: number, y: number, start: ScreenPoint, end: ScreenPoint): number {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const lengthSquared = dx * dx + dy * dy
+  if (!lengthSquared) return Math.hypot(x - start.x, y - start.y)
+  const amount = Math.min(1, Math.max(0, ((x - start.x) * dx + (y - start.y) * dy) / lengthSquared))
+  return Math.hypot(x - (start.x + amount * dx), y - (start.y + amount * dy))
 }
 
 function visibilityRank(index: number): number {
@@ -527,6 +660,22 @@ function countVisibleItems(count: number, ratio: number): number {
   for (let index = 0; index < count; index += 1) {
     if (visibilityRank(index) <= ratio) visible += 1
   }
+  return visible
+}
+
+function countActiveEffectItems(speedFactors: Float32Array): number {
+  let active = 0
+  speedFactors.forEach((speed) => {
+    if (speed >= 0) active += 1
+  })
+  return active
+}
+
+function countVisibleEffectItems(speedFactors: Float32Array, ratio: number): number {
+  let visible = 0
+  speedFactors.forEach((speed, index) => {
+    if (speed >= 0 && visibilityRank(index) <= ratio) visible += 1
+  })
   return visible
 }
 

@@ -1,5 +1,9 @@
 import type { Transform } from '../core/types'
-import type { StreamingEffect } from './types'
+import {
+  createEffectParameters,
+  type StreamingEffect,
+  type StreamingEffectGpuData,
+} from './types'
 
 export interface LinearShooterOptions {
   sourceRadius?: number
@@ -14,22 +18,16 @@ export interface LinearShooterOptions {
   seed?: number
 }
 
-export interface LinearShooterGpuData {
-  paths: Float32Array
-  speedFactors: Float32Array
-  sourceRadius: number
-  speed: number
-  startScale: number
-  endScale: number
-  z: number
-}
+export type LinearShooterGpuData = StreamingEffectGpuData
 
 export class LinearShooterEffect implements StreamingEffect {
   readonly name = 'linear-shooter'
+  readonly kind = 'linear-shooter' as const
   private readonly options: Required<LinearShooterOptions>
   private paths = new Float32Array(0)
   private speedFactors = new Float32Array(0)
-  private preparedCount = 0
+  private preparedCount = -1
+  private preparedActiveCount = -1
 
   constructor(options: LinearShooterOptions = {}) {
     this.options = {
@@ -46,12 +44,13 @@ export class LinearShooterEffect implements StreamingEffect {
     }
   }
 
-  prepare(count: number): void {
-    if (this.preparedCount === count) return
+  prepare(count: number, activeLimit = Number.POSITIVE_INFINITY): void {
+    const activeCount = Math.floor(Math.min(count, this.options.maxActiveItems, Math.max(0, activeLimit)))
+    if (this.preparedCount === count && this.preparedActiveCount === activeCount) return
     this.preparedCount = count
-    this.paths = new Float32Array(count * 3)
+    this.preparedActiveCount = activeCount
+    this.paths = new Float32Array(count * 4)
     this.speedFactors = new Float32Array(count)
-    const activeCount = Math.min(count, this.options.maxActiveItems)
     const activeRows = Math.max(1, Math.ceil(activeCount / this.options.directionCount))
 
     for (let index = 0; index < count; index += 1) {
@@ -66,17 +65,17 @@ export class LinearShooterEffect implements StreamingEffect {
       const offset = index < activeCount
         ? (sequence / activeRows + direction / (activeRows * this.options.directionCount)) % 1
         : 0
-      this.paths.set([laneAngle + jitter, radius, offset], index * 3)
-      this.speedFactors[index] = index < this.options.maxActiveItems
+      this.paths.set([laneAngle + jitter, radius, offset, 0], index * 4)
+      this.speedFactors[index] = index < activeCount
         ? 0.9 + random(index + 9000, this.options.seed) * 0.2
         : -1
     }
   }
 
   calculateTransforms(count: number, elapsedSeconds: number): Transform[] {
-    this.prepare(count)
+    if (this.preparedCount !== count) this.prepare(count)
     return Array.from({ length: count }, (_, index) => {
-      const pathIndex = index * 3
+      const pathIndex = index * 4
       const angle = this.paths[pathIndex]
       const outerRadius = this.paths[pathIndex + 1]
       const offset = this.paths[pathIndex + 2]
@@ -98,15 +97,18 @@ export class LinearShooterEffect implements StreamingEffect {
   }
 
   getGpuData(): LinearShooterGpuData {
-    if (!this.preparedCount) throw new Error('LinearShooterEffect must be prepared before reading GPU data')
+    if (this.preparedCount < 0) throw new Error('LinearShooterEffect must be prepared before reading GPU data')
     return {
+      kind: this.kind,
       paths: this.paths,
       speedFactors: this.speedFactors,
-      sourceRadius: this.options.sourceRadius,
-      speed: this.options.speed,
-      startScale: this.options.startScale,
-      endScale: this.options.endScale,
-      z: this.options.z,
+      parameters: createEffectParameters(
+        this.options.sourceRadius,
+        this.options.speed,
+        this.options.startScale,
+        this.options.endScale,
+        this.options.z,
+      ),
     }
   }
 }

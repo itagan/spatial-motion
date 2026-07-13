@@ -10,7 +10,8 @@ describe('TunnelEffect', () => {
     const second = effect.getGpuData()
 
     expect(first.paths).toBe(second.paths)
-    expect(first.paths).toHaveLength(1800)
+    expect(first.kind).toBe('tunnel')
+    expect(first.paths).toHaveLength(2400)
     expect(first.speedFactors).toHaveLength(600)
   })
 
@@ -32,5 +33,12 @@ describe('TunnelEffect', () => {
 
     expect(transforms.filter(({ opacity }) => opacity > 0).length).toBeLessThanOrEqual(120)
     expect(Array.from(gpuData.speedFactors).filter((speed) => speed >= 0)).toHaveLength(120)
+  })
+
+  it('honors the runtime quality cap below its configured pool limit', () => {
+    const effect = tunnel({ maxActiveItems: 300 })
+    effect.prepare(600, 140)
+
+    expect(Array.from(effect.getGpuData().speedFactors).filter((speed) => speed >= 0)).toHaveLength(140)
   })
 })

@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Layout, MotionItem, Transform } from './types'
 import { MotionStage } from './MotionStage'
 import { TunnelEffect } from '../effects/TunnelEffect'
+import { radialBurst } from '../effects/RadialBurstEffect'
+import type { StreamingEffect } from '../effects/types'
 
 const stageMocks = vi.hoisted(() => ({
   cards: [] as Array<Record<string, ReturnType<typeof vi.fn>>>,
@@ -19,8 +21,7 @@ vi.mock('../renderers/InstancedCardRenderer', () => ({
     setGroupRotation = vi.fn()
     setOrientation = vi.fn()
     setHideBackHemisphere = vi.fn()
-    enableTunnel = vi.fn()
-    enableLinearShooter = vi.fn()
+    enableEffect = vi.fn()
     disableEffect = vi.fn()
     setEffectTime = vi.fn()
     setVisibleRatio = vi.fn()
@@ -297,11 +298,28 @@ describe('MotionStage', () => {
     cards.disableEffect.mockClear()
 
     expect(await stage.enterTunnel(new TunnelEffect(), { duration: 0 })).toBe(true)
-    expect(cards.enableTunnel).toHaveBeenCalledOnce()
+    expect(cards.enableEffect).toHaveBeenCalledOnce()
     expect(await stage.to(baseLayout, { duration: 0 })).toBe(true)
     expect(cards.disableEffect).toHaveBeenCalledOnce()
     const restored = cards.setTransforms.mock.calls.at(-1)?.[0] as Transform[]
     expect(restored.map(({ x }) => x)).toEqual([0, 1])
+    stage.destroy()
+  })
+
+  it('uses the unified effect API and reapplies the active pool limit after a quality change', async () => {
+    const stage = createStage({ quality: 'high' })
+    const cards = currentCards()
+    await stage.setItems(Array.from({ length: 500 }, (_, index) => ({ id: `item-${index}` })))
+
+    expect(await stage.enterEffect(radialBurst({ maxActiveItems: 500 }), { duration: 0 })).toBe(true)
+    expect(cards.enableEffect).toHaveBeenCalledOnce()
+    expect(stage.getPerformanceStats()).toMatchObject({ effect: 'radial-burst', activeEffectItems: 300 })
+
+    stage.setQuality('medium')
+    expect(stage.getPerformanceStats()).toMatchObject({ effect: 'radial-burst', activeEffectItems: 220 })
+    stage.setQuality('low')
+    expect(cards.enableEffect).toHaveBeenCalledTimes(3)
+    expect(stage.getPerformanceStats()).toMatchObject({ effect: 'radial-burst', activeEffectItems: 140 })
     stage.destroy()
   })
 
@@ -319,6 +337,78 @@ describe('MotionStage', () => {
 
     await stage.to(layout(() => [transform({ opacity: 0.01 })]), { duration: 0 })
     expect(stage.pick(50, 50)).toBeNull()
+    stage.destroy()
+  })
+
+  it('uses the projected card quad and optional padding instead of a center radius', async () => {
+    const stage = createStage()
+    await stage.setItems([{ id: 'card' }])
+    await stage.to(layout(() => [transform({ scale: 1 })]), { duration: 0 })
+
+    expect(stage.pick(58, 50)).toBeNull()
+    expect(stage.pick(58, 50, { padding: 5 })?.item.id).toBe('card')
+    expect(stage.pick(58, 50, 10)?.item.id).toBe('card')
+    stage.destroy()
+  })
+
+  it('resolves overlapping projected cards by camera depth', async () => {
+    const stage = createStage()
+    await stage.setItems([{ id: 'far' }, { id: 'near' }])
+    await stage.to(layout(() => [
+      transform({ x: 0, z: 0, scale: 2 }),
+      transform({ x: 0.3, z: 8, scale: 2 }),
+    ]), { duration: 0 })
+
+    expect(stage.pick(50, 50)?.item.id).toBe('near')
+    expect(stage.pick(50, 50, { includeOccluded: true })?.item.id).toBe('far')
+    stage.destroy()
+  })
+
+  it('rejects back-facing surface cards', async () => {
+    const stage = createStage()
+    await stage.setItems([{ id: 'back' }])
+    await stage.to({
+      name: 'back-facing',
+      orientation: 'surface',
+      calculate: () => [transform({ scale: 2, rotationY: Math.PI })],
+    }, { duration: 0 })
+
+    expect(stage.pick(50, 50)).toBeNull()
+    stage.destroy()
+  })
+
+  it('picks from current CPU transforms while a transition or streaming effect is active', async () => {
+    const callbacks: FrameRequestCallback[] = []
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      callbacks.push(callback)
+      return callbacks.length
+    }))
+    const stage = createStage()
+    await stage.setItems([{ id: 'moving' }])
+    await stage.to(layout(() => [transform({ x: -2, scale: 2 })]), { duration: 0 })
+    const moving = stage.to(layout(() => [transform({ x: 2, scale: 2 })]), { duration: 100 })
+    now = 50
+    expect(stage.pick(50, 50)?.item.id).toBe('moving')
+    now = 100
+    callbacks.at(-1)?.(100)
+    await moving
+
+    const fixedEffect: StreamingEffect = {
+      name: 'fixed-test-effect',
+      kind: 'radial-burst',
+      prepare: vi.fn(),
+      calculateTransforms: () => [transform({ z: 3, scale: 2 })],
+      getGpuData: () => ({
+        kind: 'radial-burst',
+        paths: new Float32Array(4),
+        speedFactors: new Float32Array([1]),
+        parameters: new Float32Array(12),
+      }),
+    }
+    expect(await stage.enterEffect(fixedEffect, { duration: 0 })).toBe(true)
+    expect(stage.pick(50, 50)?.item.id).toBe('moving')
     stage.destroy()
   })
 
@@ -344,6 +434,7 @@ describe('MotionStage', () => {
     expect(() => stage.getQuality()).toThrow('MotionStage has been destroyed')
     expect(() => stage.setItems([])).toThrow('MotionStage has been destroyed')
     expect(() => stage.to(layout(() => []))).toThrow('MotionStage has been destroyed')
+    expect(() => stage.enterEffect(radialBurst())).toThrow('MotionStage has been destroyed')
   })
 
   it('ignores an item load that finishes after destroy', async () => {

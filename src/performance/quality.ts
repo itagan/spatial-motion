@@ -1,9 +1,9 @@
 import type { QualityLevel, QualityProfile } from '../core/types'
 
 export const qualityProfiles: Record<QualityLevel, QualityProfile> = {
-  high: { maxPixelRatio: 1.5, maxVisibleItems: 2000, antialias: true, targetFps: 60 },
-  medium: { maxPixelRatio: 1.25, maxVisibleItems: 1000, antialias: true, targetFps: 45 },
-  low: { maxPixelRatio: 1, maxVisibleItems: 500, antialias: false, targetFps: 30 },
+  high: { maxPixelRatio: 1.5, maxVisibleItems: 2000, maxActiveEffectItems: 300, antialias: true, targetFps: 60 },
+  medium: { maxPixelRatio: 1.25, maxVisibleItems: 1000, maxActiveEffectItems: 220, antialias: true, targetFps: 45 },
+  low: { maxPixelRatio: 1, maxVisibleItems: 500, maxActiveEffectItems: 140, antialias: false, targetFps: 30 },
 }
 
 export const visibleRatios: Record<QualityLevel, number> = {

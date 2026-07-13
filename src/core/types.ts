@@ -38,6 +38,7 @@ export type EasingFunction = (value: number) => number
 export interface QualityProfile {
   maxPixelRatio: number
   maxVisibleItems: number
+  maxActiveEffectItems: number
   antialias: boolean
   targetFps: number
 }

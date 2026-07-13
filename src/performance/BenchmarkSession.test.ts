@@ -17,6 +17,8 @@ function stats(overrides: Partial<StagePerformanceStats> = {}): StagePerformance
     textureBytes: 2_000_000,
     pixelRatio: 1.5,
     paused: false,
+    effect: null,
+    activeEffectItems: 0,
     ...overrides,
   }
 }
