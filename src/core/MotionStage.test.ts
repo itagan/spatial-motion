@@ -24,6 +24,7 @@ vi.mock('../renderers/InstancedCardRenderer', () => ({
     disableEffect = vi.fn()
     setEffectTime = vi.fn()
     setVisibleRatio = vi.fn()
+    getStats = vi.fn(() => ({ instanceCount: 0, textureBytes: 0 }))
     dispose = vi.fn()
 
     constructor() {
@@ -40,6 +41,8 @@ vi.mock('three', async (importOriginal) => {
     setSize = vi.fn()
     render = vi.fn()
     dispose = vi.fn()
+    getPixelRatio = vi.fn(() => 1.5)
+    info = { render: { calls: 1, triangles: 2 } }
 
     constructor() {
       this.domElement.getBoundingClientRect = () => ({
@@ -143,6 +146,58 @@ describe('MotionStage', () => {
     expect(cards.setItems).toHaveBeenNthCalledWith(1, [])
     expect((cards.setItems.mock.calls[1][0] as MotionItem[])).toHaveLength(500)
     stage.destroy()
+  })
+
+  it('reports render metrics and supports manual quality locking', async () => {
+    const stage = createStage({ quality: 'low' })
+    const cards = currentCards()
+    cards.getStats.mockReturnValue({ instanceCount: 500, textureBytes: 1_048_576 })
+    await stage.setItems(Array.from({ length: 520 }, (_, index) => ({ id: `item-${index}` })))
+
+    expect(stage.getQualityMode()).toBe('low')
+    expect(stage.getPerformanceStats()).toMatchObject({
+      quality: 'low',
+      qualityMode: 'low',
+      inputItems: 520,
+      renderedItems: 500,
+      drawCalls: 1,
+      triangles: 2,
+      textureBytes: 1_048_576,
+      pixelRatio: 1.5,
+      paused: false,
+    })
+
+    stage.setQuality('high')
+    expect(stage.getQuality()).toBe('high')
+    expect(stage.getQualityMode()).toBe('high')
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
+    stage.setQuality('auto')
+    expect(stage.getQualityMode()).toBe('auto')
+    stage.destroy()
+  })
+
+  it('pauses manually and while the document is hidden', () => {
+    let visibility: DocumentVisibilityState = 'visible'
+    const visibilitySpy = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
+    const stage = createStage()
+    const requestFrame = vi.mocked(requestAnimationFrame)
+    const cancelFrame = vi.mocked(cancelAnimationFrame)
+
+    stage.pause()
+    expect(cancelFrame).toHaveBeenCalled()
+    expect(stage.getPerformanceStats().paused).toBe(true)
+    stage.resume()
+    expect(requestFrame).toHaveBeenCalledTimes(2)
+
+    visibility = 'hidden'
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(stage.getPerformanceStats().paused).toBe(true)
+    visibility = 'visible'
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(stage.getPerformanceStats().paused).toBe(false)
+
+    stage.destroy()
+    visibilitySpy.mockRestore()
   })
 
   it('allows only the newest concurrent item update to mutate stage transforms', async () => {

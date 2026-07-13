@@ -4,6 +4,8 @@ import type { MotionItem } from '../core/types'
 export interface TextureAtlasResult {
   texture: CanvasTexture
   rects: Float32Array
+  width: number
+  height: number
 }
 
 const loadImage = (url: string): Promise<HTMLImageElement | null> =>
@@ -62,7 +64,7 @@ export async function createTextureAtlas(
   texture.magFilter = LinearFilter
   texture.generateMipmaps = false
   texture.needsUpdate = true
-  return { texture, rects }
+  return { texture, rects, width: canvas.width, height: canvas.height }
 }
 
 function hash(value: string): number {

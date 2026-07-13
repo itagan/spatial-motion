@@ -25,6 +25,8 @@ function atlas(count: number) {
     result: {
       texture: { dispose } as unknown as TextureAtlasResult['texture'],
       rects: new Float32Array(count * 4),
+      width: 128,
+      height: 128,
     },
     dispose,
   }
@@ -72,5 +74,19 @@ describe('InstancedCardRenderer item loading', () => {
     expect(await loading).toBe(false)
     expect(pendingAtlas.dispose).toHaveBeenCalledOnce()
     expect(scene.children).toHaveLength(0)
+  })
+
+  it('reuses the current atlas when visual item data is unchanged', async () => {
+    const currentAtlas = atlas(1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const renderer = new InstancedCardRenderer(new Scene())
+    const items = [{ id: 'same', image: 'avatar.png', title: 'Same' }]
+
+    expect(await renderer.setItems(items)).toBe(true)
+    expect(await renderer.setItems(items.map((item) => ({ ...item })))).toBe(true)
+
+    expect(atlasMock.create).toHaveBeenCalledOnce()
+    expect(renderer.getStats()).toEqual({ instanceCount: 1, textureBytes: 65_536 })
+    renderer.dispose()
   })
 })

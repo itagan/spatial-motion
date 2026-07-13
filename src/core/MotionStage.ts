@@ -41,6 +41,20 @@ export interface PickResult {
   distance: number
 }
 
+export type QualityMode = QualityLevel | 'auto'
+
+export interface StagePerformanceStats extends PerformanceStats {
+  qualityMode: QualityMode
+  inputItems: number
+  renderedItems: number
+  visibleItems: number
+  drawCalls: number
+  triangles: number
+  textureBytes: number
+  pixelRatio: number
+  paused: boolean
+}
+
 export class MotionStage {
   private readonly scene = new Scene()
   private readonly camera: PerspectiveCamera
@@ -67,14 +81,19 @@ export class MotionStage {
   } | null = null
   private activeEffect: { effect: StreamingEffect; startedAt: number } | null = null
   private quality: QualityLevel
-  private readonly performanceManager: AdaptivePerformanceManager
+  private performanceManager: AdaptivePerformanceManager
+  private qualityMode: QualityMode
   private lastLayout: Layout | null = null
   private visibleRatio = 1
+  private inputItemCount = 0
   private itemsToken = 0
   private destroyed = false
+  private pausedByUser = false
+  private pausedByVisibility = document.visibilityState === 'hidden'
 
   constructor(private readonly options: MotionStageOptions) {
-    this.quality = options.quality === 'auto' || !options.quality ? detectQuality() : options.quality
+    this.qualityMode = options.quality ?? 'auto'
+    this.quality = this.qualityMode === 'auto' ? detectQuality() : this.qualityMode
     this.performanceManager = new AdaptivePerformanceManager(this.quality)
     const profile = qualityProfiles[this.quality]
     this.camera = new PerspectiveCamera(45, 1, 0.1, 100)
@@ -83,13 +102,14 @@ export class MotionStage {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
     this.options.container.appendChild(this.renderer.domElement)
     this.renderer.domElement.addEventListener('pointerup', this.handlePointerUp)
+    document.addEventListener('visibilitychange', this.handleVisibilityChange)
     this.cards = new InstancedCardRenderer(this.scene)
     this.resizeObserver = new ResizeObserver(() => {
       if (!this.destroyed) this.resizeInternal()
     })
     this.resizeObserver.observe(this.options.container)
     this.resizeInternal()
-    this.frameId = requestAnimationFrame(this.render)
+    if (!this.isPaused()) this.frameId = requestAnimationFrame(this.render)
   }
 
   setItems(items: MotionItem[]): Promise<void> {
@@ -110,6 +130,7 @@ export class MotionStage {
     const applied = await this.cards.setItems(nextItems)
     if (!applied || token !== this.itemsToken || this.destroyed) return
     this.items = nextItems
+    this.inputItemCount = items.length
     this.transforms = nextTransforms
     this.cards.setTransforms(nextTransforms)
     this.visibleRatio = visibleRatios[this.quality]
@@ -225,6 +246,7 @@ export class MotionStage {
     const applied = await this.cards.setItems(nextItems)
     if (!applied || token !== this.itemsToken || this.destroyed) return false
     this.items = nextItems
+    this.inputItemCount = items.length
     this.transforms = nextTransforms
     this.cards.setTransforms(nextTransforms)
     this.cards.setVisibleRatio(this.visibleRatio)
@@ -319,6 +341,33 @@ export class MotionStage {
     this.rotateSpeedY = options.y ?? 0.25
   }
 
+  setQuality(mode: QualityMode): void {
+    this.assertActive()
+    this.qualityMode = mode
+    const quality = mode === 'auto' ? detectQuality() : mode
+    this.performanceManager = new AdaptivePerformanceManager(quality)
+    if (quality !== this.quality) this.applyQuality(quality)
+  }
+
+  getQualityMode(): QualityMode {
+    this.assertActive()
+    return this.qualityMode
+  }
+
+  pause(): void {
+    this.assertActive()
+    if (this.pausedByUser) return
+    this.pausedByUser = true
+    this.stopRenderLoop()
+  }
+
+  resume(): void {
+    this.assertActive()
+    if (!this.pausedByUser) return
+    this.pausedByUser = false
+    this.startRenderLoop()
+  }
+
   stopRotation(): void {
     this.assertActive()
     this.rotateSpeedX = 0
@@ -356,8 +405,10 @@ export class MotionStage {
     this.itemsToken += 1
     this.transitionToken += 1
     cancelAnimationFrame(this.frameId)
+    this.frameId = 0
     this.resizeObserver.disconnect()
     this.renderer.domElement.removeEventListener('pointerup', this.handlePointerUp)
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange)
     this.cards.dispose()
     this.renderer.dispose()
     this.renderer.domElement.remove()
@@ -368,9 +419,22 @@ export class MotionStage {
     return this.quality
   }
 
-  getPerformanceStats(): PerformanceStats {
+  getPerformanceStats(): StagePerformanceStats {
     this.assertActive()
-    return this.performanceManager.getStats()
+    const performanceStats = this.performanceManager.getStats()
+    const cardStats = this.cards.getStats()
+    return {
+      ...performanceStats,
+      qualityMode: this.qualityMode,
+      inputItems: this.inputItemCount,
+      renderedItems: cardStats.instanceCount,
+      visibleItems: countVisibleItems(cardStats.instanceCount, this.visibleRatio),
+      drawCalls: this.renderer.info.render.calls,
+      triangles: this.renderer.info.render.triangles,
+      textureBytes: cardStats.textureBytes,
+      pixelRatio: this.renderer.getPixelRatio(),
+      paused: this.isPaused(),
+    }
   }
 
   private context() {
@@ -396,7 +460,7 @@ export class MotionStage {
     const rawFrameMs = now - this.lastFrame || 0
     const delta = Math.min(0.05, rawFrameMs / 1000)
     this.lastFrame = now
-    if (this.options.adaptivePerformance !== false && document.visibilityState === 'visible') {
+    if (this.qualityMode === 'auto' && this.options.adaptivePerformance !== false) {
       const nextQuality = this.performanceManager.recordFrame(rawFrameMs, now)
       if (nextQuality) this.applyQuality(nextQuality)
     }
@@ -407,7 +471,7 @@ export class MotionStage {
       this.cards.setEffectTime(Math.max(0, (now - this.activeEffect.startedAt) / 1000))
     }
     this.renderer.render(this.scene, this.camera)
-    this.frameId = requestAnimationFrame(this.render)
+    if (!this.isPaused()) this.frameId = requestAnimationFrame(this.render)
   }
 
   private applyQuality(quality: QualityLevel): void {
@@ -418,6 +482,29 @@ export class MotionStage {
     this.visibleRatio = visibleRatios[quality]
     this.resizeInternal()
     this.options.onQualityChange?.(quality, this.performanceManager.getStats())
+  }
+
+  private readonly handleVisibilityChange = () => {
+    if (this.destroyed) return
+    this.pausedByVisibility = document.visibilityState === 'hidden'
+    if (this.pausedByVisibility) this.stopRenderLoop()
+    else this.startRenderLoop()
+  }
+
+  private startRenderLoop(): void {
+    if (this.destroyed || this.isPaused() || this.frameId) return
+    this.lastFrame = performance.now()
+    this.frameId = requestAnimationFrame(this.render)
+  }
+
+  private stopRenderLoop(): void {
+    if (!this.frameId) return
+    cancelAnimationFrame(this.frameId)
+    this.frameId = 0
+  }
+
+  private isPaused(): boolean {
+    return this.pausedByUser || this.pausedByVisibility
   }
 
   private readonly handlePointerUp = (event: PointerEvent) => {
@@ -433,6 +520,14 @@ export class MotionStage {
 
 function visibilityRank(index: number): number {
   return (index * 0.618033988749895) % 1
+}
+
+function countVisibleItems(count: number, ratio: number): number {
+  let visible = 0
+  for (let index = 0; index < count; index += 1) {
+    if (visibilityRank(index) <= ratio) visible += 1
+  }
+  return visible
 }
 
 function validateItems(items: MotionItem[]): void {
