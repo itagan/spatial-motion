@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spatial Motion Performance Benchmark</title>
+  </head>
+  <body>
+    <main class="app benchmark-app">
+      <header>
+        <div>
+          <p class="eyebrow">SPATIAL MOTION / BENCHMARK</p>
+          <h1>低配设备性能基准</h1>
+        </div>
+        <a class="nav-link" href="/">返回动效演示</a>
+      </header>
+
+      <section class="benchmark-toolbar" aria-label="Benchmark controls">
+        <div class="control-group">
+          <strong>实例数</strong>
+          <div class="controls" id="item-counts">
+            <button data-count="100">100</button>
+            <button data-count="300">300</button>
+            <button data-count="600" class="active">600</button>
+            <button data-count="1000">1000</button>
+            <button data-count="1500">1500</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <strong>质量</strong>
+          <div class="controls" id="quality-modes">
+            <button data-quality="auto" class="active">AUTO</button>
+            <button data-quality="high">HIGH</button>
+            <button data-quality="medium">MEDIUM</button>
+            <button data-quality="low">LOW</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <strong>布局</strong>
+          <div class="controls" id="benchmark-layouts">
+            <button data-benchmark-layout="sphere" class="active">球体</button>
+            <button data-benchmark-layout="cylinder">圆柱</button>
+            <button data-benchmark-layout="grid">平面</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="metrics" aria-label="Live performance metrics">
+        <article><span>FPS</span><strong id="metric-fps">--</strong></article>
+        <article><span>FRAME</span><strong id="metric-frame">-- ms</strong></article>
+        <article><span>ITEMS</span><strong id="metric-items">--</strong></article>
+        <article><span>VISIBLE</span><strong id="metric-visible">--</strong></article>
+        <article><span>CALLS</span><strong id="metric-calls">--</strong></article>
+        <article><span>TRIANGLES</span><strong id="metric-triangles">--</strong></article>
+        <article><span>ATLAS</span><strong id="metric-texture">--</strong></article>
+        <article><span>QUALITY</span><strong id="metric-quality">--</strong></article>
+      </section>
+
+      <section id="benchmark-stage" aria-label="3D benchmark stage"></section>
+
+      <footer class="benchmark-footer">
+        <div class="benchmark-actions">
+          <label>采样时长
+            <select id="duration">
+              <option value="3">3 秒</option>
+              <option value="10" selected>10 秒</option>
+              <option value="20">20 秒</option>
+            </select>
+          </label>
+          <button id="run-benchmark" class="primary">运行性能采样</button>
+          <button id="export-result" disabled>导出 JSON</button>
+        </div>
+        <p id="benchmark-status" aria-live="polite">选择配置后运行采样</p>
+      </footer>
+      <section class="result-panel" aria-label="Benchmark result">
+        <pre id="benchmark-result">尚无采样结果</pre>
+      </section>
+    </main>
+    <script type="module" src="/benchmark.ts"></script>
+  </body>
+</html>

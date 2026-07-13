@@ -10,5 +10,11 @@ export default defineConfig({
   build: {
     outDir: '../dist-demo',
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        demo: new URL('./demo/index.html', import.meta.url).pathname,
+        benchmark: new URL('./demo/benchmark.html', import.meta.url).pathname,
+      },
+    },
   },
 })
