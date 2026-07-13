@@ -1,3 +1,6 @@
 export * from './sphere'
 export * from './cylinder'
 export * from './grid'
+export * from './ring'
+export * from './helix'
+export * from './cone'
