@@ -1,4 +1,4 @@
-import type { Layout, Transform } from '../core/types'
+import type { Layout, Transform } from '../core/types.js'
 
 export interface GridOptions {
   columns?: number

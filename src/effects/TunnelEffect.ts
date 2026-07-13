@@ -1,9 +1,9 @@
-import type { Transform } from '../core/types'
+import type { Transform } from '../core/types.js'
 import {
   createEffectParameters,
   type StreamingEffect,
   type StreamingEffectGpuData,
-} from './types'
+} from './types.js'
 
 export interface TunnelOptions {
   farZ?: number

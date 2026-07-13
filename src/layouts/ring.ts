@@ -1,5 +1,5 @@
-import type { Layout, Transform } from '../core/types'
-import { distributeWeighted } from './distribution'
+import type { Layout, Transform } from '../core/types.js'
+import { distributeWeighted } from './distribution.js'
 
 export interface RingOptions {
   /** Radius of the innermost orbit. */

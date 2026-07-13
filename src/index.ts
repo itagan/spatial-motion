@@ -1,9 +1,26 @@
-export * from './core/MotionStage'
-export * from './core/Timeline'
-export * from './core/types'
-export * from './core/math'
-export * from './layouts'
-export * from './effects'
-export * from './performance/quality'
-export * from './performance/AdaptivePerformanceManager'
-export * from './performance/BenchmarkSession'
+export { MotionStage } from './core/MotionStage.js'
+export type {
+  FocusItemsOptions,
+  MotionStageOptions,
+  PickOptions,
+  PickResult,
+  QualityMode,
+  StagePerformanceStats,
+  UpdateItemsOptions,
+} from './core/MotionStage.js'
+export { Timeline } from './core/Timeline.js'
+export type { TimelineStep } from './core/Timeline.js'
+export { easing, identityTransform, interpolateTransform } from './core/math.js'
+export type {
+  EasingFunction,
+  Layout,
+  LayoutContext,
+  MotionItem,
+  QualityLevel,
+  QualityProfile,
+  Transform,
+  TransitionOptions,
+} from './core/types.js'
+export * from './layouts/index.js'
+export * from './effects/index.js'
+export * from './performance/index.js'

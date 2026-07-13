@@ -1,5 +1,5 @@
-import type { QualityLevel } from '../core/types'
-import { qualityProfiles } from './quality'
+import type { QualityLevel } from '../core/types.js'
+import { qualityProfiles } from './quality.js'
 
 export interface AdaptivePerformanceOptions {
   sampleWindowMs?: number
