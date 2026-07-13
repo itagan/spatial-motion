@@ -70,6 +70,8 @@ export class MotionStage {
   private readonly performanceManager: AdaptivePerformanceManager
   private lastLayout: Layout | null = null
   private visibleRatio = 1
+  private itemsToken = 0
+  private destroyed = false
 
   constructor(private readonly options: MotionStageOptions) {
     this.quality = options.quality === 'auto' || !options.quality ? detectQuality() : options.quality
@@ -82,27 +84,44 @@ export class MotionStage {
     this.options.container.appendChild(this.renderer.domElement)
     this.renderer.domElement.addEventListener('pointerup', this.handlePointerUp)
     this.cards = new InstancedCardRenderer(this.scene)
-    this.resizeObserver = new ResizeObserver(() => this.resize())
+    this.resizeObserver = new ResizeObserver(() => {
+      if (!this.destroyed) this.resizeInternal()
+    })
     this.resizeObserver.observe(this.options.container)
-    this.resize()
+    this.resizeInternal()
     this.frameId = requestAnimationFrame(this.render)
   }
 
-  async setItems(items: MotionItem[]): Promise<void> {
+  setItems(items: MotionItem[]): Promise<void> {
+    this.assertActive()
+    validateItems(items)
+    return this.setItemsInternal(items)
+  }
+
+  private async setItemsInternal(items: MotionItem[]): Promise<void> {
+    const token = ++this.itemsToken
     this.transitionToken += 1
     this.activeTransition = null
     this.activeEffect = null
     this.cards.disableEffect()
     const maxItems = qualityProfiles[this.quality].maxVisibleItems
-    this.items = items.slice(0, maxItems)
-    this.transforms = this.items.map(identityTransform)
-    await this.cards.setItems(this.items)
-    this.cards.setTransforms(this.transforms)
+    const nextItems = items.slice(0, maxItems)
+    const nextTransforms = nextItems.map(identityTransform)
+    const applied = await this.cards.setItems(nextItems)
+    if (!applied || token !== this.itemsToken || this.destroyed) return
+    this.items = nextItems
+    this.transforms = nextTransforms
+    this.cards.setTransforms(nextTransforms)
     this.visibleRatio = visibleRatios[this.quality]
     this.cards.setVisibleRatio(this.visibleRatio)
   }
 
-  async to(layout: Layout, options: TransitionOptions = {}): Promise<boolean> {
+  to(layout: Layout, options: TransitionOptions = {}): Promise<boolean> {
+    this.assertActive()
+    return this.toInternal(layout, options)
+  }
+
+  private async toInternal(layout: Layout, options: TransitionOptions): Promise<boolean> {
     const completed = await this.transitionTo(layout, options)
     if (completed) this.lastLayout = layout
     return completed
@@ -147,11 +166,13 @@ export class MotionStage {
     })
   }
 
-  async enterTunnel(effect: TunnelEffect, options: TransitionOptions = {}): Promise<boolean> {
+  enterTunnel(effect: TunnelEffect, options: TransitionOptions = {}): Promise<boolean> {
+    this.assertActive()
     return this.enterStreamingEffect(effect, () => this.cards.enableTunnel(effect.getGpuData()), options)
   }
 
-  async enterLinearShooter(effect: LinearShooterEffect, options: TransitionOptions = {}): Promise<boolean> {
+  enterLinearShooter(effect: LinearShooterEffect, options: TransitionOptions = {}): Promise<boolean> {
+    this.assertActive()
     return this.enterStreamingEffect(effect, () => this.cards.enableLinearShooter(effect.getGpuData()), options)
   }
 
@@ -177,23 +198,35 @@ export class MotionStage {
     return true
   }
 
-  async updateItems(items: MotionItem[], options: UpdateItemsOptions = {}): Promise<boolean> {
+  updateItems(items: MotionItem[], options: UpdateItemsOptions = {}): Promise<boolean> {
+    this.assertActive()
+    validateItems(items)
+    return this.updateItemsInternal(items, options)
+  }
+
+  private async updateItemsInternal(items: MotionItem[], options: UpdateItemsOptions): Promise<boolean> {
     const now = performance.now()
     const current = this.resolveCurrentTransforms(now)
     const previousById = new Map(this.items.map((item, index) => [item.id, current[index]]))
+    const token = ++this.itemsToken
     this.transitionToken += 1
     this.activeTransition = null
     this.activeEffect = null
     this.cards.disableEffect()
+    this.transforms = current
+    this.cards.setTransforms(current)
 
     const maxItems = qualityProfiles[this.quality].maxVisibleItems
-    this.items = items.slice(0, maxItems)
-    this.transforms = this.items.map((item) => {
+    const nextItems = items.slice(0, maxItems)
+    const nextTransforms = nextItems.map((item) => {
       const previous = previousById.get(item.id)
       return previous ? { ...previous } : identityTransform()
     })
-    await this.cards.setItems(this.items)
-    this.cards.setTransforms(this.transforms)
+    const applied = await this.cards.setItems(nextItems)
+    if (!applied || token !== this.itemsToken || this.destroyed) return false
+    this.items = nextItems
+    this.transforms = nextTransforms
+    this.cards.setTransforms(nextTransforms)
     this.cards.setVisibleRatio(this.visibleRatio)
 
     const targetLayout = options.layout ?? this.lastLayout
@@ -203,7 +236,12 @@ export class MotionStage {
     return completed
   }
 
-  async focusItems(ids: string[], options: FocusItemsOptions = {}): Promise<boolean> {
+  focusItems(ids: string[], options: FocusItemsOptions = {}): Promise<boolean> {
+    this.assertActive()
+    return this.focusItemsInternal(ids, options)
+  }
+
+  private async focusItemsInternal(ids: string[], options: FocusItemsOptions): Promise<boolean> {
     const selected = new Set(ids)
     const selectedIndices = this.items
       .map((item, index) => (selected.has(item.id) ? index : -1))
@@ -245,13 +283,16 @@ export class MotionStage {
   }
 
   restoreLayout(options: TransitionOptions = {}): Promise<boolean> {
+    this.assertActive()
     if (!this.lastLayout) return Promise.resolve(false)
     return this.transitionTo(this.lastLayout, options)
   }
 
   pick(clientX: number, clientY: number, radius = 56): PickResult | null {
+    this.assertActive()
     const rect = this.renderer.domElement.getBoundingClientRect()
     const transforms = this.resolveCurrentTransforms(performance.now())
+    this.camera.updateMatrixWorld()
     this.groupEuler.set(this.rotateX, this.rotateY, 0, 'XYZ')
     let closest: PickResult | null = null
 
@@ -273,26 +314,35 @@ export class MotionStage {
   }
 
   autoRotate(options: { x?: number; y?: number } = {}): void {
+    this.assertActive()
     this.rotateSpeedX = options.x ?? 0
     this.rotateSpeedY = options.y ?? 0.25
   }
 
   stopRotation(): void {
+    this.assertActive()
     this.rotateSpeedX = 0
     this.rotateSpeedY = 0
   }
 
   setRotation(x: number, y: number): void {
+    this.assertActive()
     this.rotateX = x
     this.rotateY = y
     this.cards.setGroupRotation(x, y)
   }
 
   timeline(): Timeline {
+    this.assertActive()
     return new Timeline()
   }
 
   resize(): void {
+    this.assertActive()
+    this.resizeInternal()
+  }
+
+  private resizeInternal(): void {
     const { clientWidth: width, clientHeight: height } = this.options.container
     if (!width || !height) return
     this.camera.aspect = width / height
@@ -301,6 +351,9 @@ export class MotionStage {
   }
 
   destroy(): void {
+    if (this.destroyed) return
+    this.destroyed = true
+    this.itemsToken += 1
     this.transitionToken += 1
     cancelAnimationFrame(this.frameId)
     this.resizeObserver.disconnect()
@@ -311,10 +364,12 @@ export class MotionStage {
   }
 
   getQuality(): QualityLevel {
+    this.assertActive()
     return this.quality
   }
 
   getPerformanceStats(): PerformanceStats {
+    this.assertActive()
     return this.performanceManager.getStats()
   }
 
@@ -361,16 +416,30 @@ export class MotionStage {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
     this.cards.setVisibleRatio(visibleRatios[quality])
     this.visibleRatio = visibleRatios[quality]
-    this.resize()
+    this.resizeInternal()
     this.options.onQualityChange?.(quality, this.performanceManager.getStats())
   }
 
   private readonly handlePointerUp = (event: PointerEvent) => {
+    if (this.destroyed) return
     const result = this.pick(event.clientX, event.clientY)
     if (result) this.options.onItemClick?.(result.item, result.index)
+  }
+
+  private assertActive(): void {
+    if (this.destroyed) throw new Error('MotionStage has been destroyed')
   }
 }
 
 function visibilityRank(index: number): number {
   return (index * 0.618033988749895) % 1
+}
+
+function validateItems(items: MotionItem[]): void {
+  const ids = new Set<string>()
+  items.forEach((item, index) => {
+    if (!item.id.trim()) throw new Error(`MotionItem at index ${index} must have a non-empty id`)
+    if (ids.has(item.id)) throw new Error(`Duplicate MotionItem id: ${item.id}`)
+    ids.add(item.id)
+  })
 }
