@@ -1,4 +1,14 @@
-import { MotionStage, cylinder, grid, sphere, type Layout, type MotionItem } from '@spatial-motion'
+import {
+  MotionStage,
+  cylinder,
+  grid,
+  linearShooter,
+  sphere,
+  tunnel,
+  type Layout,
+  type MotionItem,
+  type Timeline,
+} from '@spatial-motion'
 import './style.css'
 
 const itemCount = 600
@@ -25,7 +35,15 @@ function createAvatar(index: number): string {
 const container = document.querySelector<HTMLElement>('#stage')
 if (!container) throw new Error('Stage container not found')
 
-const stage = new MotionStage({ container, quality: 'auto' })
+const stage = new MotionStage({
+  container,
+  quality: 'auto',
+  adaptivePerformance: true,
+  onQualityChange(quality, stats) {
+    document.querySelector('#quality')!.textContent = `${quality.toUpperCase()} QUALITY`
+    console.info(`Spatial Motion quality changed to ${quality} at ${stats.fps.toFixed(1)} FPS`)
+  },
+})
 await stage.setItems(items)
 stage.autoRotate({ y: 0.24 })
 await stage.to(sphere({ radius: 5.2 }), { duration: 1600 })
@@ -35,25 +53,75 @@ const layouts: Record<string, Layout> = {
   cylinder: cylinder({ radius: 5 }),
   grid: grid({ columns: 30, gap: 0.42 }),
 }
+const tunnelEffect = tunnel({
+  directionCount: 20,
+  speed: 0.18,
+  outerRadius: 4.2,
+  maxActiveItems: 260,
+})
+const shooterEffect = linearShooter({
+  directionCount: 18,
+  speed: 0.26,
+  outerRadius: 10,
+  maxActiveItems: 180,
+})
+let activeTimeline: Timeline | null = null
 
 document.querySelectorAll<HTMLButtonElement>('[data-layout]').forEach((button) => {
   button.addEventListener('click', () => {
-    const layout = layouts[button.dataset.layout ?? 'sphere']
+    activeTimeline?.cancel()
+    const layoutName = button.dataset.layout ?? 'sphere'
+    const layout = layouts[layoutName]
+    if (layoutName === 'grid') {
+      stage.stopRotation()
+      stage.setRotation(0, 0)
+    } else {
+      stage.autoRotate({ y: 0.24 })
+    }
     if (layout) void stage.to(layout, { duration: 1300 })
   })
 })
 
+document.querySelector('#tunnel')?.addEventListener('click', () => {
+  activeTimeline?.cancel()
+  stage.stopRotation()
+  stage.setRotation(0, 0)
+  void stage.enterTunnel(tunnelEffect, { duration: 1300 })
+})
+
+document.querySelector('#shooter')?.addEventListener('click', () => {
+  activeTimeline?.cancel()
+  stage.stopRotation()
+  stage.setRotation(0, 0)
+  void stage.enterLinearShooter(shooterEffect, { duration: 1200 })
+})
+
 document.querySelector('#sequence')?.addEventListener('click', () => {
-  const timeline = stage
+  activeTimeline?.cancel()
+  activeTimeline = stage
     .timeline()
+    .add(() => stage.autoRotate({ y: 0.24 }))
     .add(() => stage.to(layouts.sphere, { duration: 1200 }))
     .wait(900)
+    .add(() => {
+      stage.stopRotation()
+      stage.setRotation(0, 0)
+    })
+    .add(() => stage.enterTunnel(tunnelEffect, { duration: 1400 }))
+    .wait(3200)
+    .add(() => stage.enterLinearShooter(shooterEffect, { duration: 1200 }))
+    .wait(2600)
     .add(() => stage.to(layouts.cylinder, { duration: 1300 }))
     .wait(900)
+    .add(() => {
+      stage.stopRotation()
+      stage.setRotation(0, 0)
+    })
     .add(() => stage.to(layouts.grid, { duration: 1200 }))
     .wait(900)
+    .add(() => stage.autoRotate({ y: 0.24 }))
     .add(() => stage.to(layouts.sphere, { duration: 1400 }))
-  void timeline.play()
+  void activeTimeline.play()
 })
 
 document.querySelector('#quality')!.textContent = `${stage.getQuality().toUpperCase()} QUALITY`

@@ -6,6 +6,12 @@ export const qualityProfiles: Record<QualityLevel, QualityProfile> = {
   low: { maxPixelRatio: 1, maxVisibleItems: 500, antialias: false, targetFps: 30 },
 }
 
+export const visibleRatios: Record<QualityLevel, number> = {
+  high: 1,
+  medium: 0.82,
+  low: 0.58,
+}
+
 export function detectQuality(): QualityLevel {
   const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4
   const cores = navigator.hardwareConcurrency ?? 4

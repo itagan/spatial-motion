@@ -4,12 +4,20 @@
 
 ## 当前能力
 
-- `InstancedMesh` 批量渲染卡片，主体场景保持单 Draw Call
+- `InstancedBufferGeometry` 批量渲染卡片，主体场景保持单 Draw Call
 - Canvas Texture Atlas，避免每个卡片独立纹理和材质
 - 球体、圆柱体、平面网格布局
 - 同一批实例在布局之间连续过渡，不重建 Three.js 对象
+- GPU Shader 并行插值位置、缩放、透明度和四元数朝向
+- 动画过程中 CPU 每帧仅更新一个进度 uniform
 - 自动旋转和串行 Timeline
+- 新布局可中断当前过渡，并自动终止已失效的 Timeline
+- GPU 时空隧道与固定实例对象池
+- GPU 多方向线性发射器
+- 隧道活跃数量独立于数据池大小，超额实例进入休眠
+- 从静态布局进入隧道，或从隧道当前帧聚合回任意布局
 - high、medium、low 设备质量分级
+- 运行时帧率监控、自动降级与稳定恢复
 - 自动限制像素比和可见实例数量
 - ResizeObserver 响应式画布及完整资源释放
 
@@ -38,12 +46,73 @@ import { MotionStage, cylinder, sphere } from 'spatial-motion'
 const stage = new MotionStage({
   container: document.querySelector('#stage')!,
   quality: 'auto',
+  adaptivePerformance: true,
+  onQualityChange(quality, stats) {
+    console.log(quality, stats.fps)
+  },
 })
 
 await stage.setItems(participants)
 stage.autoRotate({ y: 0.25 })
 await stage.to(sphere({ radius: 5 }), { duration: 1600 })
 await stage.to(cylinder({ radius: 5 }), { duration: 1400 })
+```
+
+运行时状态：
+
+```ts
+stage.getQuality()          // 'high' | 'medium' | 'low'
+stage.getPerformanceStats() // fps、平均帧时间、采样数量、当前质量
+```
+
+质量变化会同时调整：
+
+| 质量 | 最大像素比 | 分布式可见比例 | 目标帧率 |
+| --- | ---: | ---: | ---: |
+| high | 1.5 | 100% | 60 |
+| medium | 1.25 | 82% | 45 |
+| low | 1 | 58% | 30 |
+
+连续低帧率约 2.5 秒后下降一级，质量切换后有 5 秒冷却；性能稳定约 8 秒后才允许恢复。页面切到后台、调试暂停及超过 100ms 的异常长帧不会参与判断。
+
+时空隧道：
+
+```ts
+import { tunnel } from 'spatial-motion'
+
+const tunnelEffect = tunnel({
+  directionCount: 20,
+  speed: 0.18,
+  outerRadius: 4.2,
+  maxActiveItems: 260,
+})
+
+await stage.enterTunnel(tunnelEffect, { duration: 1400 })
+
+// 隧道持续运行，稍后从当时的位置聚合为圆柱
+await stage.to(cylinder(), { duration: 1300 })
+```
+
+线性发射器：
+
+```ts
+import { linearShooter } from 'spatial-motion'
+
+const shooter = linearShooter({
+  directionCount: 18,
+  speed: 0.26,
+  outerRadius: 10,
+  maxActiveItems: 180,
+})
+
+await stage.enterLinearShooter(shooter, {
+  duration: 1200,
+})
+
+// 捕获发射中的当前帧并重新聚合
+await stage.to(sphere(), {
+  duration: 1400,
+})
 ```
 
 球体头像朝向：
@@ -71,6 +140,7 @@ await stage
 src/
 ├── core/          Stage、Timeline、公共类型和插值
 ├── layouts/       无渲染依赖的布局算法
+├── effects/       隧道等固定对象池流式效果
 ├── renderers/     WebGL 实例渲染与纹理图集
 └── performance/   设备质量检测与性能配置
 demo/              性能和连续动画演示
@@ -78,17 +148,15 @@ demo/              性能和连续动画演示
 
 ## 后续路线
 
-1. GPU Shader 布局插值，进一步降低大量实例过渡时的 CPU 消耗
-2. 时空隧道、线性发射器及固定对象池
-3. 动态性能监控与运行时自动降级
-4. 动态增删数据、卡片聚焦和拾取事件
-5. CSS3D 可选渲染器以及 Vue/React 薄适配器
-6. 独立 library build、导出边界和包体积基准
+1. 动态增删数据、卡片聚焦和拾取事件
+2. CSS3D 可选渲染器以及 Vue/React 薄适配器
+3. 独立 library build、导出边界和包体积基准
 
 ## 性能原则
 
 - 业务数据量与当前可视数量分离
-- 运动过程中不反复创建对象、纹理或 Tween
+- 运动过程中不反复创建对象、纹理、矩阵或 Tween
+- 切换开始时上传起点和终点缓冲，逐帧插值交给 GPU
 - 低配设备降低实例上限和像素比
 - 普通头像使用低分辨率图集，聚焦对象按需加载高清资源
 - 所有循环、监听器、纹理和 WebGL 资源必须支持销毁

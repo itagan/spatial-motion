@@ -1,0 +1,36 @@
+import { describe, expect, it } from 'vitest'
+import { tunnel } from './TunnelEffect'
+
+describe('TunnelEffect', () => {
+  it('keeps a fixed deterministic path buffer for the instance pool', () => {
+    const effect = tunnel({ seed: 42 })
+    effect.prepare(600)
+    const first = effect.getGpuData()
+    effect.prepare(600)
+    const second = effect.getGpuData()
+
+    expect(first.paths).toBe(second.paths)
+    expect(first.paths).toHaveLength(1800)
+    expect(first.speedFactors).toHaveLength(600)
+  })
+
+  it('cycles finite transforms between the far and near planes', () => {
+    const effect = tunnel({ farZ: -20, nearZ: 10, seed: 7 })
+    const initial = effect.calculateTransforms(500, 0)
+    const later = effect.calculateTransforms(500, 1)
+
+    expect(initial).toHaveLength(500)
+    expect(initial.every((value) => Object.values(value).every(Number.isFinite))).toBe(true)
+    expect(initial.every(({ z }) => z >= -20 && z <= 10)).toBe(true)
+    expect(later.some((value, index) => value.z !== initial[index].z)).toBe(true)
+  })
+
+  it('keeps excess pool entries dormant without reallocating the pool', () => {
+    const effect = tunnel({ maxActiveItems: 120 })
+    const transforms = effect.calculateTransforms(600, 0)
+    const gpuData = effect.getGpuData()
+
+    expect(transforms.filter(({ opacity }) => opacity > 0).length).toBeLessThanOrEqual(120)
+    expect(Array.from(gpuData.speedFactors).filter((speed) => speed >= 0)).toHaveLength(120)
+  })
+})

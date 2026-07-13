@@ -1,4 +1,4 @@
-export type TimelineStep = () => Promise<void> | void
+export type TimelineStep = () => Promise<boolean | void> | boolean | void
 
 export class Timeline {
   private readonly steps: TimelineStep[] = []
@@ -17,7 +17,8 @@ export class Timeline {
     this.cancelled = false
     for (const step of this.steps) {
       if (this.cancelled) break
-      await step()
+      const result = await step()
+      if (result === false) break
     }
   }
 
