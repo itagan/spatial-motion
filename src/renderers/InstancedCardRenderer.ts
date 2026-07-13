@@ -14,16 +14,25 @@ import type { TunnelGpuData } from '../effects/TunnelEffect'
 import type { LinearShooterGpuData } from '../effects/LinearShooterEffect'
 import { createTextureAtlas } from './textureAtlas'
 
+export interface CardRendererStats {
+  instanceCount: number
+  textureBytes: number
+}
+
 export class InstancedCardRenderer {
   private mesh: Mesh<InstancedBufferGeometry, ShaderMaterial> | null = null
   private material: ShaderMaterial | null = null
   private generation = 0
+  private itemsFingerprint = ''
+  private textureBytes = 0
   private readonly euler = new Euler()
   private readonly quaternion = new Quaternion()
 
   constructor(private readonly scene: Scene) {}
 
   async setItems(items: MotionItem[]): Promise<boolean> {
+    const fingerprint = createItemsFingerprint(items)
+    if (this.mesh && fingerprint === this.itemsFingerprint) return true
     const generation = ++this.generation
     const atlas = await createTextureAtlas(items)
     if (generation !== this.generation) {
@@ -183,6 +192,8 @@ export class InstancedCardRenderer {
     this.mesh = new Mesh(geometry, this.material)
     this.mesh.frustumCulled = false
     this.scene.add(this.mesh)
+    this.itemsFingerprint = fingerprint
+    this.textureBytes = atlas.width * atlas.height * 4
     return true
   }
 
@@ -281,6 +292,13 @@ export class InstancedCardRenderer {
     if (this.material) this.material.uniforms.visibleRatio.value = Math.min(1, Math.max(0.05, ratio))
   }
 
+  getStats(): CardRendererStats {
+    return {
+      instanceCount: this.mesh?.geometry.instanceCount ?? 0,
+      textureBytes: this.textureBytes,
+    }
+  }
+
   dispose(): void {
     this.generation += 1
     this.disposeCurrent()
@@ -295,6 +313,8 @@ export class InstancedCardRenderer {
     this.material?.dispose()
     this.mesh = null
     this.material = null
+    this.itemsFingerprint = ''
+    this.textureBytes = 0
   }
 
   private writeTransform(
@@ -315,6 +335,12 @@ export class InstancedCardRenderer {
     scales[index] = transform.scale
     opacities[index] = transform.opacity
   }
+}
+
+function createItemsFingerprint(items: MotionItem[]): string {
+  return items
+    .map((item) => `${item.id.length}:${item.id}|${item.image?.length ?? 0}:${item.image ?? ''}|${item.title?.length ?? 0}:${item.title ?? ''}`)
+    .join('\n')
 }
 
 function createVisibilityRanks(count: number): Float32Array {

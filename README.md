@@ -19,6 +19,9 @@
 - high、medium、low 设备质量分级
 - 运行时帧率监控、自动降级与稳定恢复
 - 自动限制像素比和可见实例数量
+- 自动质量与 high、medium、low 手动质量锁定
+- 页面进入后台时暂停渲染循环，回到前台后平滑恢复
+- 独立性能基准页和 JSON 采样结果导出
 - 按稳定 `id` 动态增删数据，并从已有卡片的当前空间位置继续过渡
 - 屏幕坐标拾取、卡片点击回调和任意 `id` 聚焦
 - 聚焦后恢复最近一次业务布局
@@ -65,8 +68,21 @@ await stage.to(cylinder({ radius: 5 }), { duration: 1400 })
 
 ```ts
 stage.getQuality()          // 'high' | 'medium' | 'low'
-stage.getPerformanceStats() // fps、平均帧时间、采样数量、当前质量
+stage.getQualityMode()      // 'auto' | 'high' | 'medium' | 'low'
+stage.getPerformanceStats() // fps、帧时间、实例、Draw Call、三角形、纹理内存等
 ```
+
+质量与暂停控制：
+
+```ts
+stage.setQuality('low')  // 锁定低质量
+stage.setQuality('auto') // 恢复自动检测和运行时升降级
+
+stage.pause()
+stage.resume()
+```
+
+页面隐藏时 Stage 会自动停止 `requestAnimationFrame`，恢复可见时重置帧时间再继续，后台停留时间不会污染性能样本。
 
 动态更新数据：
 
@@ -119,6 +135,24 @@ stage.destroy() // 幂等
 | low | 1 | 500 | 58% | 30 |
 
 输入数据超过当前质量档位的最大实例数时，尾部数据不会进入纹理图集或 GPU 实例缓冲。
+
+## 性能基准
+
+启动开发服务器后打开：
+
+```text
+http://localhost:5173/benchmark.html
+```
+
+基准页支持：
+
+- 100、300、600、1000、1500 个实例
+- auto、high、medium、low 质量模式
+- 球体、圆柱体和平面布局
+- FPS、平均帧时间、渲染/可见实例、Draw Call、三角形和纹理图集内存
+- 3、10、20 秒采样与完整 JSON 结果导出
+
+重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。
 
 连续低帧率约 2.5 秒后下降一级，质量切换后有 5 秒冷却；性能稳定约 8 秒后才允许恢复。页面切到后台、调试暂停及超过 100ms 的异常长帧不会参与判断。
 
@@ -195,11 +229,10 @@ demo/              性能和连续动画演示
 
 ## 后续路线
 
-1. 低配设备性能基准页与自动降级数据验证
-2. 圆环、螺旋、圆锥等通用布局和连续变形增强
-3. 更多固定对象池流式效果和精确遮挡拾取
-4. 独立 library build、导出边界和包体积基准
-5. CSS3D 可选渲染器以及 Vue/React 薄适配器
+1. 圆环、螺旋、圆锥等通用布局和连续变形增强
+2. 更多固定对象池流式效果和精确遮挡拾取
+3. 独立 library build、导出边界和包体积基准
+4. CSS3D 可选渲染器以及 Vue/React 薄适配器
 
 ## 性能原则
 

@@ -1,0 +1,25 @@
+body { overflow: auto; }
+.benchmark-app { min-height: 100vh; grid-template-rows: auto auto auto minmax(420px, 1fr) auto auto; }
+.nav-link { color: #62d8ff; font-size: 12px; text-decoration: none; }
+.benchmark-toolbar { display: flex; flex-wrap: wrap; gap: 18px; padding: 14px 30px; border-bottom: 1px solid rgba(151, 190, 255, .14); }
+.control-group { display: grid; gap: 8px; }
+.control-group strong { color: #68809d; font-size: 10px; letter-spacing: .12em; }
+button.active { color: #071018; background: #65d6ff; border-color: #65d6ff; }
+button:disabled { cursor: wait; opacity: .55; }
+.metrics { display: grid; grid-template-columns: repeat(8, minmax(90px, 1fr)); gap: 8px; padding: 12px 30px; }
+.metrics article { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid rgba(142, 187, 255, .14); background: rgba(8, 17, 31, .72); }
+.metrics span { color: #68809d; font-size: 9px; letter-spacing: .14em; }
+.metrics strong { color: #dcecff; font-size: 14px; font-variant-numeric: tabular-nums; }
+#benchmark-stage { position: relative; min-height: 420px; overflow: hidden; }
+#benchmark-stage canvas { display: block; width: 100%; height: 100%; }
+.benchmark-footer { gap: 18px; }
+.benchmark-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+.benchmark-actions label { color: #68809d; font-size: 11px; }
+select { margin-left: 8px; border: 1px solid rgba(142, 187, 255, .2); border-radius: 999px; background: #121e34; color: #b9cbe7; padding: 7px 10px; }
+.result-panel { padding: 0 30px 24px; }
+.result-panel pre { margin: 0; max-height: 260px; overflow: auto; border: 1px solid rgba(142, 187, 255, .14); background: rgba(4, 9, 17, .86); color: #8fc9df; padding: 16px; font-size: 11px; }
+
+@media (max-width: 960px) {
+  .metrics { grid-template-columns: repeat(4, 1fr); padding-inline: 14px; }
+  .benchmark-toolbar, .result-panel { padding-inline: 14px; }
+}
