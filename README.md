@@ -12,10 +12,9 @@
 - 动画过程中 CPU 每帧仅更新一个进度 uniform
 - 自动旋转和串行 Timeline
 - 新布局可中断当前过渡，并自动终止已失效的 Timeline
-- GPU 时空隧道与固定实例对象池
-- GPU 多方向线性发射器
-- 隧道活跃数量独立于数据池大小，超额实例进入休眠
-- 从静态布局进入隧道，或从隧道当前帧聚合回任意布局
+- GPU 时空隧道、线性发射、漩涡和径向爆发固定实例对象池
+- 统一 `enterEffect()` 入口，特效可直接插入 Timeline 并从当前帧回归任意布局
+- 特效活跃数量独立于数据池大小，并随质量档位限制，超额实例进入休眠
 - high、medium、low 设备质量分级
 - 运行时帧率监控、自动降级与稳定恢复
 - 自动限制像素比和可见实例数量
@@ -23,7 +22,7 @@
 - 页面进入后台时暂停渲染循环，回到前台后平滑恢复
 - 独立性能基准页和 JSON 采样结果导出
 - 按稳定 `id` 动态增删数据，并从已有卡片的当前空间位置继续过渡
-- 屏幕坐标拾取、卡片点击回调和任意 `id` 聚焦
+- 基于投影四边形和相机深度的精确遮挡拾取、卡片点击回调和任意 `id` 聚焦
 - 聚焦后恢复最近一次业务布局
 - ResizeObserver 响应式画布及完整资源释放
 
@@ -108,6 +107,14 @@ const stage = new MotionStage({
 })
 
 const hit = stage.pick(pointerEvent.clientX, pointerEvent.clientY)
+const paddedHit = stage.pick(pointerEvent.clientX, pointerEvent.clientY, {
+  padding: 6,
+})
+
+// 调试重叠卡片时，可按屏幕中心距离选择被遮挡卡片
+const includingOccluded = stage.pick(pointerEvent.clientX, pointerEvent.clientY, {
+  includeOccluded: true,
+})
 
 await stage.focusItems(['guest-1', 'guest-8'], {
   columns: 2,
@@ -116,6 +123,8 @@ await stage.focusItems(['guest-1', 'guest-8'], {
 })
 await stage.restoreLayout({ duration: 1000 })
 ```
+
+默认拾取按照卡片当前帧的投影四边形判断，多张卡片重叠时返回距离相机最近的一张；透明、休眠、质量降级隐藏、球体背面及背向相机的实例不会命中。计算仅发生在调用 `pick()` 或指针事件时，不进行 GPU readback，也不进入逐帧渲染路径。第三个参数传数字仍保留为旧版中心半径拾取兼容模式。
 
 资源释放：
 
@@ -128,11 +137,11 @@ stage.destroy() // 幂等
 
 质量变化会同时调整：
 
-| 质量 | 最大像素比 | 最大实例数 | 分布式可见比例 | 目标帧率 |
-| --- | ---: | ---: | ---: | ---: |
-| high | 1.5 | 2000 | 100% | 60 |
-| medium | 1.25 | 1000 | 82% | 45 |
-| low | 1 | 500 | 58% | 30 |
+| 质量 | 最大像素比 | 最大实例数 | 特效活跃上限 | 分布式可见比例 | 目标帧率 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| high | 1.5 | 2000 | 300 | 100% | 60 |
+| medium | 1.25 | 1000 | 220 | 82% | 45 |
+| low | 1 | 500 | 140 | 58% | 30 |
 
 输入数据超过当前质量档位的最大实例数时，尾部数据不会进入纹理图集或 GPU 实例缓冲。
 
@@ -149,12 +158,14 @@ http://localhost:5173/benchmark.html
 - 100、300、600、1000、1500 个实例
 - auto、high、medium、low 质量模式
 - 球体、圆柱体、平面、同心圆环、螺旋和圆锥布局
+- 时空隧道、漩涡和径向爆发特效及实际活跃实例统计
 - FPS、平均帧时间、渲染/可见实例、Draw Call、三角形和纹理图集内存
 - 3、10、20 秒采样与完整 JSON 结果导出
 
 重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。
 
 连续低帧率约 2.5 秒后下降一级，质量切换后有 5 秒冷却；性能稳定约 8 秒后才允许恢复。页面切到后台、调试暂停及超过 100ms 的异常长帧不会参与判断。
+手动锁定 high、medium 或 low 时仍持续记录 FPS 和帧时间，但采样结果不会触发自动升降级。
 
 时空隧道：
 
@@ -168,7 +179,7 @@ const tunnelEffect = tunnel({
   maxActiveItems: 260,
 })
 
-await stage.enterTunnel(tunnelEffect, { duration: 1400 })
+await stage.enterEffect(tunnelEffect, { duration: 1400 })
 
 // 隧道持续运行，稍后从当时的位置聚合为圆柱
 await stage.to(cylinder(), { duration: 1300 })
@@ -186,7 +197,7 @@ const shooter = linearShooter({
   maxActiveItems: 180,
 })
 
-await stage.enterLinearShooter(shooter, {
+await stage.enterEffect(shooter, {
   duration: 1200,
 })
 
@@ -195,6 +206,28 @@ await stage.to(sphere(), {
   duration: 1400,
 })
 ```
+
+漩涡与径向爆发：
+
+```ts
+import { radialBurst, vortex } from 'spatial-motion'
+
+await stage.enterEffect(vortex({
+  direction: 'in',
+  turns: 2.6,
+  maxActiveItems: 240,
+}), { duration: 1300 })
+
+await stage.to(ring(), { duration: 1200 })
+
+await stage.enterEffect(radialBurst({
+  direction: 'out', // 使用 in 可反向聚合
+  depthScale: 0.3,
+  maxActiveItems: 190,
+}), { duration: 1100 })
+```
+
+`enterTunnel()` 和 `enterLinearShooter()` 继续作为兼容别名保留。所有内置流式特效使用统一的四分量路径缓冲和三组参数 uniform，切换效果不会创建新的 Mesh 或增加 Draw Call。
 
 球体头像朝向：
 
@@ -257,9 +290,8 @@ demo/              性能和连续动画演示
 
 ## 后续路线
 
-1. 更多固定对象池流式效果和精确遮挡拾取
-2. 独立 library build、导出边界和包体积基准
-3. CSS3D 可选渲染器以及 Vue/React 薄适配器
+1. 独立 library build、导出边界和包体积基准
+2. CSS3D 可选渲染器以及 Vue/React 薄适配器
 
 ## 性能原则
 

@@ -47,6 +47,19 @@ button.primary { color: #071018; background: #65d6ff; border-color: #65d6ff; }
 footer p { color: #68809d; font-size: 11px; letter-spacing: .08em; }
 #stage { position: relative; min-height: 0; overflow: hidden; }
 #stage canvas { display: block; width: 100%; height: 100%; }
+#pick-debug {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  padding: 6px 9px;
+  border: 1px solid rgba(101, 214, 255, .7);
+  border-radius: 7px;
+  background: rgba(5, 12, 24, .88);
+  color: #8ce3ff;
+  font-size: 10px;
+  letter-spacing: .05em;
+  white-space: nowrap;
+}
 
 @media (max-width: 720px) {
   header, footer { padding: 14px; align-items: flex-start; gap: 12px; }
