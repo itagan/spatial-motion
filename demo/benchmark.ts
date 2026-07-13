@@ -1,8 +1,11 @@
 import {
   BenchmarkSession,
   MotionStage,
+  cone,
   cylinder,
   grid,
+  helix,
+  ring,
   sphere,
   type BenchmarkResult,
   type Layout,
@@ -23,6 +26,9 @@ const layouts: Record<string, Layout> = {
   sphere: sphere({ radius: 5.2 }),
   cylinder: cylinder({ radius: 5 }),
   grid: grid({ columns: 30, gap: 0.42 }),
+  ring: ring({ innerRadius: 0.8, spacing: 0.42 }),
+  helix: helix({ radius: 4.6, height: 9 }),
+  cone: cone({ radius: 5, height: 9, stagger: true }),
 }
 
 const container = document.querySelector<HTMLElement>('#benchmark-stage')
@@ -73,7 +79,7 @@ updateMetrics()
 async function applyConfiguration(): Promise<void> {
   cancelRun('配置已更新，可以重新运行采样')
   stage.setQuality(qualityMode)
-  if (layoutName === 'grid') {
+  if (layoutName === 'grid' || layoutName === 'ring') {
     stage.stopRotation()
     stage.setRotation(0, 0)
   } else {

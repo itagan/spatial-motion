@@ -1,8 +1,11 @@
 import {
   MotionStage,
+  cone,
   cylinder,
   grid,
+  helix,
   linearShooter,
+  ring,
   sphere,
   tunnel,
   type Layout,
@@ -62,6 +65,9 @@ const layouts: Record<string, Layout> = {
   sphere: sphere({ radius: 5.2 }),
   cylinder: cylinder({ radius: 5 }),
   grid: grid({ columns: 30, gap: 0.42 }),
+  ring: ring({ innerRadius: 0.8, spacing: 0.42 }),
+  helix: helix({ radius: 4.6, height: 9 }),
+  cone: cone({ radius: 5, height: 9, stagger: true }),
 }
 const tunnelEffect = tunnel({
   directionCount: 20,
@@ -83,7 +89,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-layout]').forEach((button) =
     updateSelection(0)
     const layoutName = button.dataset.layout ?? 'sphere'
     const layout = layouts[layoutName]
-    if (layoutName === 'grid') {
+    if (layoutName === 'grid' || layoutName === 'ring') {
       stage.stopRotation()
       stage.setRotation(0, 0)
     } else {
@@ -148,6 +154,12 @@ document.querySelector('#sequence')?.addEventListener('click', () => {
     .timeline()
     .add(() => stage.autoRotate({ y: 0.24 }))
     .add(() => stage.to(layouts.sphere, { duration: 1200 }))
+    .wait(900)
+    .add(() => stage.to(layouts.ring, { duration: 1200 }))
+    .wait(700)
+    .add(() => stage.to(layouts.helix, { duration: 1300 }))
+    .wait(700)
+    .add(() => stage.to(layouts.cone, { duration: 1300 }))
     .wait(900)
     .add(() => {
       stage.stopRotation()
