@@ -5,44 +5,44 @@ import {
   type StreamingEffectGpuData,
 } from './types'
 
-export interface TunnelOptions {
-  farZ?: number
-  nearZ?: number
+export interface VortexOptions {
   innerRadius?: number
   outerRadius?: number
-  directionCount?: number
+  farZ?: number
+  nearZ?: number
   speed?: number
-  twist?: number
-  farScale?: number
-  nearScale?: number
+  turns?: number
+  startScale?: number
+  endScale?: number
+  direction?: 'in' | 'out'
   maxActiveItems?: number
   seed?: number
 }
 
-export type TunnelGpuData = StreamingEffectGpuData
+export type VortexGpuData = StreamingEffectGpuData
 
-export class TunnelEffect implements StreamingEffect {
-  readonly name = 'tunnel'
-  readonly kind = 'tunnel' as const
-  private readonly options: Required<TunnelOptions>
+export class VortexEffect implements StreamingEffect {
+  readonly name = 'vortex'
+  readonly kind = 'vortex' as const
+  private readonly options: Required<VortexOptions>
   private paths = new Float32Array(0)
   private speedFactors = new Float32Array(0)
   private preparedCount = -1
   private preparedActiveCount = -1
 
-  constructor(options: TunnelOptions = {}) {
+  constructor(options: VortexOptions = {}) {
     this.options = {
-      farZ: options.farZ ?? -18,
-      nearZ: options.nearZ ?? 12,
       innerRadius: options.innerRadius ?? 0.18,
-      outerRadius: options.outerRadius ?? 5,
-      directionCount: options.directionCount ?? 18,
-      speed: options.speed ?? 0.16,
-      twist: options.twist ?? 0.08,
-      farScale: options.farScale ?? 0.22,
-      nearScale: options.nearScale ?? 0.72,
-      maxActiveItems: options.maxActiveItems ?? 240,
-      seed: options.seed ?? 2026,
+      outerRadius: options.outerRadius ?? 5.6,
+      farZ: options.farZ ?? -8,
+      nearZ: options.nearZ ?? 5,
+      speed: options.speed ?? 0.13,
+      turns: options.turns ?? 2.4,
+      startScale: options.startScale ?? 0.14,
+      endScale: options.endScale ?? 0.82,
+      direction: options.direction ?? 'in',
+      maxActiveItems: options.maxActiveItems ?? 220,
+      seed: options.seed ?? 2028,
     }
   }
 
@@ -53,20 +53,16 @@ export class TunnelEffect implements StreamingEffect {
     this.preparedActiveCount = activeCount
     this.paths = new Float32Array(count * 4)
     this.speedFactors = new Float32Array(count)
+
     for (let index = 0; index < count; index += 1) {
-      const lane = index % this.options.directionCount
-      const randomAngle = random(index * 3 + 1, this.options.seed)
-      const randomRadius = random(index * 3 + 2, this.options.seed)
-      const randomOffset = random(index * 3 + 3, this.options.seed)
-      const angle = (lane / this.options.directionCount) * Math.PI * 2
-        + (randomAngle - 0.5) * (Math.PI * 2 / this.options.directionCount) * 0.7
-      const radius = this.options.outerRadius * (0.62 + randomRadius * 0.38)
+      const angle = random(index * 3 + 1, this.options.seed) * Math.PI * 2
+      const radius = this.options.outerRadius * (0.82 + random(index * 3 + 2, this.options.seed) * 0.18)
       const offset = index < activeCount
-        ? (index / activeCount + randomOffset / activeCount) % 1
+        ? (index / Math.max(1, activeCount) + random(index * 3 + 3, this.options.seed) / Math.max(1, activeCount)) % 1
         : 0
       this.paths.set([angle, radius, offset, 0], index * 4)
       this.speedFactors[index] = index < activeCount
-        ? 0.88 + random(index + 8000, this.options.seed) * 0.24
+        ? 0.88 + random(index + 10_000, this.options.seed) * 0.24
         : -1
     }
   }
@@ -75,19 +71,22 @@ export class TunnelEffect implements StreamingEffect {
     if (this.preparedCount !== count) this.prepare(count)
     return Array.from({ length: count }, (_, index) => {
       const pathIndex = index * 4
-      const angle = this.paths[pathIndex]
+      const baseAngle = this.paths[pathIndex]
       const outerRadius = this.paths[pathIndex + 1]
       const offset = this.paths[pathIndex + 2]
-      const enabled = this.speedFactors[index] >= 0
-      const progress = fract(offset + elapsedSeconds * this.options.speed * Math.abs(this.speedFactors[index]))
-      const spread = smoothstep(0, 1, progress)
-      const currentAngle = angle + progress * this.options.twist
+      const speedFactor = this.speedFactors[index]
+      const enabled = speedFactor >= 0
+      const progress = fract(offset + elapsedSeconds * this.options.speed * Math.abs(speedFactor))
+      const travel = this.options.direction === 'out' ? progress : 1 - progress
+      const spread = smoothstep(0, 1, travel)
+      const angleDirection = this.options.direction === 'out' ? 1 : -1
+      const angle = baseAngle + progress * this.options.turns * Math.PI * 2 * angleDirection
       const radius = this.options.innerRadius + (outerRadius - this.options.innerRadius) * spread
       return {
-        x: Math.cos(currentAngle) * radius,
-        y: Math.sin(currentAngle) * radius,
-        z: this.options.farZ + (this.options.nearZ - this.options.farZ) * progress,
-        scale: this.options.farScale + (this.options.nearScale - this.options.farScale) * progress,
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius,
+        z: this.options.nearZ + (this.options.farZ - this.options.nearZ) * travel,
+        scale: this.options.startScale + (this.options.endScale - this.options.startScale) * travel,
         rotationX: 0,
         rotationY: 0,
         rotationZ: 0,
@@ -96,26 +95,28 @@ export class TunnelEffect implements StreamingEffect {
     })
   }
 
-  getGpuData(): TunnelGpuData {
-    if (this.preparedCount < 0) throw new Error('TunnelEffect must be prepared before reading GPU data')
+  getGpuData(): VortexGpuData {
+    if (this.preparedCount < 0) throw new Error('VortexEffect must be prepared before reading GPU data')
     return {
       kind: this.kind,
       paths: this.paths,
       speedFactors: this.speedFactors,
       parameters: createEffectParameters(
+        this.options.innerRadius,
+        this.options.outerRadius,
         this.options.farZ,
         this.options.nearZ,
-        this.options.innerRadius,
         this.options.speed,
-        this.options.twist,
-        this.options.farScale,
-        this.options.nearScale,
+        this.options.turns,
+        this.options.startScale,
+        this.options.endScale,
+        this.options.direction === 'out' ? 1 : 0,
       ),
     }
   }
 }
 
-export const tunnel = (options: TunnelOptions = {}) => new TunnelEffect(options)
+export const vortex = (options: VortexOptions = {}) => new VortexEffect(options)
 
 function random(index: number, seed: number): number {
   const value = Math.sin(index * 12.9898 + seed * 78.233) * 43758.5453
@@ -132,5 +133,5 @@ function smoothstep(min: number, max: number, value: number): number {
 }
 
 function edgeFade(progress: number): number {
-  return smoothstep(0, 0.06, progress) * (1 - smoothstep(0.9, 1, progress))
+  return smoothstep(0, 0.05, progress) * (1 - smoothstep(0.9, 1, progress))
 }

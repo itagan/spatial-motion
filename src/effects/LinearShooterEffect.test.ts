@@ -7,7 +7,8 @@ describe('LinearShooterEffect', () => {
     effect.prepare(500)
     const data = effect.getGpuData()
 
-    expect(data.paths).toHaveLength(1500)
+    expect(data.kind).toBe('linear-shooter')
+    expect(data.paths).toHaveLength(2000)
     expect(data.speedFactors).toHaveLength(500)
     expect(Array.from(data.speedFactors).filter((speed) => speed >= 0)).toHaveLength(90)
   })

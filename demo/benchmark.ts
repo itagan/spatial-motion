@@ -5,12 +5,16 @@ import {
   cylinder,
   grid,
   helix,
+  radialBurst,
   ring,
   sphere,
+  tunnel,
+  vortex,
   type BenchmarkResult,
   type Layout,
   type MotionItem,
   type QualityMode,
+  type StreamingEffect,
 } from '@spatial-motion'
 import './style.css'
 import './benchmark.css'
@@ -29,6 +33,11 @@ const layouts: Record<string, Layout> = {
   ring: ring({ innerRadius: 0.8, spacing: 0.42 }),
   helix: helix({ radius: 4.6, height: 9 }),
   cone: cone({ radius: 5, height: 9, stagger: true }),
+}
+const effects: Record<string, StreamingEffect> = {
+  tunnel: tunnel({ maxActiveItems: 300 }),
+  vortex: vortex({ maxActiveItems: 300 }),
+  burst: radialBurst({ maxActiveItems: 300 }),
 }
 
 const container = document.querySelector<HTMLElement>('#benchmark-stage')
@@ -65,7 +74,15 @@ document.querySelectorAll<HTMLButtonElement>('[data-quality]').forEach((button) 
 document.querySelectorAll<HTMLButtonElement>('[data-benchmark-layout]').forEach((button) => {
   button.addEventListener('click', async () => {
     layoutName = button.dataset.benchmarkLayout ?? 'sphere'
-    setActive('[data-benchmark-layout]', button)
+    setActive('[data-benchmark-layout], [data-benchmark-effect]', button)
+    await applyConfiguration()
+  })
+})
+
+document.querySelectorAll<HTMLButtonElement>('[data-benchmark-effect]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    layoutName = button.dataset.benchmarkEffect ?? 'tunnel'
+    setActive('[data-benchmark-layout], [data-benchmark-effect]', button)
     await applyConfiguration()
   })
 })
@@ -79,16 +96,18 @@ updateMetrics()
 async function applyConfiguration(): Promise<void> {
   cancelRun('配置已更新，可以重新运行采样')
   stage.setQuality(qualityMode)
-  if (layoutName === 'grid' || layoutName === 'ring') {
+  const effect = effects[layoutName]
+  if (effect || layoutName === 'grid' || layoutName === 'ring') {
     stage.stopRotation()
     stage.setRotation(0, 0)
   } else {
     stage.autoRotate({ y: 0.24 })
   }
   await stage.updateItems(createItems(itemCount), {
-    layout: layouts[layoutName],
+    layout: effect ? layouts.sphere : layouts[layoutName],
     duration: 650,
   })
+  if (effect) await stage.enterEffect(effect, { duration: 650 })
   updateMetrics()
 }
 
@@ -131,6 +150,7 @@ function updateMetrics(): void {
   setText('#metric-frame', stats.averageFrameMs ? `${stats.averageFrameMs.toFixed(2)} ms` : '-- ms')
   setText('#metric-items', `${stats.renderedItems} / ${stats.inputItems}`)
   setText('#metric-visible', String(stats.visibleItems))
+  setText('#metric-effect', stats.effect ? `${stats.effect} / ${stats.activeEffectItems}` : 'layout / 0')
   setText('#metric-calls', String(stats.drawCalls))
   setText('#metric-triangles', stats.triangles.toLocaleString())
   setText('#metric-texture', formatBytes(stats.textureBytes))

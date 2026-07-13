@@ -5,9 +5,11 @@ import {
   grid,
   helix,
   linearShooter,
+  radialBurst,
   ring,
   sphere,
   tunnel,
+  vortex,
   type Layout,
   type MotionItem,
   type Timeline,
@@ -81,6 +83,20 @@ const shooterEffect = linearShooter({
   outerRadius: 10,
   maxActiveItems: 180,
 })
+const vortexEffect = vortex({
+  direction: 'in',
+  speed: 0.14,
+  turns: 2.6,
+  outerRadius: 5.6,
+  maxActiveItems: 240,
+})
+const burstEffect = radialBurst({
+  direction: 'out',
+  speed: 0.23,
+  outerRadius: 9.5,
+  depthScale: 0.3,
+  maxActiveItems: 190,
+})
 let activeTimeline: Timeline | null = null
 
 document.querySelectorAll<HTMLButtonElement>('[data-layout]').forEach((button) => {
@@ -104,7 +120,7 @@ document.querySelector('#tunnel')?.addEventListener('click', () => {
   updateSelection(0)
   stage.stopRotation()
   stage.setRotation(0, 0)
-  void stage.enterTunnel(tunnelEffect, { duration: 1300 })
+  void stage.enterEffect(tunnelEffect, { duration: 1300 })
 })
 
 document.querySelector('#shooter')?.addEventListener('click', () => {
@@ -112,7 +128,23 @@ document.querySelector('#shooter')?.addEventListener('click', () => {
   updateSelection(0)
   stage.stopRotation()
   stage.setRotation(0, 0)
-  void stage.enterLinearShooter(shooterEffect, { duration: 1200 })
+  void stage.enterEffect(shooterEffect, { duration: 1200 })
+})
+
+document.querySelector('#vortex')?.addEventListener('click', () => {
+  activeTimeline?.cancel()
+  updateSelection(0)
+  stage.stopRotation()
+  stage.setRotation(0, 0)
+  void stage.enterEffect(vortexEffect, { duration: 1300 })
+})
+
+document.querySelector('#burst')?.addEventListener('click', () => {
+  activeTimeline?.cancel()
+  updateSelection(0)
+  stage.stopRotation()
+  stage.setRotation(0, 0)
+  void stage.enterEffect(burstEffect, { duration: 1100 })
 })
 
 document.querySelector('#focus')?.addEventListener('click', () => {
@@ -155,19 +187,21 @@ document.querySelector('#sequence')?.addEventListener('click', () => {
     .add(() => stage.autoRotate({ y: 0.24 }))
     .add(() => stage.to(layouts.sphere, { duration: 1200 }))
     .wait(900)
+    .add(() => stage.enterEffect(vortexEffect, { duration: 1300 }))
+    .wait(2600)
     .add(() => stage.to(layouts.ring, { duration: 1200 }))
     .wait(700)
-    .add(() => stage.to(layouts.helix, { duration: 1300 }))
-    .wait(700)
-    .add(() => stage.to(layouts.cone, { duration: 1300 }))
-    .wait(900)
+    .add(() => stage.enterEffect(burstEffect, { duration: 1100 }))
+    .wait(2200)
+    .add(() => stage.to(layouts.cylinder, { duration: 1300 }))
+    .wait(800)
     .add(() => {
       stage.stopRotation()
       stage.setRotation(0, 0)
     })
-    .add(() => stage.enterTunnel(tunnelEffect, { duration: 1400 }))
+    .add(() => stage.enterEffect(tunnelEffect, { duration: 1400 }))
     .wait(3200)
-    .add(() => stage.enterLinearShooter(shooterEffect, { duration: 1200 }))
+    .add(() => stage.enterEffect(shooterEffect, { duration: 1200 }))
     .wait(2600)
     .add(() => stage.to(layouts.cylinder, { duration: 1300 }))
     .wait(900)
@@ -188,12 +222,34 @@ const updateItemCount = () => {
 }
 updateItemCount()
 
+const pickDebug = document.querySelector<HTMLElement>('#pick-debug')
+container.addEventListener('pointermove', (event) => {
+  if (!pickDebug) return
+  const hit = stage.pick(event.clientX, event.clientY, { padding: 3 })
+  if (!hit) {
+    pickDebug.hidden = true
+    return
+  }
+  const rect = container.getBoundingClientRect()
+  pickDebug.hidden = false
+  pickDebug.textContent = `${hit.item.title ?? hit.item.id} · depth pick`
+  pickDebug.style.left = `${event.clientX - rect.left + 12}px`
+  pickDebug.style.top = `${event.clientY - rect.top + 12}px`
+})
+container.addEventListener('pointerleave', () => {
+  if (pickDebug) pickDebug.hidden = true
+})
+
 let frames = 0
 let measuredAt = performance.now()
 const updateFps = (now: number) => {
   frames += 1
   if (now - measuredAt >= 1000) {
     document.querySelector('#fps')!.textContent = `${Math.round((frames * 1000) / (now - measuredAt))} FPS`
+    const stats = stage.getPerformanceStats()
+    document.querySelector('#effect')!.textContent = stats.effect
+      ? `${stats.effect.toUpperCase()} · ${stats.activeEffectItems} ACTIVE`
+      : 'LAYOUT MODE'
     frames = 0
     measuredAt = now
   }

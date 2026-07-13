@@ -1,4 +1,4 @@
-import { Scene } from 'three'
+import { InstancedBufferGeometry, Mesh, Scene, ShaderMaterial } from 'three'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TextureAtlasResult } from './textureAtlas'
 import { InstancedCardRenderer } from './InstancedCardRenderer'
@@ -87,6 +87,30 @@ describe('InstancedCardRenderer item loading', () => {
 
     expect(atlasMock.create).toHaveBeenCalledOnce()
     expect(renderer.getStats()).toEqual({ instanceCount: 1, textureBytes: 65_536 })
+    renderer.dispose()
+  })
+
+  it('uploads every built-in effect through the shared vec4 path buffer', async () => {
+    const currentAtlas = atlas(2)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene)
+    await renderer.setItems([{ id: 'a' }, { id: 'b' }])
+    const parameters = Float32Array.from({ length: 12 }, (_, index) => index + 1)
+
+    renderer.enableEffect({
+      kind: 'vortex',
+      paths: new Float32Array(8),
+      speedFactors: new Float32Array([1, -1]),
+      parameters,
+    })
+
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+    expect(mesh.geometry.getAttribute('effectPath').itemSize).toBe(4)
+    expect(mesh.geometry.getAttribute('effectSpeedFactor').count).toBe(2)
+    expect(mesh.material.uniforms.effectMode.value).toBe(3)
+    expect(mesh.material.uniforms.effectParamsA.value.toArray()).toEqual([1, 2, 3, 4])
+    expect(mesh.material.uniforms.effectParamsC.value.toArray()).toEqual([9, 10, 11, 12])
     renderer.dispose()
   })
 })

@@ -37,7 +37,7 @@ export class AdaptivePerformanceManager {
     this.stats = { fps: 0, averageFrameMs: 0, quality, sampleCount: 0 }
   }
 
-  recordFrame(frameMs: number, now: number): QualityLevel | null {
+  recordFrame(frameMs: number, now: number, allowQualityChange = true): QualityLevel | null {
     // Ignore tab suspension, debugger pauses and invalid measurements.
     if (frameMs < 4 || frameMs > 100) return null
     if (!this.windowStartedAt) this.windowStartedAt = now
@@ -50,6 +50,7 @@ export class AdaptivePerformanceManager {
     this.samples = []
     this.windowStartedAt = now
 
+    if (!allowQualityChange) return null
     if (now - this.lastChangedAt < this.options.cooldownMs) return null
     const currentIndex = levels.indexOf(this.quality)
     const currentTarget = qualityProfiles[this.quality].targetFps

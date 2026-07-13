@@ -1,3 +1,5 @@
 export * from './TunnelEffect'
 export * from './LinearShooterEffect'
+export * from './VortexEffect'
+export * from './RadialBurstEffect'
 export * from './types'

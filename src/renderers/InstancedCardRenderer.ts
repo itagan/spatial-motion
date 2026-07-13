@@ -8,10 +8,10 @@ import {
   Quaternion,
   Scene,
   ShaderMaterial,
+  Vector4,
 } from 'three'
 import type { MotionItem, Transform } from '../core/types'
-import type { TunnelGpuData } from '../effects/TunnelEffect'
-import type { LinearShooterGpuData } from '../effects/LinearShooterEffect'
+import type { StreamingEffectGpuData, StreamingEffectKind } from '../effects/types'
 import { createTextureAtlas } from './textureAtlas'
 
 export interface CardRendererStats {
@@ -47,8 +47,8 @@ export class InstancedCardRenderer {
     geometry.setAttribute('uv', plane.getAttribute('uv'))
     geometry.instanceCount = items.length
     geometry.setAttribute('atlasRect', new InstancedBufferAttribute(atlas.rects, 4))
-    geometry.setAttribute('tunnelPath', new InstancedBufferAttribute(new Float32Array(items.length * 3), 3))
-    geometry.setAttribute('tunnelSpeedFactor', new InstancedBufferAttribute(new Float32Array(items.length), 1))
+    geometry.setAttribute('effectPath', new InstancedBufferAttribute(new Float32Array(items.length * 4), 4))
+    geometry.setAttribute('effectSpeedFactor', new InstancedBufferAttribute(new Float32Array(items.length), 1))
     geometry.setAttribute('visibilityRank', new InstancedBufferAttribute(createVisibilityRanks(items.length), 1))
     this.material = new ShaderMaterial({
       uniforms: {
@@ -58,18 +58,9 @@ export class InstancedCardRenderer {
         hideBackHemisphere: { value: 0 },
         effectMode: { value: 0 },
         effectTime: { value: 0 },
-        tunnelFarZ: { value: -18 },
-        tunnelNearZ: { value: 12 },
-        tunnelInnerRadius: { value: 0.18 },
-        tunnelSpeed: { value: 0.16 },
-        tunnelTwist: { value: 0.08 },
-        tunnelFarScale: { value: 0.32 },
-        tunnelNearScale: { value: 1.15 },
-        shooterSourceRadius: { value: 0.15 },
-        shooterSpeed: { value: 0.24 },
-        shooterStartScale: { value: 0.16 },
-        shooterEndScale: { value: 1 },
-        shooterZ: { value: 1.5 },
+        effectParamsA: { value: new Vector4() },
+        effectParamsB: { value: new Vector4() },
+        effectParamsC: { value: new Vector4() },
         visibleRatio: { value: 1 },
       },
       vertexShader: `
@@ -82,26 +73,17 @@ export class InstancedCardRenderer {
         attribute float toScale;
         attribute float fromOpacity;
         attribute float toOpacity;
-        attribute vec3 tunnelPath;
-        attribute float tunnelSpeedFactor;
+        attribute vec4 effectPath;
+        attribute float effectSpeedFactor;
         attribute float visibilityRank;
         uniform float progress;
         uniform float billboard;
         uniform float hideBackHemisphere;
         uniform float effectMode;
         uniform float effectTime;
-        uniform float tunnelFarZ;
-        uniform float tunnelNearZ;
-        uniform float tunnelInnerRadius;
-        uniform float tunnelSpeed;
-        uniform float tunnelTwist;
-        uniform float tunnelFarScale;
-        uniform float tunnelNearScale;
-        uniform float shooterSourceRadius;
-        uniform float shooterSpeed;
-        uniform float shooterStartScale;
-        uniform float shooterEndScale;
-        uniform float shooterZ;
+        uniform vec4 effectParamsA;
+        uniform vec4 effectParamsB;
+        uniform vec4 effectParamsC;
         uniform float visibleRatio;
         varying vec2 vAtlasUv;
         varying vec2 vLocalUv;
@@ -126,30 +108,60 @@ export class InstancedCardRenderer {
           vec4 itemQuaternion = interpolateQuaternion(fromQuaternion, toQuaternion, progress);
           float effectVisible = 1.0;
 
-          if (effectMode > 1.5) {
-            effectVisible = step(0.0, tunnelSpeedFactor);
-            float shooterProgress = fract(tunnelPath.z + effectTime * shooterSpeed * abs(tunnelSpeedFactor));
-            float currentDistance = mix(shooterSourceRadius, tunnelPath.y, shooterProgress);
+          if (effectMode > 3.5) {
+            effectVisible = step(0.0, effectSpeedFactor);
+            float radialProgress = fract(effectPath.w + effectTime * effectParamsA.z * abs(effectSpeedFactor));
+            float radialTravel = effectParamsB.z > 0.5 ? radialProgress : 1.0 - radialProgress;
+            float radialDistance = mix(effectParamsA.x, effectPath.z, smoothstep(0.0, 1.0, radialTravel));
+            float radialHorizontal = cos(effectPath.y) * radialDistance;
             center = vec3(
-              cos(tunnelPath.x) * currentDistance,
-              sin(tunnelPath.x) * currentDistance,
-              shooterZ
+              cos(effectPath.x) * radialHorizontal,
+              sin(effectPath.y) * radialDistance,
+              effectParamsA.w + sin(effectPath.x) * radialHorizontal * effectParamsB.w
             );
-            itemScale = mix(shooterStartScale, shooterEndScale, shooterProgress);
+            itemScale = mix(effectParamsB.x, effectParamsB.y, radialTravel);
+            vOpacity *= smoothstep(0.0, 0.04, radialProgress)
+              * (1.0 - smoothstep(0.86, 1.0, radialProgress));
+          } else if (effectMode > 2.5) {
+            effectVisible = step(0.0, effectSpeedFactor);
+            float vortexProgress = fract(effectPath.z + effectTime * effectParamsB.x * abs(effectSpeedFactor));
+            float vortexTravel = effectParamsC.x > 0.5 ? vortexProgress : 1.0 - vortexProgress;
+            float vortexSpread = smoothstep(0.0, 1.0, vortexTravel);
+            float vortexDirection = effectParamsC.x > 0.5 ? 1.0 : -1.0;
+            float vortexAngle = effectPath.x + vortexProgress * effectParamsB.y * 6.28318530718 * vortexDirection;
+            float vortexRadius = mix(effectParamsA.x, effectPath.y, vortexSpread);
+            center = vec3(
+              cos(vortexAngle) * vortexRadius,
+              sin(vortexAngle) * vortexRadius,
+              mix(effectParamsA.w, effectParamsA.z, vortexTravel)
+            );
+            itemScale = mix(effectParamsB.z, effectParamsB.w, vortexTravel);
+            vOpacity *= smoothstep(0.0, 0.05, vortexProgress)
+              * (1.0 - smoothstep(0.9, 1.0, vortexProgress));
+          } else if (effectMode > 1.5) {
+            effectVisible = step(0.0, effectSpeedFactor);
+            float shooterProgress = fract(effectPath.z + effectTime * effectParamsA.y * abs(effectSpeedFactor));
+            float currentDistance = mix(effectParamsA.x, effectPath.y, shooterProgress);
+            center = vec3(
+              cos(effectPath.x) * currentDistance,
+              sin(effectPath.x) * currentDistance,
+              effectParamsB.x
+            );
+            itemScale = mix(effectParamsA.z, effectParamsA.w, shooterProgress);
             vOpacity *= smoothstep(0.0, 0.04, shooterProgress)
               * (1.0 - smoothstep(0.82, 1.0, shooterProgress));
           } else if (effectMode > 0.5) {
-            effectVisible = step(0.0, tunnelSpeedFactor);
-            float tunnelProgress = fract(tunnelPath.z + effectTime * tunnelSpeed * abs(tunnelSpeedFactor));
+            effectVisible = step(0.0, effectSpeedFactor);
+            float tunnelProgress = fract(effectPath.z + effectTime * effectParamsA.w * abs(effectSpeedFactor));
             float spread = smoothstep(0.0, 1.0, tunnelProgress);
-            float currentAngle = tunnelPath.x + tunnelProgress * tunnelTwist;
-            float currentRadius = mix(tunnelInnerRadius, tunnelPath.y, spread);
+            float currentAngle = effectPath.x + tunnelProgress * effectParamsB.x;
+            float currentRadius = mix(effectParamsA.z, effectPath.y, spread);
             center = vec3(
               cos(currentAngle) * currentRadius,
               sin(currentAngle) * currentRadius,
-              mix(tunnelFarZ, tunnelNearZ, tunnelProgress)
+              mix(effectParamsA.x, effectParamsA.y, tunnelProgress)
             );
-            itemScale = mix(tunnelFarScale, tunnelNearScale, tunnelProgress);
+            itemScale = mix(effectParamsB.y, effectParamsB.z, tunnelProgress);
             vOpacity *= smoothstep(0.0, 0.06, tunnelProgress)
               * (1.0 - smoothstep(0.9, 1.0, tunnelProgress));
           }
@@ -248,35 +260,16 @@ export class InstancedCardRenderer {
     if (this.material) this.material.uniforms.hideBackHemisphere.value = hidden ? 1 : 0
   }
 
-  enableTunnel(data: TunnelGpuData): void {
+  enableEffect(data: StreamingEffectGpuData): void {
     if (!this.mesh || !this.material) return
-    this.mesh.geometry.setAttribute('tunnelPath', new InstancedBufferAttribute(data.paths, 3))
-    this.mesh.geometry.setAttribute('tunnelSpeedFactor', new InstancedBufferAttribute(data.speedFactors, 1))
+    this.mesh.geometry.setAttribute('effectPath', new InstancedBufferAttribute(data.paths, 4))
+    this.mesh.geometry.setAttribute('effectSpeedFactor', new InstancedBufferAttribute(data.speedFactors, 1))
     const uniforms = this.material.uniforms
-    uniforms.tunnelFarZ.value = data.farZ
-    uniforms.tunnelNearZ.value = data.nearZ
-    uniforms.tunnelInnerRadius.value = data.innerRadius
-    uniforms.tunnelSpeed.value = data.speed
-    uniforms.tunnelTwist.value = data.twist
-    uniforms.tunnelFarScale.value = data.farScale
-    uniforms.tunnelNearScale.value = data.nearScale
+    setVector4(uniforms.effectParamsA.value as Vector4, data.parameters, 0)
+    setVector4(uniforms.effectParamsB.value as Vector4, data.parameters, 4)
+    setVector4(uniforms.effectParamsC.value as Vector4, data.parameters, 8)
     uniforms.effectTime.value = 0
-    uniforms.effectMode.value = 1
-    uniforms.hideBackHemisphere.value = 0
-  }
-
-  enableLinearShooter(data: LinearShooterGpuData): void {
-    if (!this.mesh || !this.material) return
-    this.mesh.geometry.setAttribute('tunnelPath', new InstancedBufferAttribute(data.paths, 3))
-    this.mesh.geometry.setAttribute('tunnelSpeedFactor', new InstancedBufferAttribute(data.speedFactors, 1))
-    const uniforms = this.material.uniforms
-    uniforms.shooterSourceRadius.value = data.sourceRadius
-    uniforms.shooterSpeed.value = data.speed
-    uniforms.shooterStartScale.value = data.startScale
-    uniforms.shooterEndScale.value = data.endScale
-    uniforms.shooterZ.value = data.z
-    uniforms.effectTime.value = 0
-    uniforms.effectMode.value = 2
+    uniforms.effectMode.value = effectMode(data.kind)
     uniforms.hideBackHemisphere.value = 0
   }
 
@@ -335,6 +328,19 @@ export class InstancedCardRenderer {
     scales[index] = transform.scale
     opacities[index] = transform.opacity
   }
+}
+
+function effectMode(kind: StreamingEffectKind): number {
+  switch (kind) {
+    case 'tunnel': return 1
+    case 'linear-shooter': return 2
+    case 'vortex': return 3
+    case 'radial-burst': return 4
+  }
+}
+
+function setVector4(target: Vector4, values: Float32Array, offset: number): void {
+  target.set(values[offset], values[offset + 1], values[offset + 2], values[offset + 3])
 }
 
 function createItemsFingerprint(items: MotionItem[]): string {
