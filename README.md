@@ -26,7 +26,23 @@
 - 聚焦后恢复最近一次业务布局
 - ResizeObserver 响应式画布及完整资源释放
 
-目前是本地预研版本，源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)，尚未发布 npm 包。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名已确定为 `@itagan/spatial-motion`，目前可从 GitHub 安装，尚未发布到 npm Registry。
+
+## 安装
+
+从 GitHub 安装当前主分支：
+
+```bash
+npm install github:itagan/spatial-motion three
+```
+
+发布到 npm 后使用：
+
+```bash
+npm install @itagan/spatial-motion three
+```
+
+Three.js `>=0.178.0 <1.0.0` 是 peer dependency，不会被 Spatial Motion 重复打包。
 
 ## 启动
 
@@ -40,13 +56,17 @@ npm run dev
 ```bash
 npm run typecheck
 npm test
-npm run build
+npm run build:lib
+npm run build:demo
+npm run pack:check
 ```
+
+`build:lib` 输出可发布 ESM 和类型声明到 `dist/`；`build:demo` 独立输出演示站点到 `dist-demo/`。
 
 ## 基础使用
 
 ```ts
-import { MotionStage, cylinder, sphere } from 'spatial-motion'
+import { MotionStage, cylinder, sphere } from '@itagan/spatial-motion'
 
 const stage = new MotionStage({
   container: document.querySelector('#stage')!,
@@ -62,6 +82,16 @@ stage.autoRotate({ y: 0.25 })
 await stage.to(sphere({ radius: 5 }), { duration: 1600 })
 await stage.to(cylinder({ radius: 5 }), { duration: 1400 })
 ```
+
+按需子路径入口：
+
+```ts
+import { sphere, cylinder } from '@itagan/spatial-motion/layouts'
+import { tunnel, vortex } from '@itagan/spatial-motion/effects'
+import { BenchmarkSession } from '@itagan/spatial-motion/performance'
+```
+
+仅主入口、`layouts`、`effects`、`performance` 和 `package.json` 是稳定导出路径。`renderers` 等内部目录受 `exports` 限制，不属于公共 API。
 
 运行时状态：
 
@@ -164,13 +194,25 @@ http://localhost:5173/benchmark.html
 
 重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。
 
+## 包构建与体积基准
+
+Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Three.js 保持为外部依赖。当前自动化预算和实测基线：
+
+| 项目 | 预算 | 当前基线 |
+| --- | ---: | ---: |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 21.6 KB |
+| npm tarball | ≤ 150 KB | 72.0 KB |
+| 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 2.1 KB |
+
+`npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、README、LICENSE 和包元数据。
+
 连续低帧率约 2.5 秒后下降一级，质量切换后有 5 秒冷却；性能稳定约 8 秒后才允许恢复。页面切到后台、调试暂停及超过 100ms 的异常长帧不会参与判断。
 手动锁定 high、medium 或 low 时仍持续记录 FPS 和帧时间，但采样结果不会触发自动升降级。
 
 时空隧道：
 
 ```ts
-import { tunnel } from 'spatial-motion'
+import { tunnel } from '@itagan/spatial-motion'
 
 const tunnelEffect = tunnel({
   directionCount: 20,
@@ -188,7 +230,7 @@ await stage.to(cylinder(), { duration: 1300 })
 线性发射器：
 
 ```ts
-import { linearShooter } from 'spatial-motion'
+import { linearShooter } from '@itagan/spatial-motion'
 
 const shooter = linearShooter({
   directionCount: 18,
@@ -210,7 +252,7 @@ await stage.to(sphere(), {
 漩涡与径向爆发：
 
 ```ts
-import { radialBurst, vortex } from 'spatial-motion'
+import { radialBurst, vortex } from '@itagan/spatial-motion'
 
 await stage.enterEffect(vortex({
   direction: 'in',
@@ -240,7 +282,7 @@ sphere({ orientation: 'surface' })         // 严格贴合球面切线
 通用布局：
 
 ```ts
-import { cone, helix, ring } from 'spatial-motion'
+import { cone, helix, ring } from '@itagan/spatial-motion'
 
 await stage.to(ring({
   innerRadius: 0.8,
@@ -290,8 +332,11 @@ demo/              性能和连续动画演示
 
 ## 后续路线
 
-1. 独立 library build、导出边界和包体积基准
-2. CSS3D 可选渲染器以及 Vue/React 薄适配器
+1. CSS3D 可选渲染器以及 Vue/React 薄适配器
+
+## License
+
+[MIT](./LICENSE)
 
 ## 性能原则
 
