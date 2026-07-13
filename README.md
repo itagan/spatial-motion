@@ -19,9 +19,12 @@
 - high、medium、low 设备质量分级
 - 运行时帧率监控、自动降级与稳定恢复
 - 自动限制像素比和可见实例数量
+- 按稳定 `id` 动态增删数据，并从已有卡片的当前空间位置继续过渡
+- 屏幕坐标拾取、卡片点击回调和任意 `id` 聚焦
+- 聚焦后恢复最近一次业务布局
 - ResizeObserver 响应式画布及完整资源释放
 
-目前是本地预研版本，尚未初始化独立 Git 仓库，也未发布 npm 包。
+目前是本地预研版本，源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)，尚未发布 npm 包。
 
 ## 启动
 
@@ -65,13 +68,57 @@ stage.getQuality()          // 'high' | 'medium' | 'low'
 stage.getPerformanceStats() // fps、平均帧时间、采样数量、当前质量
 ```
 
+动态更新数据：
+
+```ts
+await stage.updateItems(nextParticipants, {
+  duration: 800,
+  // 可选：更新后直接进入指定布局；默认恢复最近一次布局
+  layout: sphere({ radius: 5 }),
+})
+```
+
+相同 `id` 的卡片会继承更新发生时的位置，新卡片从初始状态进入；纹理图集只在数据更新时批量重建，不进入逐帧渲染路径。
+快速连续更新时仅最后一次调用生效，已失效的图集结果会被释放。`id` 必须是非空字符串且在完整输入中唯一，否则调用会在修改舞台状态前抛出错误。
+
+拾取与聚焦：
+
+```ts
+const stage = new MotionStage({
+  container,
+  onItemClick(item, index) {
+    void stage.focusItems([item.id])
+  },
+})
+
+const hit = stage.pick(pointerEvent.clientX, pointerEvent.clientY)
+
+await stage.focusItems(['guest-1', 'guest-8'], {
+  columns: 2,
+  scale: 1.45,
+  dimOpacity: 0.08,
+})
+await stage.restoreLayout({ duration: 1000 })
+```
+
+资源释放：
+
+```ts
+stage.destroy()
+stage.destroy() // 幂等
+```
+
+除重复 `destroy()` 外，舞台销毁后的公开 API 调用都会抛出 `MotionStage has been destroyed`，用于尽早发现组件生命周期误用。
+
 质量变化会同时调整：
 
-| 质量 | 最大像素比 | 分布式可见比例 | 目标帧率 |
-| --- | ---: | ---: | ---: |
-| high | 1.5 | 100% | 60 |
-| medium | 1.25 | 82% | 45 |
-| low | 1 | 58% | 30 |
+| 质量 | 最大像素比 | 最大实例数 | 分布式可见比例 | 目标帧率 |
+| --- | ---: | ---: | ---: | ---: |
+| high | 1.5 | 2000 | 100% | 60 |
+| medium | 1.25 | 1000 | 82% | 45 |
+| low | 1 | 500 | 58% | 30 |
+
+输入数据超过当前质量档位的最大实例数时，尾部数据不会进入纹理图集或 GPU 实例缓冲。
 
 连续低帧率约 2.5 秒后下降一级，质量切换后有 5 秒冷却；性能稳定约 8 秒后才允许恢复。页面切到后台、调试暂停及超过 100ms 的异常长帧不会参与判断。
 
@@ -148,9 +195,11 @@ demo/              性能和连续动画演示
 
 ## 后续路线
 
-1. 动态增删数据、卡片聚焦和拾取事件
-2. CSS3D 可选渲染器以及 Vue/React 薄适配器
-3. 独立 library build、导出边界和包体积基准
+1. 低配设备性能基准页与自动降级数据验证
+2. 圆环、螺旋、圆锥等通用布局和连续变形增强
+3. 更多固定对象池流式效果和精确遮挡拾取
+4. 独立 library build、导出边界和包体积基准
+5. CSS3D 可选渲染器以及 Vue/React 薄适配器
 
 ## 性能原则
 

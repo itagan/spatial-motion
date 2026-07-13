@@ -17,14 +17,20 @@ import { createTextureAtlas } from './textureAtlas'
 export class InstancedCardRenderer {
   private mesh: Mesh<InstancedBufferGeometry, ShaderMaterial> | null = null
   private material: ShaderMaterial | null = null
+  private generation = 0
   private readonly euler = new Euler()
   private readonly quaternion = new Quaternion()
 
   constructor(private readonly scene: Scene) {}
 
-  async setItems(items: MotionItem[]): Promise<void> {
-    this.dispose()
+  async setItems(items: MotionItem[]): Promise<boolean> {
+    const generation = ++this.generation
     const atlas = await createTextureAtlas(items)
+    if (generation !== this.generation) {
+      atlas.texture.dispose()
+      return false
+    }
+    this.disposeCurrent()
     const plane = new PlaneGeometry(1, 1)
     const geometry = new InstancedBufferGeometry()
     geometry.index = plane.index
@@ -177,6 +183,7 @@ export class InstancedCardRenderer {
     this.mesh = new Mesh(geometry, this.material)
     this.mesh.frustumCulled = false
     this.scene.add(this.mesh)
+    return true
   }
 
   setTransforms(transforms: Transform[]): void {
@@ -275,6 +282,11 @@ export class InstancedCardRenderer {
   }
 
   dispose(): void {
+    this.generation += 1
+    this.disposeCurrent()
+  }
+
+  private disposeCurrent(): void {
     if (!this.mesh) return
     this.scene.remove(this.mesh)
     this.mesh.geometry.dispose()

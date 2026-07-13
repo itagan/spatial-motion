@@ -11,13 +11,13 @@ import {
 } from '@spatial-motion'
 import './style.css'
 
-const itemCount = 600
 const avatarPool = Array.from({ length: 24 }, (_, index) => createAvatar(index))
-const items: MotionItem[] = Array.from({ length: itemCount }, (_, index) => ({
-  id: `guest-${index + 1}`,
-  title: String(index + 1).padStart(3, '0'),
-  image: avatarPool[index % avatarPool.length],
-}))
+const createItems = (count: number): MotionItem[] => Array.from({ length: count }, (_, index) => ({
+    id: `guest-${index + 1}`,
+    title: String(index + 1).padStart(3, '0'),
+    image: avatarPool[index % avatarPool.length],
+  }))
+let items = createItems(600)
 
 function createAvatar(index: number): string {
   const hue = (index * 47) % 360
@@ -34,6 +34,9 @@ function createAvatar(index: number): string {
 
 const container = document.querySelector<HTMLElement>('#stage')
 if (!container) throw new Error('Stage container not found')
+const updateSelection = (count: number) => {
+  document.querySelector('#selection')!.textContent = `${count} SELECTED`
+}
 
 const stage = new MotionStage({
   container,
@@ -42,6 +45,13 @@ const stage = new MotionStage({
   onQualityChange(quality, stats) {
     document.querySelector('#quality')!.textContent = `${quality.toUpperCase()} QUALITY`
     console.info(`Spatial Motion quality changed to ${quality} at ${stats.fps.toFixed(1)} FPS`)
+  },
+  onItemClick(item) {
+    activeTimeline?.cancel()
+    stage.stopRotation()
+    stage.setRotation(0, 0)
+    updateSelection(1)
+    void stage.focusItems([item.id])
   },
 })
 await stage.setItems(items)
@@ -70,6 +80,7 @@ let activeTimeline: Timeline | null = null
 document.querySelectorAll<HTMLButtonElement>('[data-layout]').forEach((button) => {
   button.addEventListener('click', () => {
     activeTimeline?.cancel()
+    updateSelection(0)
     const layoutName = button.dataset.layout ?? 'sphere'
     const layout = layouts[layoutName]
     if (layoutName === 'grid') {
@@ -84,6 +95,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-layout]').forEach((button) =
 
 document.querySelector('#tunnel')?.addEventListener('click', () => {
   activeTimeline?.cancel()
+  updateSelection(0)
   stage.stopRotation()
   stage.setRotation(0, 0)
   void stage.enterTunnel(tunnelEffect, { duration: 1300 })
@@ -91,13 +103,47 @@ document.querySelector('#tunnel')?.addEventListener('click', () => {
 
 document.querySelector('#shooter')?.addEventListener('click', () => {
   activeTimeline?.cancel()
+  updateSelection(0)
   stage.stopRotation()
   stage.setRotation(0, 0)
   void stage.enterLinearShooter(shooterEffect, { duration: 1200 })
 })
 
+document.querySelector('#focus')?.addEventListener('click', () => {
+  activeTimeline?.cancel()
+  updateSelection(5)
+  stage.stopRotation()
+  stage.setRotation(0, 0)
+  void stage.focusItems(items.slice(0, 5).map((item) => item.id))
+})
+
+document.querySelector('#restore')?.addEventListener('click', () => {
+  activeTimeline?.cancel()
+  updateSelection(0)
+  void stage.restoreLayout({ duration: 1000 }).then((restored) => {
+    if (restored) stage.autoRotate({ y: 0.24 })
+  })
+})
+
+document.querySelector('#add-items')?.addEventListener('click', async () => {
+  activeTimeline?.cancel()
+  updateSelection(0)
+  items = createItems(Math.min(1200, items.length + 100))
+  await stage.updateItems(items)
+  updateItemCount()
+})
+
+document.querySelector('#remove-items')?.addEventListener('click', async () => {
+  activeTimeline?.cancel()
+  updateSelection(0)
+  items = createItems(Math.max(100, items.length - 100))
+  await stage.updateItems(items)
+  updateItemCount()
+})
+
 document.querySelector('#sequence')?.addEventListener('click', () => {
   activeTimeline?.cancel()
+  updateSelection(0)
   activeTimeline = stage
     .timeline()
     .add(() => stage.autoRotate({ y: 0.24 }))
@@ -125,7 +171,10 @@ document.querySelector('#sequence')?.addEventListener('click', () => {
 })
 
 document.querySelector('#quality')!.textContent = `${stage.getQuality().toUpperCase()} QUALITY`
-document.querySelector('#count')!.textContent = `${itemCount} ITEMS`
+const updateItemCount = () => {
+  document.querySelector('#count')!.textContent = `${items.length} ITEMS`
+}
+updateItemCount()
 
 let frames = 0
 let measuredAt = performance.now()
