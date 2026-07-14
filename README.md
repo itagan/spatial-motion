@@ -28,6 +28,12 @@
 
 源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名已确定为 `@itagan/spatial-motion`，目前可从 GitHub 安装，尚未发布到 npm Registry。
 
+## 项目文档
+
+- [开发指南](./docs/DEVELOPMENT.md)：环境、命令、架构职责、测试与发布检查。
+- [路线图](./ROADMAP.md)：已完成阶段、当前目标和后续候选方向。
+- [开发代理指南](./AGENTS.md)：Codex、Claude Code 等自动化开发代理的项目边界与完成标准。
+
 ## 安装
 
 从 GitHub 安装当前主分支：
@@ -332,7 +338,7 @@ demo/              性能和连续动画演示
 
 ## 后续路线
 
-1. CSS3D 可选渲染器以及 Vue/React 薄适配器
+CSS3D 可选渲染器、Vue/React 薄适配器及发布准备工作的状态统一维护在[路线图](./ROADMAP.md)中。
 
 ## License
 
