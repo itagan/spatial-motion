@@ -1,5 +1,6 @@
 import {
   MotionStage,
+  box,
   cone,
   cylinder,
   grid,
@@ -65,6 +66,7 @@ await stage.to(sphere({ radius: 5.2 }), { duration: 1600 })
 
 const layouts: Record<string, Layout> = {
   sphere: sphere({ radius: 5.2 }),
+  box: box({ width: 8, height: 7, depth: 6 }),
   cylinder: cylinder({ radius: 5 }),
   grid: grid({ columns: 30, gap: 0.42 }),
   ring: ring({ innerRadius: 0.8, spacing: 0.42 }),
@@ -186,6 +188,8 @@ document.querySelector('#sequence')?.addEventListener('click', () => {
     .timeline()
     .add(() => stage.autoRotate({ y: 0.24 }))
     .add(() => stage.to(layouts.sphere, { duration: 1200 }))
+    .wait(900)
+    .add(() => stage.to(layouts.box, { duration: 1300 }))
     .wait(900)
     .add(() => stage.enterEffect(vortexEffect, { duration: 1300 }))
     .wait(2600)

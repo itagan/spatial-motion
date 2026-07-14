@@ -6,7 +6,7 @@
 
 - `InstancedBufferGeometry` 批量渲染卡片，主体场景保持单 Draw Call
 - Canvas Texture Atlas，避免每个卡片独立纹理和材质
-- 球体、圆柱体、平面网格、同心圆环、螺旋和圆锥布局
+- 球体、立方体/长方体、圆柱体、平面网格、同心圆环、螺旋和圆锥布局
 - 同一批实例在布局之间连续过渡，不重建 Three.js 对象
 - GPU Shader 并行插值位置、缩放、透明度和四元数朝向
 - 动画过程中 CPU 每帧仅更新一个进度 uniform
@@ -193,7 +193,7 @@ http://localhost:5173/benchmark.html
 
 - 100、300、600、1000、1500 个实例
 - auto、high、medium、low 质量模式
-- 球体、圆柱体、平面、同心圆环、螺旋和圆锥布局
+- 球体、立方体/长方体、圆柱体、平面、同心圆环、螺旋和圆锥布局
 - 时空隧道、漩涡和径向爆发特效及实际活跃实例统计
 - FPS、平均帧时间、渲染/可见实例、Draw Call、三角形和纹理图集内存
 - 3、10、20 秒采样与完整 JSON 结果导出
@@ -288,7 +288,14 @@ sphere({ orientation: 'surface' })         // 严格贴合球面切线
 通用布局：
 
 ```ts
-import { cone, helix, ring } from '@itagan/spatial-motion'
+import { box, cone, helix, ring } from '@itagan/spatial-motion'
+
+await stage.to(box({
+  width: 8,
+  height: 6,
+  depth: 5,
+  orientation: 'surface',
+}))
 
 await stage.to(ring({
   innerRadius: 0.8,
@@ -311,7 +318,7 @@ await stage.to(cone({
 }))
 ```
 
-三种布局会根据实例数量自动计算环数、圈数和卡片缩放，也可通过 `rings`、`turns`、`density` 等参数锁定视觉密度。它们遵循统一 `Layout` 契约，可直接插入 Timeline，并在任意中间帧切换到其他布局或流式特效。
+这些布局会根据实例数量自动计算面分布、环数、圈数和卡片缩放，也可通过尺寸、`rings`、`turns`、`density` 等参数锁定视觉密度。它们遵循统一 `Layout` 契约，可直接插入 Timeline，并在任意中间帧切换到其他布局或流式特效。
 
 连续编排：
 

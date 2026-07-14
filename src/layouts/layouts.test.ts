@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  box,
+  calculateBoxFaceDistribution,
   calculateConeRingDistribution,
   calculateOrbitalRingDistribution,
   calculateRingCount,
@@ -15,7 +17,7 @@ import {
 const context = { width: 1920, height: 1080 }
 
 describe('layouts', () => {
-  it.each([sphere(), cylinder(), grid(), ring(), helix(), cone()])('$name returns one finite transform per item', (layout) => {
+  it.each([sphere(), cylinder(), grid(), ring(), helix(), cone(), box()])('$name returns one finite transform per item', (layout) => {
     const result = layout.calculate(500, context)
     expect(result).toHaveLength(500)
     expect(result.every((value) => Object.values(value).every(Number.isFinite))).toBe(true)
@@ -47,7 +49,7 @@ describe('layouts', () => {
     expect(new Set(result.map(({ x, y }) => `${x},${y}`)).size).toBe(100)
   })
 
-  it.each([sphere(), cylinder(), grid(), ring(), helix(), cone()])(
+  it.each([sphere(), cylinder(), grid(), ring(), helix(), cone(), box()])(
     '$name handles empty and single-item data',
     (layout) => {
       expect(layout.calculate(0, context)).toEqual([])
@@ -98,5 +100,35 @@ describe('layouts', () => {
     expect(distribution[0]).toBe(1)
     expect(Math.hypot(result[0].x, result[0].z)).toBeCloseTo(0)
     expect(Math.max(...result.map(({ x, z }) => Math.hypot(x, z)))).toBeCloseTo(5, 5)
+  })
+
+  it('box distributes items by face area and keeps them on the six surfaces', () => {
+    const dimensions = { width: 12, height: 8, depth: 4 }
+    const distribution = calculateBoxFaceDistribution(600, dimensions.width, dimensions.height, dimensions.depth)
+    const result = box(dimensions).calculate(600, context)
+
+    expect(distribution).toHaveLength(6)
+    expect(distribution.reduce((sum, value) => sum + value, 0)).toBe(600)
+    expect(distribution[0]).toBe(distribution[1])
+    expect(distribution[2]).toBe(distribution[3])
+    expect(distribution[4]).toBe(distribution[5])
+    expect(distribution[0]).toBeGreaterThan(distribution[2])
+    result.forEach(({ x, y, z }) => {
+      expect(
+        Math.abs(Math.abs(x) - dimensions.width / 2) < 1e-8
+        || Math.abs(Math.abs(y) - dimensions.height / 2) < 1e-8
+        || Math.abs(Math.abs(z) - dimensions.depth / 2) < 1e-8,
+      ).toBe(true)
+    })
+  })
+
+  it('box uses unique finite transforms for small data and supports camera orientation', () => {
+    const result = box({ width: 8, height: 6, depth: 4, orientation: 'camera' }).calculate(5, context)
+    expect(result).toHaveLength(5)
+    expect(new Set(result.map(({ x, y, z }) => `${x},${y},${z}`)).size).toBe(5)
+    result.forEach((transform) => {
+      expect(Object.values(transform).every(Number.isFinite)).toBe(true)
+      expect([transform.rotationX, transform.rotationY, transform.rotationZ]).toEqual([0, 0, 0])
+    })
   })
 })
