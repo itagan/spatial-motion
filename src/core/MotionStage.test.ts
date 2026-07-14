@@ -15,6 +15,7 @@ const stageMocks = vi.hoisted(() => ({
 vi.mock('../renderers/InstancedCardRenderer', () => ({
   InstancedCardRenderer: class MockInstancedCardRenderer {
     setItems = vi.fn(async () => true)
+    updateItems = vi.fn(async () => true)
     setTransforms = vi.fn()
     prepareTransition = vi.fn()
     setProgress = vi.fn()
@@ -239,6 +240,28 @@ describe('MotionStage', () => {
       { x: 10, scale: 1 },
       { x: 0, scale: 0.01 },
     ])
+    stage.destroy()
+  })
+
+  it('updates card content by stable id without rebuilding stage transforms', async () => {
+    const stage = createStage()
+    const cards = currentCards()
+    await stage.setItems([{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }])
+    cards.setTransforms.mockClear()
+
+    expect(await stage.updateItem('b', { title: 'Updated', meta: { value: 2 } })).toBe(true)
+    expect(cards.updateItems).toHaveBeenCalledWith([
+      { id: 'a', title: 'A' },
+      { id: 'b', title: 'Updated', meta: { value: 2 } },
+    ], [1])
+    expect(cards.setTransforms).not.toHaveBeenCalled()
+
+    await expect(stage.updateItemsById([{ id: 'missing', patch: { title: 'No' } }]))
+      .rejects.toThrow('Unknown MotionItem id: missing')
+    expect(() => stage.updateItemsById([
+      { id: 'a', patch: { title: 'one' } },
+      { id: 'a', patch: { title: 'two' } },
+    ])).toThrow('Duplicate MotionItem update id: a')
     stage.destroy()
   })
 

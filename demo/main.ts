@@ -68,6 +68,12 @@ const stage = new MotionStage({
   },
   hoverEffect: 'highlight',
   motionPreference: 'auto',
+  cardStyle: {
+    shape: 'circle',
+    borderWidth: 2,
+    borderColor: 'rgba(245, 215, 122, .9)',
+    backgroundColor: '#111827',
+  },
 })
 await stage.setItems(items)
 stage.autoRotate({ y: 0.24 })

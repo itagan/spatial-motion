@@ -147,8 +147,45 @@ await stage.updateItems(nextParticipants, {
 })
 ```
 
-相同 `id` 的卡片会继承更新发生时的位置，新卡片从初始状态进入；纹理图集只在数据更新时批量重建，不进入逐帧渲染路径。
+相同 `id` 的卡片会继承更新发生时的位置，新卡片从初始状态进入；尺寸或实例数量变化时纹理图集会批量重建，但不进入逐帧渲染路径。
 快速连续更新时仅最后一次调用生效，已失效的图集结果会被释放。`id` 必须是非空字符串且在完整输入中唯一，否则调用会在修改舞台状态前抛出错误。
+
+只更新已有卡片内容时使用稳定 `id` API。它仅重绘受影响的图集单元，不重建 Mesh，也不会打断当前布局或流式特效：
+
+```ts
+await stage.updateItem('guest-8', {
+  title: 'Winner',
+  image: '/winner.webp',
+})
+
+await stage.updateItemsById([
+  { id: 'guest-3', patch: { title: 'Finalist' } },
+  { id: 'guest-9', patch: { meta: { rank: 2 } } },
+])
+```
+
+卡片外观与自定义 Canvas 绘制：
+
+```ts
+const stage = new MotionStage({
+  container,
+  cardStyle: {
+    shape: 'rounded', // square | rounded | circle
+    cornerRadius: 10,
+    borderWidth: 2,
+    borderColor: '#f5d77a',
+    backgroundColor: '#111827',
+  },
+  async drawCard(context, item, bounds) {
+    context.fillStyle = '#16213e'
+    context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height)
+    context.fillStyle = '#fff'
+    context.fillText(item.title ?? item.id, bounds.width / 2, bounds.height / 2)
+  },
+})
+```
+
+绘制回调会在隔离的 Canvas 状态和卡片裁剪区域内执行；抛错时回退为内置卡片。异步绘制同样受更新 token 保护，旧请求完成后不会覆盖新内容。核心库不会执行 HTML 模板或挂载框架组件。
 
 拾取与聚焦：
 

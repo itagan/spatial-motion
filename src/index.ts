@@ -2,6 +2,8 @@ export { MotionStage } from './core/MotionStage.js'
 export type {
   FocusItemsOptions,
   MotionStageOptions,
+  MotionItemPatch,
+  MotionItemUpdate,
   MotionPreference,
   PickOptions,
   PickResult,
@@ -13,6 +15,9 @@ export { Timeline } from './core/Timeline.js'
 export type { TimelineStep } from './core/Timeline.js'
 export { easing, identityTransform, interpolateTransform } from './core/math.js'
 export type {
+  CardDrawBounds,
+  CardStyle,
+  DrawCard,
   EasingFunction,
   Layout,
   LayoutContext,
