@@ -89,11 +89,12 @@ try {
   await writeFile(join(consumer, 'consumer.ts'), `
     import { type MotionItem, type MotionStage, sphere } from '${packageName}'
     import { box, ring } from '${packageName}/layouts'
-    import { vortex } from '${packageName}/effects'
+    import { vortex, type EmissionOptions } from '${packageName}/effects'
     import { BenchmarkSession } from '${packageName}/performance'
     const items: MotionItem[] = [{ id: 'one' }]
     const stage: MotionStage | undefined = undefined
-    void [items, stage, sphere(), box(), ring(), vortex(), BenchmarkSession]
+    const emission: EmissionOptions = { mode: 'wave' }
+    void [items, stage, sphere(), box(), ring(), vortex(), BenchmarkSession, emission]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {

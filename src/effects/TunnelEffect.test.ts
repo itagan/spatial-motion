@@ -41,4 +41,29 @@ describe('TunnelEffect', () => {
 
     expect(Array.from(effect.getGpuData().speedFactors).filter((speed) => speed >= 0)).toHaveLength(140)
   })
+
+  it('supports deterministic square cross sections', () => {
+    const effect = tunnel({ crossSection: 'square', twist: 0, seed: 5 })
+    const transforms = effect.calculateTransforms(120, 0.5).filter(({ opacity }) => opacity > 0)
+    transforms.forEach(({ x, y }) => {
+      expect(Math.max(Math.abs(x), Math.abs(y))).toBeGreaterThan(0)
+    })
+    expect(new Set(effect.getGpuData().paths.filter((_, index) => index % 4 === 3))).toEqual(new Set([1]))
+  })
+
+  it('applies burst and wave emission envelopes to CPU transforms and GPU parameters', () => {
+    const burst = tunnel({ emission: { mode: 'burst', burstInterval: 2, burstDuration: 0.4 } })
+    const active = burst.calculateTransforms(80, 0.1)
+    const dormant = burst.calculateTransforms(80, 1)
+    expect(active.some(({ opacity }) => opacity > 0)).toBe(true)
+    expect(dormant.every(({ opacity }) => opacity === 0)).toBe(true)
+    const parameters = Array.from(burst.getGpuData().parameters.slice(7))
+    ;[1, 2, 0.4, 0.35, 0.75].forEach((value, index) => {
+      expect(parameters[index]).toBeCloseTo(value)
+    })
+
+    const wave = tunnel({ emission: { mode: 'wave', waveFrequency: 0.5, waveStrength: 1 } })
+    expect(wave.calculateTransforms(80, 1.5).every(({ opacity }) => opacity === 0)).toBe(true)
+    expect(wave.calculateTransforms(80, 0.5).some(({ opacity }) => opacity > 0)).toBe(true)
+  })
 })

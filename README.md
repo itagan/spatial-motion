@@ -233,6 +233,19 @@ await stage.enterEffect(tunnelEffect, { duration: 1400 })
 await stage.to(cylinder(), { duration: 1300 })
 ```
 
+隧道和线性发射器支持连续、爆发与波浪三种 GPU 发射节奏；隧道还可切换圆形或方形截面：
+
+```ts
+await stage.enterEffect(tunnel({
+  crossSection: 'square',
+  emission: { mode: 'burst', burstInterval: 2, burstDuration: 0.45 },
+}))
+
+await stage.enterEffect(linearShooter({
+  emission: { mode: 'wave', waveFrequency: 0.35, waveStrength: 0.75 },
+}))
+```
+
 线性发射器：
 
 ```ts

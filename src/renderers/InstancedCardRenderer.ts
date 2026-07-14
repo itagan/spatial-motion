@@ -99,6 +99,23 @@ export class InstancedCardRenderer {
           return normalize(mix(fromValue, target, amount));
         }
 
+        float emissionEnvelope(float time, float mode, float burstInterval, float burstDuration, float waveFrequency, float waveStrength) {
+          if (mode < 0.5) return 1.0;
+          if (mode > 1.5) {
+            float wave = sin(time * waveFrequency * 6.28318530718) * 0.5 + 0.5;
+            return mix(1.0 - waveStrength, 1.0, wave);
+          }
+          float phase = mod(time, max(0.001, burstInterval));
+          float edge = min(0.08, burstDuration * 0.25);
+          return 1.0 - smoothstep(burstDuration - edge, burstDuration, phase);
+        }
+
+        vec2 tunnelCrossSection(float angle, float radius, float squareShape) {
+          vec2 direction = vec2(cos(angle), sin(angle));
+          if (squareShape > 0.5) direction /= max(max(abs(direction.x), abs(direction.y)), 0.000001);
+          return direction * radius;
+        }
+
         void main() {
           vAtlasUv = atlasRect.xy + uv * atlasRect.zw;
           vLocalUv = uv;
@@ -150,20 +167,22 @@ export class InstancedCardRenderer {
             itemScale = mix(effectParamsA.z, effectParamsA.w, shooterProgress);
             vOpacity *= smoothstep(0.0, 0.04, shooterProgress)
               * (1.0 - smoothstep(0.82, 1.0, shooterProgress));
+            vOpacity *= emissionEnvelope(effectTime, effectParamsB.w, effectParamsC.x, effectParamsC.y, effectParamsC.z, effectParamsC.w);
           } else if (effectMode > 0.5) {
             effectVisible = step(0.0, effectSpeedFactor);
             float tunnelProgress = fract(effectPath.z + effectTime * effectParamsA.w * abs(effectSpeedFactor));
             float spread = smoothstep(0.0, 1.0, tunnelProgress);
             float currentAngle = effectPath.x + tunnelProgress * effectParamsB.x;
             float currentRadius = mix(effectParamsA.z, effectPath.y, spread);
+            vec2 tunnelPoint = tunnelCrossSection(currentAngle, currentRadius, effectPath.w);
             center = vec3(
-              cos(currentAngle) * currentRadius,
-              sin(currentAngle) * currentRadius,
+              tunnelPoint,
               mix(effectParamsA.x, effectParamsA.y, tunnelProgress)
             );
             itemScale = mix(effectParamsB.y, effectParamsB.z, tunnelProgress);
             vOpacity *= smoothstep(0.0, 0.06, tunnelProgress)
               * (1.0 - smoothstep(0.9, 1.0, tunnelProgress));
+            vOpacity *= emissionEnvelope(effectTime, effectParamsB.w, effectParamsC.x, effectParamsC.y, effectParamsC.z, effectParamsC.w);
           }
 
           if (billboard > 0.5 || effectMode > 0.5) {
