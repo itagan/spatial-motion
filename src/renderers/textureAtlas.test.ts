@@ -2,7 +2,12 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TextureAtlasResult } from './textureAtlas'
-import { applyTextureAtlasPatch, createTextureAtlasPatch } from './textureAtlas'
+import {
+  applyTextureAtlasPatch,
+  createTextureAtlas,
+  createTextureAtlasPatch,
+  resolveAtlasMetrics,
+} from './textureAtlas'
 
 const contexts = new WeakMap<HTMLCanvasElement, ReturnType<typeof createContext>>()
 
@@ -46,7 +51,50 @@ describe('texture atlas card rendering', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  it('clamps atlas resolution to the GPU texture limit and enables mipmapped sampling', async () => {
+    expect(resolveAtlasMetrics(2000, 128, 2048)).toEqual({
+      columns: 45,
+      rows: 45,
+      cellSize: 37,
+      padding: 4,
+      stride: 45,
+    })
+
+    const atlas = await createTextureAtlas([{ id: 'one' }], 96, {
+      maxTextureSize: 64,
+      anisotropy: 4,
+    })
+    expect(atlas).toMatchObject({ width: 64, height: 64, cellSize: 56, padding: 4 })
+    expect(atlas.texture.generateMipmaps).toBe(true)
+    expect(atlas.texture.anisotropy).toBe(4)
+    atlas.texture.dispose()
+  })
+
+  it('falls back when an image does not settle before the configured timeout', async () => {
+    vi.useFakeTimers()
+    class NeverImage {
+      crossOrigin = ''
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      src = ''
+    }
+    vi.stubGlobal('Image', NeverImage)
+
+    const pending = createTextureAtlasPatch(
+      [{ id: 'slow', title: 'Slow', image: 'https://example.test/slow.png' }],
+      [0],
+      32,
+      { imageTimeout: 100 },
+    )
+    await vi.advanceTimersByTimeAsync(100)
+    const patch = await pending
+    const context = contexts.get(patch.cells[0].canvas)!
+    expect(context.fillText).toHaveBeenCalledWith('Sl', 16, 16)
   })
 
   it('isolates a custom async draw callback inside the configured card shape', async () => {

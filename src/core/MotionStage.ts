@@ -33,11 +33,17 @@ export interface MotionStageOptions {
   hoverEffect?: 'none' | 'highlight'
   cardStyle?: CardStyle
   drawCard?: DrawCard
+  /** Atlas pixels per card before GPU texture-size clamping. */
+  cardResolution?: number
+  /** Maximum time to wait for each image before drawing the fallback card. */
+  imageTimeout?: number
+  /** Defaults used when an individual transition omits duration or easing. */
+  transition?: TransitionOptions
+  onContextChange?: (state: 'lost' | 'restored') => void
 }
 
-export interface UpdateItemsOptions {
+export interface UpdateItemsOptions extends TransitionOptions {
   layout?: Layout
-  duration?: number
 }
 
 export type MotionItemPatch = Partial<Omit<MotionItem, 'id'>>
@@ -83,6 +89,7 @@ export interface StagePerformanceStats extends PerformanceStats {
   paused: boolean
   effect: string | null
   activeEffectItems: number
+  contextLost: boolean
 }
 
 export class MotionStage {
@@ -109,6 +116,10 @@ export class MotionStage {
     startedAt: number
     duration: number
     easing: (value: number) => number
+    fromBillboard: number
+    toBillboard: number
+    fromHideBackHemisphere: number
+    toHideBackHemisphere: number
   } | null = null
   private activeEffect: {
     effect: StreamingEffect
@@ -127,6 +138,7 @@ export class MotionStage {
   private destroyed = false
   private pausedByUser = false
   private pausedByVisibility = document.visibilityState === 'hidden'
+  private pausedByContext = false
   private readonly motionPreference: MotionPreference
   private readonly motionQuery: MediaQueryList | null
   private reducedMotion = false
@@ -150,6 +162,8 @@ export class MotionStage {
     this.renderer = new WebGLRenderer({ alpha: true, antialias: profile.antialias, powerPreference: 'high-performance' })
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
     this.options.container.appendChild(this.renderer.domElement)
+    this.renderer.domElement.addEventListener('webglcontextlost', this.handleContextLost)
+    this.renderer.domElement.addEventListener('webglcontextrestored', this.handleContextRestored)
     this.renderer.domElement.addEventListener('pointerup', this.handlePointerUp)
     if (this.hoverEnabled) {
       this.renderer.domElement.addEventListener('pointermove', this.handlePointerMove)
@@ -162,6 +176,10 @@ export class MotionStage {
     this.cards = new InstancedCardRenderer(this.scene, {
       cardStyle: options.cardStyle,
       drawCard: options.drawCard,
+      cellSize: options.cardResolution,
+      imageTimeout: options.imageTimeout,
+      maxTextureSize: this.renderer.capabilities.maxTextureSize,
+      anisotropy: Math.min(4, this.renderer.capabilities.getMaxAnisotropy()),
     })
     this.resizeObserver = new ResizeObserver(() => {
       if (!this.destroyed) this.resizeInternal()
@@ -192,6 +210,8 @@ export class MotionStage {
     this.sourceItems = items.map((item) => ({ ...item }))
     this.inputItemCount = items.length
     this.transforms = nextTransforms
+    this.cards.setOrientation(this.currentOrientation)
+    this.cards.setHideBackHemisphere(this.hideBackHemisphere)
     this.cards.setTransforms(nextTransforms)
     this.visibleRatio = visibleRatios[this.quality]
     this.cards.setVisibleRatio(this.visibleRatio)
@@ -210,6 +230,7 @@ export class MotionStage {
 
   private async transitionTo(layout: Layout, options: TransitionOptions = {}): Promise<boolean> {
     const now = performance.now()
+    const visualState = this.resolveCurrentVisualState(now)
     this.transforms = this.resolveCurrentTransforms(now)
     if (this.activeEffect) {
       this.activeEffect = null
@@ -218,20 +239,43 @@ export class MotionStage {
     const token = ++this.transitionToken
     const from = this.transforms
     const target = layout.calculate(this.items.length, this.context())
-    this.currentOrientation = layout.orientation ?? 'surface'
-    this.hideBackHemisphere = layout.hideBackHemisphere ?? false
-    this.cards.setOrientation(this.currentOrientation)
-    this.cards.setHideBackHemisphere(this.hideBackHemisphere)
-    const duration = this.reducedMotion ? 0 : Math.max(0, options.duration ?? 1200)
-    const ease = options.easing ?? easing.cubicInOut
+    const targetOrientation = layout.orientation ?? 'surface'
+    const targetHideBackHemisphere = layout.hideBackHemisphere ?? false
+    const targetBillboard = targetOrientation === 'camera' ? 1 : 0
+    const targetHideBack = targetHideBackHemisphere ? 1 : 0
+    this.currentOrientation = targetOrientation
+    this.hideBackHemisphere = targetHideBackHemisphere
+    const duration = this.reducedMotion
+      ? 0
+      : Math.max(0, options.duration ?? this.options.transition?.duration ?? 1200)
+    const ease = options.easing ?? this.options.transition?.easing ?? easing.sineInOut
     if (duration === 0) {
       this.transforms = target
       this.activeTransition = null
+      this.cards.setOrientation(targetOrientation)
+      this.cards.setHideBackHemisphere(targetHideBackHemisphere)
       this.cards.setTransforms(target)
       return true
     }
-    this.activeTransition = { from, to: target, startedAt: now, duration, easing: ease }
-    this.cards.prepareTransition(from, target)
+    this.activeTransition = {
+      from,
+      to: target,
+      startedAt: now,
+      duration,
+      easing: ease,
+      fromBillboard: visualState.billboard,
+      toBillboard: targetBillboard,
+      fromHideBackHemisphere: visualState.hideBackHemisphere,
+      toHideBackHemisphere: targetHideBack,
+    }
+    this.cards.prepareTransition(
+      from,
+      target,
+      visualState.billboard,
+      targetBillboard,
+      visualState.hideBackHemisphere,
+      targetHideBack,
+    )
     return new Promise<boolean>((resolve) => {
       const update = (frameTime: number) => {
         if (token !== this.transitionToken) return resolve(false)
@@ -332,7 +376,10 @@ export class MotionStage {
     this.inputItemCount = nextSource.length
 
     if (!options.layout) return true
-    const completed = await this.transitionTo(options.layout, { duration: options.duration ?? 800 })
+    const completed = await this.transitionTo(options.layout, {
+      duration: options.duration ?? 800,
+      easing: options.easing,
+    })
     if (completed) this.lastLayout = options.layout
     return completed
   }
@@ -361,12 +408,17 @@ export class MotionStage {
     this.sourceItems = items.map((item) => ({ ...item }))
     this.inputItemCount = items.length
     this.transforms = nextTransforms
+    this.cards.setOrientation(this.currentOrientation)
+    this.cards.setHideBackHemisphere(this.hideBackHemisphere)
     this.cards.setTransforms(nextTransforms)
     this.cards.setVisibleRatio(this.visibleRatio)
 
     const targetLayout = options.layout ?? this.lastLayout
     if (!targetLayout) return true
-    const completed = await this.transitionTo(targetLayout, { duration: options.duration ?? 800 })
+    const completed = await this.transitionTo(targetLayout, {
+      duration: options.duration ?? 800,
+      easing: options.easing,
+    })
     if (completed && options.layout) this.lastLayout = options.layout
     return completed
   }
@@ -553,6 +605,8 @@ export class MotionStage {
     this.frameId = 0
     this.resizeObserver.disconnect()
     this.renderer.domElement.removeEventListener('pointerup', this.handlePointerUp)
+    this.renderer.domElement.removeEventListener('webglcontextlost', this.handleContextLost)
+    this.renderer.domElement.removeEventListener('webglcontextrestored', this.handleContextRestored)
     this.renderer.domElement.removeEventListener('pointermove', this.handlePointerMove)
     this.renderer.domElement.removeEventListener('pointerleave', this.handlePointerLeave)
     this.motionQuery?.removeEventListener('change', this.handleMotionPreferenceChange)
@@ -588,6 +642,7 @@ export class MotionStage {
       activeEffectItems: this.activeEffect
         ? countActiveEffectItems(this.activeEffect.gpuData.speedFactors)
         : 0,
+      contextLost: this.pausedByContext,
     }
   }
 
@@ -617,6 +672,24 @@ export class MotionStage {
     return to.map((transform, index) =>
       interpolateTransform(from[index] ?? identityTransform(), transform, progress),
     )
+  }
+
+  private resolveCurrentVisualState(now: number): { billboard: number; hideBackHemisphere: number } {
+    if (this.activeEffect) return { billboard: 1, hideBackHemisphere: 0 }
+    if (!this.activeTransition) {
+      return {
+        billboard: this.currentOrientation === 'camera' ? 1 : 0,
+        hideBackHemisphere: this.hideBackHemisphere ? 1 : 0,
+      }
+    }
+    const transition = this.activeTransition
+    const progress = transition.easing(Math.min(1, Math.max(0, (now - transition.startedAt) / transition.duration)))
+    return {
+      billboard: transition.fromBillboard
+        + (transition.toBillboard - transition.fromBillboard) * progress,
+      hideBackHemisphere: transition.fromHideBackHemisphere
+        + (transition.toHideBackHemisphere - transition.fromHideBackHemisphere) * progress,
+    }
   }
 
   private readonly render = (now: number) => {
@@ -676,7 +749,23 @@ export class MotionStage {
   }
 
   private isPaused(): boolean {
-    return this.pausedByUser || this.pausedByVisibility
+    return this.pausedByUser || this.pausedByVisibility || this.pausedByContext
+  }
+
+  private readonly handleContextLost = (event: Event) => {
+    if (this.destroyed || this.pausedByContext) return
+    event.preventDefault()
+    this.pausedByContext = true
+    this.stopRenderLoop()
+    this.options.onContextChange?.('lost')
+  }
+
+  private readonly handleContextRestored = () => {
+    if (this.destroyed || !this.pausedByContext) return
+    this.pausedByContext = false
+    this.cards.refreshTexture()
+    this.startRenderLoop()
+    this.options.onContextChange?.('restored')
   }
 
   private readonly handlePointerUp = (event: PointerEvent) => {

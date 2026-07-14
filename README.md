@@ -27,8 +27,10 @@
 - ResizeObserver 响应式画布及完整资源释放
 - 圆角、圆形、边框与背景卡片样式，以及安全的 Canvas 自定义绘制
 - 按稳定 `id` 局部重绘单张或多张图集卡片
+- 统一的平滑特效运动曲线、mipmap 图集采样和 GPU 纹理尺寸保护
+- WebGL context loss 暂停/恢复、图片超时回退和长时间压力基准
 
-源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已准备为 v1.0.0，目前可从 GitHub 安装，npm Registry 发布仍以正式 release 公告为准。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.1.0，目前可从 GitHub 安装，npm Registry 发布仍以正式 release 公告为准。
 
 ## 项目文档
 
@@ -36,6 +38,7 @@
 - [路线图](./ROADMAP.md)：已完成阶段、当前目标和后续候选方向。
 - [公共 API 与兼容策略](./docs/PUBLIC_API.md)：稳定入口、SemVer 承诺和迁移边界。
 - [浏览器支持与限制](./docs/COMPATIBILITY.md)：运行环境、图片 CORS 和已知限制。
+- [视觉验收矩阵](./docs/VISUAL_QA.md)：布局、特效、图集和长时间压力测试标准。
 - [发布清单](./docs/RELEASE.md)：版本验证、发布及发布后空项目安装步骤。
 - [变更记录](./CHANGELOG.md)：各阶段功能与兼容说明。
 - [开发代理指南](./AGENTS.md)：Codex、Claude Code 等自动化开发代理的项目边界与完成标准。
@@ -78,12 +81,18 @@ npm run pack:check
 ## 基础使用
 
 ```ts
-import { MotionStage, cylinder, sphere } from '@itagan/spatial-motion'
+import { MotionStage, cylinder, easing, sphere } from '@itagan/spatial-motion'
 
 const stage = new MotionStage({
   container: document.querySelector('#stage')!,
   quality: 'auto',
   adaptivePerformance: true,
+  transition: { duration: 1200, easing: easing.sineInOut },
+  cardResolution: 64,
+  imageTimeout: 10_000,
+  onContextChange(state) {
+    console.log('WebGL context:', state)
+  },
   onQualityChange(quality, stats) {
     console.log(quality, stats.fps)
   },
@@ -142,6 +151,8 @@ await stage.to(grid({ fit: 'cover' }))   // 铺满相机可视范围
 低动态模式会立即完成布局切换、停止自动旋转，并把流式特效固定为确定性的静态首帧。`full` 可强制保留动画，`reduced` 可强制使用低动态行为。
 
 页面隐藏时 Stage 会自动停止 `requestAnimationFrame`，恢复可见时重置帧时间再继续，后台停留时间不会污染性能样本。
+
+浏览器报告 WebGL context loss 时 Stage 会阻止默认销毁行为并暂停循环；context restored 后图集会重新标记上传并恢复运行。`getPerformanceStats().contextLost` 可用于状态面板。若此前由用户主动暂停，context 恢复不会越过该暂停状态。
 
 动态更新数据：
 
@@ -252,14 +263,15 @@ http://localhost:5173/benchmark.html
 
 基准页支持：
 
-- 100、300、600、1000、1500 个实例
+- 100、500、1000、2000 个固定实例规模
 - auto、high、medium、low 质量模式
 - 球体、立方体/长方体、圆柱体、平面、同心圆环、螺旋和圆锥布局
 - 时空隧道、漩涡和径向爆发特效及实际活跃实例统计
 - FPS、平均帧时间、渲染/可见实例、Draw Call、三角形和纹理图集内存
-- 3、10、20 秒采样与完整 JSON 结果导出
+- 3 秒至 30 分钟采样、持续布局/特效中断与局部图集更新压力模式
 
 重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。
+图集默认使用 4px 隔离、mipmap 和最高 4x 各向异性采样；`cardResolution` 会被限制在 32–256px，并在实例规模超过设备 `MAX_TEXTURE_SIZE` 时自动降低实际单元分辨率，避免创建无效纹理。
 
 ## 包构建与体积基准
 
@@ -267,8 +279,8 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 26.2 KB |
-| npm tarball | ≤ 150 KB | 99.5 KB |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 27.2 KB |
+| npm tarball | ≤ 150 KB | 105.9 KB |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 2.1 KB |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

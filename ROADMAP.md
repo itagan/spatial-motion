@@ -29,17 +29,19 @@
 - [x] **v0.9 响应式、低动态与悬停交互**：grid fit、Reduced Motion、事件驱动拾取和 GPU hover 高亮。
 - [x] **v0.10 卡片表现与增量更新**：卡片裁剪/边框/背景、自定义 Canvas 绘制和稳定 id 局部图集更新。
 - [x] **v1.0 稳定与发布准备**：稳定入口、SemVer 策略、CHANGELOG、release checklist、兼容范围和独立消费者检查。
+- [x] **v1.1 视觉打磨与运行时加固**：统一运动/淡出曲线、纹理采样与尺寸保护、图片超时、WebGL context 恢复和切换压力基准。
 
-以上状态以当前源码、测试、构建脚本和提交历史为依据。`package.json` 已准备为 `1.0.0`；npm publish、tag、GitHub Release 和发布后 Registry 空项目验证仍须按发布清单单独执行。
+以上状态以当前源码、测试、构建脚本和提交历史为依据。`package.json` 已推进到 `1.1.0`；npm publish、tag、GitHub Release 和发布后 Registry 空项目验证仍须按发布清单单独执行。
 
 ## 当前发布状态
 
 - [x] 首次稳定版本号、范围和兼容性承诺已固化。
 - [x] CHANGELOG、发布清单、包内容检查和本地临时消费者验证已建立。
 - [x] 浏览器/WebGL 支持范围、图片 CORS 行为和已知限制已记录。
+- [x] 建立 500/1000/2000 固定规模与最长 30 分钟的中断/更新压力测试入口。
 - [ ] 在目标真实浏览器/设备完成长时间 benchmark 和真实跨域图片冒烟。
 - [ ] 获得维护者明确授权后执行 npm publish、tag 和 GitHub Release。
-- [ ] 从 Registry 在空项目安装 v1.0.0 并记录发布后验证结果。
+- [ ] 从 Registry 在空项目安装正式发布版本并记录发布后验证结果。
 
 ## 后续候选方向
 

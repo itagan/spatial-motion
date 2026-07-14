@@ -1,6 +1,8 @@
 import type { Transform } from '../core/types.js'
 import {
   createEffectParameters,
+  effectEdgeFade,
+  effectTravel,
   emissionEnvelope,
   emissionModeCode,
   resolveEmissionOptions,
@@ -89,19 +91,20 @@ export class TunnelEffect implements StreamingEffect {
       const offset = this.paths[pathIndex + 2]
       const enabled = this.speedFactors[index] >= 0
       const progress = fract(offset + elapsedSeconds * this.options.speed * Math.abs(this.speedFactors[index]))
-      const spread = smoothstep(0, 1, progress)
+      const travel = effectTravel(progress)
+      const spread = smoothstep(0, 1, travel)
       const currentAngle = angle + progress * this.options.twist
       const radius = this.options.innerRadius + (outerRadius - this.options.innerRadius) * spread
       const point = crossSectionPoint(currentAngle, radius, this.options.crossSection)
       return {
         x: point.x,
         y: point.y,
-        z: this.options.farZ + (this.options.nearZ - this.options.farZ) * progress,
-        scale: this.options.farScale + (this.options.nearScale - this.options.farScale) * progress,
+        z: this.options.farZ + (this.options.nearZ - this.options.farZ) * travel,
+        scale: this.options.farScale + (this.options.nearScale - this.options.farScale) * travel,
         rotationX: 0,
         rotationY: 0,
         rotationZ: 0,
-        opacity: enabled ? edgeFade(progress) * emissionEnvelope(this.options.emission, elapsedSeconds) : 0,
+        opacity: enabled ? effectEdgeFade(progress, 0.08, 0.18) * emissionEnvelope(this.options.emission, elapsedSeconds) : 0,
       }
     })
   }
@@ -156,8 +159,4 @@ function fract(value: number): number {
 function smoothstep(min: number, max: number, value: number): number {
   const normalized = Math.min(1, Math.max(0, (value - min) / (max - min)))
   return normalized * normalized * (3 - 2 * normalized)
-}
-
-function edgeFade(progress: number): number {
-  return smoothstep(0, 0.06, progress) * (1 - smoothstep(0.9, 1, progress))
 }

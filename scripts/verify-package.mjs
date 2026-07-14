@@ -88,6 +88,7 @@ try {
     assert.equal(typeof performance.BenchmarkSession, 'function')
     assert.equal(typeof main.MotionStage.prototype.updateItem, 'function')
     assert.equal(typeof main.MotionStage.prototype.updateItemsById, 'function')
+    assert.equal(typeof main.easing.sineInOut, 'function')
     await assert.rejects(
       import('${packageName}/renderers/InstancedCardRenderer'),
       (error) => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED',
@@ -102,6 +103,7 @@ try {
       type MotionItemUpdate,
       type MotionPreference,
       type MotionStage,
+      type MotionStageOptions,
       sphere,
     } from '${packageName}'
     import { box, ring, scatter } from '${packageName}/layouts'
@@ -112,10 +114,16 @@ try {
     const emission: EmissionOptions = { mode: 'wave' }
     const motion: MotionPreference = 'auto'
     const cardStyle: CardStyle = { shape: 'rounded', cornerRadius: 8 }
+    const stageOptions: Omit<MotionStageOptions, 'container'> = {
+      cardResolution: 96,
+      imageTimeout: 5000,
+      transition: { duration: 900 },
+      onContextChange: (state) => void state,
+    }
     const updates: MotionItemUpdate[] = [{ id: 'one', patch: { title: 'updated' } }]
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
-    void [items, stage, sphere(), box(), ring(), scatter(), vortex(), BenchmarkSession, emission, motion, cardStyle]
+    void [items, stage, sphere(), box(), ring(), scatter(), vortex(), BenchmarkSession, emission, motion, cardStyle, stageOptions]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
@@ -161,6 +169,9 @@ try {
       quality: 'low',
       adaptivePerformance: false,
       cardStyle: { shape: 'rounded', cornerRadius: 8 },
+      cardResolution: 64,
+      imageTimeout: 1000,
+      transition: { duration: 0 },
     })
     await stage.setItems(items)
     await stage.to(sphere({ radius: 3 }), { duration: 0 })
@@ -168,7 +179,7 @@ try {
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
     const stats = stage.getPerformanceStats()
     stage.destroy()
-    const smoke = { ready: true, renderedItems: stats.renderedItems, drawCalls: stats.drawCalls, destroyed: !container.querySelector('canvas') }
+    const smoke = { ready: true, renderedItems: stats.renderedItems, drawCalls: stats.drawCalls, contextLost: stats.contextLost, destroyed: !container.querySelector('canvas') }
     document.documentElement.dataset.packageSmoke = smoke.destroyed ? 'passed' : 'failed'
     result.textContent = JSON.stringify(smoke)
   `)

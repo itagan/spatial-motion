@@ -25,6 +25,10 @@ export interface CardRendererStats {
   textureBytes: number
 }
 
+interface CardRendererOptions extends TextureAtlasOptions {
+  cellSize?: number
+}
+
 export class InstancedCardRenderer {
   private mesh: Mesh<InstancedBufferGeometry, ShaderMaterial> | null = null
   private material: ShaderMaterial | null = null
@@ -35,13 +39,13 @@ export class InstancedCardRenderer {
   private readonly euler = new Euler()
   private readonly quaternion = new Quaternion()
 
-  constructor(private readonly scene: Scene, private readonly atlasOptions: TextureAtlasOptions = {}) {}
+  constructor(private readonly scene: Scene, private readonly atlasOptions: CardRendererOptions = {}) {}
 
   async setItems(items: MotionItem[]): Promise<boolean> {
     const fingerprint = createItemsFingerprint(items)
     if (this.mesh && fingerprint === this.itemsFingerprint) return true
     const generation = ++this.generation
-    const atlas = await createTextureAtlas(items, 64, this.atlasOptions)
+    const atlas = await createTextureAtlas(items, this.atlasOptions.cellSize ?? 64, this.atlasOptions)
     if (generation !== this.generation) {
       atlas.texture.dispose()
       return false
@@ -62,8 +66,10 @@ export class InstancedCardRenderer {
       uniforms: {
         atlas: { value: atlas.texture },
         progress: { value: 1 },
-        billboard: { value: 0 },
-        hideBackHemisphere: { value: 0 },
+        fromBillboard: { value: 0 },
+        toBillboard: { value: 0 },
+        fromHideBackHemisphere: { value: 0 },
+        toHideBackHemisphere: { value: 0 },
         effectMode: { value: 0 },
         effectTime: { value: 0 },
         effectParamsA: { value: new Vector4() },
@@ -87,8 +93,10 @@ export class InstancedCardRenderer {
         attribute float visibilityRank;
         attribute float itemIndex;
         uniform float progress;
-        uniform float billboard;
-        uniform float hideBackHemisphere;
+        uniform float fromBillboard;
+        uniform float toBillboard;
+        uniform float fromHideBackHemisphere;
+        uniform float toHideBackHemisphere;
         uniform float effectMode;
         uniform float effectTime;
         uniform vec4 effectParamsA;
@@ -97,7 +105,6 @@ export class InstancedCardRenderer {
         uniform float visibleRatio;
         uniform float hoverIndex;
         varying vec2 vAtlasUv;
-        varying vec2 vLocalUv;
         varying float vOpacity;
         varying float vInstanceVisible;
         varying float vHighlight;
@@ -118,8 +125,19 @@ export class InstancedCardRenderer {
             return mix(1.0 - waveStrength, 1.0, wave);
           }
           float phase = mod(time, max(0.001, burstInterval));
-          float edge = min(0.08, burstDuration * 0.25);
-          return 1.0 - smoothstep(burstDuration - edge, burstDuration, phase);
+          float edge = min(0.1, burstDuration * 0.25);
+          return smoothstep(0.0, edge, phase)
+            * (1.0 - smoothstep(burstDuration - edge, burstDuration, phase));
+        }
+
+        float effectTravel(float progress) {
+          float value = clamp(progress, 0.0, 1.0);
+          return value * value * value * (value * (value * 6.0 - 15.0) + 10.0);
+        }
+
+        float effectEdgeFade(float progress, float fadeIn, float fadeOut) {
+          return smoothstep(0.0, fadeIn, progress)
+            * (1.0 - smoothstep(1.0 - fadeOut, 1.0, progress));
         }
 
         vec2 tunnelCrossSection(float angle, float radius, float squareShape) {
@@ -130,7 +148,6 @@ export class InstancedCardRenderer {
 
         void main() {
           vAtlasUv = atlasRect.xy + uv * atlasRect.zw;
-          vLocalUv = uv;
           vOpacity = mix(fromOpacity, toOpacity, progress);
           vec3 center = mix(fromPosition, toPosition, progress);
           float itemScale = mix(fromScale, toScale, progress);
@@ -142,7 +159,8 @@ export class InstancedCardRenderer {
           if (effectMode > 3.5) {
             effectVisible = step(0.0, effectSpeedFactor);
             float radialProgress = fract(effectPath.w + effectTime * effectParamsA.z * abs(effectSpeedFactor));
-            float radialTravel = effectParamsB.z > 0.5 ? radialProgress : 1.0 - radialProgress;
+            float radialCurvedProgress = effectTravel(radialProgress);
+            float radialTravel = effectParamsB.z > 0.5 ? radialCurvedProgress : 1.0 - radialCurvedProgress;
             float radialDistance = mix(effectParamsA.x, effectPath.z, smoothstep(0.0, 1.0, radialTravel));
             float radialHorizontal = cos(effectPath.y) * radialDistance;
             center = vec3(
@@ -151,12 +169,12 @@ export class InstancedCardRenderer {
               effectParamsA.w + sin(effectPath.x) * radialHorizontal * effectParamsB.w
             );
             itemScale = mix(effectParamsB.x, effectParamsB.y, radialTravel);
-            vOpacity *= smoothstep(0.0, 0.04, radialProgress)
-              * (1.0 - smoothstep(0.86, 1.0, radialProgress));
+            vOpacity *= effectEdgeFade(radialProgress, 0.06, 0.2);
           } else if (effectMode > 2.5) {
             effectVisible = step(0.0, effectSpeedFactor);
             float vortexProgress = fract(effectPath.z + effectTime * effectParamsB.x * abs(effectSpeedFactor));
-            float vortexTravel = effectParamsC.x > 0.5 ? vortexProgress : 1.0 - vortexProgress;
+            float vortexCurvedProgress = effectTravel(vortexProgress);
+            float vortexTravel = effectParamsC.x > 0.5 ? vortexCurvedProgress : 1.0 - vortexCurvedProgress;
             float vortexSpread = smoothstep(0.0, 1.0, vortexTravel);
             float vortexDirection = effectParamsC.x > 0.5 ? 1.0 : -1.0;
             float vortexAngle = effectPath.x + vortexProgress * effectParamsB.y * 6.28318530718 * vortexDirection;
@@ -167,51 +185,56 @@ export class InstancedCardRenderer {
               mix(effectParamsA.w, effectParamsA.z, vortexTravel)
             );
             itemScale = mix(effectParamsB.z, effectParamsB.w, vortexTravel);
-            vOpacity *= smoothstep(0.0, 0.05, vortexProgress)
-              * (1.0 - smoothstep(0.9, 1.0, vortexProgress));
+            vOpacity *= effectEdgeFade(vortexProgress, 0.07, 0.18);
           } else if (effectMode > 1.5) {
             effectVisible = step(0.0, effectSpeedFactor);
             float shooterProgress = fract(effectPath.z + effectTime * effectParamsA.y * abs(effectSpeedFactor));
-            float currentDistance = mix(effectParamsA.x, effectPath.y, shooterProgress);
+            float shooterTravel = effectTravel(shooterProgress);
+            float currentDistance = mix(effectParamsA.x, effectPath.y, shooterTravel);
             center = vec3(
               cos(effectPath.x) * currentDistance,
               sin(effectPath.x) * currentDistance,
               effectParamsB.x
             );
-            itemScale = mix(effectParamsA.z, effectParamsA.w, shooterProgress);
-            vOpacity *= smoothstep(0.0, 0.04, shooterProgress)
-              * (1.0 - smoothstep(0.82, 1.0, shooterProgress));
+            itemScale = mix(effectParamsA.z, effectParamsA.w, shooterTravel);
+            vOpacity *= effectEdgeFade(shooterProgress, 0.06, 0.22);
             vOpacity *= emissionEnvelope(effectTime, effectParamsB.w, effectParamsC.x, effectParamsC.y, effectParamsC.z, effectParamsC.w);
           } else if (effectMode > 0.5) {
             effectVisible = step(0.0, effectSpeedFactor);
             float tunnelProgress = fract(effectPath.z + effectTime * effectParamsA.w * abs(effectSpeedFactor));
-            float spread = smoothstep(0.0, 1.0, tunnelProgress);
+            float tunnelTravel = effectTravel(tunnelProgress);
+            float spread = smoothstep(0.0, 1.0, tunnelTravel);
             float currentAngle = effectPath.x + tunnelProgress * effectParamsB.x;
             float currentRadius = mix(effectParamsA.z, effectPath.y, spread);
             vec2 tunnelPoint = tunnelCrossSection(currentAngle, currentRadius, effectPath.w);
             center = vec3(
               tunnelPoint,
-              mix(effectParamsA.x, effectParamsA.y, tunnelProgress)
+              mix(effectParamsA.x, effectParamsA.y, tunnelTravel)
             );
-            itemScale = mix(effectParamsB.y, effectParamsB.z, tunnelProgress);
-            vOpacity *= smoothstep(0.0, 0.06, tunnelProgress)
-              * (1.0 - smoothstep(0.9, 1.0, tunnelProgress));
+            itemScale = mix(effectParamsB.y, effectParamsB.z, tunnelTravel);
+            vOpacity *= effectEdgeFade(tunnelProgress, 0.08, 0.18);
             vOpacity *= emissionEnvelope(effectTime, effectParamsB.w, effectParamsC.x, effectParamsC.y, effectParamsC.z, effectParamsC.w);
           }
 
-          if (billboard > 0.5 || effectMode > 0.5) {
+          if (effectMode > 0.5) {
             vec4 centerView = modelViewMatrix * vec4(center, 1.0);
-            vec4 sphereCenterView = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-            vInstanceVisible = hideBackHemisphere > 0.5
-              ? step(sphereCenterView.z, centerView.z)
-              : 1.0;
-            vInstanceVisible *= effectVisible;
+            vInstanceVisible = effectVisible;
             centerView.xy += position.xy * itemScale;
             gl_Position = projectionMatrix * centerView;
           } else {
-            vInstanceVisible = 1.0;
             vec3 localPosition = rotateByQuaternion(position * itemScale, itemQuaternion);
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(center + localPosition, 1.0);
+            vec4 surfaceView = modelViewMatrix * vec4(center + localPosition, 1.0);
+            vec4 centerView = modelViewMatrix * vec4(center, 1.0);
+            vec4 billboardView = centerView;
+            billboardView.xy += position.xy * itemScale;
+            float billboardAmount = mix(fromBillboard, toBillboard, progress);
+            gl_Position = projectionMatrix * mix(surfaceView, billboardView, billboardAmount);
+
+            vec4 sphereCenterView = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+            float hemisphereVisible = step(sphereCenterView.z, centerView.z);
+            float hideBackAmount = mix(fromHideBackHemisphere, toHideBackHemisphere, progress);
+            vOpacity *= mix(1.0, hemisphereVisible, hideBackAmount);
+            vInstanceVisible = 1.0;
           }
           vInstanceVisible *= step(visibilityRank, visibleRatio);
         }
@@ -219,18 +242,14 @@ export class InstancedCardRenderer {
       fragmentShader: `
         uniform sampler2D atlas;
         varying vec2 vAtlasUv;
-        varying vec2 vLocalUv;
         varying float vOpacity;
         varying float vInstanceVisible;
         varying float vHighlight;
         void main() {
           if (vInstanceVisible < 0.5) discard;
           vec4 color = texture2D(atlas, vAtlasUv);
-          vec2 edgeIn = smoothstep(vec2(0.0), vec2(0.04), vLocalUv);
-          vec2 edgeOut = smoothstep(vec2(0.0), vec2(0.04), vec2(1.0) - vLocalUv);
-          float edge = edgeIn.x * edgeIn.y * edgeOut.x * edgeOut.y;
           vec3 highlighted = mix(color.rgb, min(vec3(1.0), color.rgb * 1.16 + 0.06), vHighlight);
-          gl_FragColor = vec4(highlighted, color.a * edge * vOpacity);
+          gl_FragColor = vec4(highlighted, color.a * vOpacity);
         }
       `,
       transparent: true,
@@ -240,7 +259,7 @@ export class InstancedCardRenderer {
     this.mesh.frustumCulled = false
     this.scene.add(this.mesh)
     this.itemsFingerprint = fingerprint
-    this.textureBytes = atlas.width * atlas.height * 4
+    this.textureBytes = Math.ceil(atlas.width * atlas.height * 4 * 4 / 3)
     this.atlas = atlas
     return true
   }
@@ -264,7 +283,14 @@ export class InstancedCardRenderer {
     this.setProgress(1)
   }
 
-  prepareTransition(from: Transform[], to: Transform[]): void {
+  prepareTransition(
+    from: Transform[],
+    to: Transform[],
+    fromBillboard?: number,
+    toBillboard?: number,
+    fromHideBackHemisphere?: number,
+    toHideBackHemisphere?: number,
+  ): void {
     if (!this.mesh) return
     const count = Math.min(from.length, to.length, this.mesh.geometry.instanceCount)
     const fromPosition = new Float32Array(count * 3)
@@ -282,6 +308,13 @@ export class InstancedCardRenderer {
     }
 
     const geometry = this.mesh.geometry
+    if (this.material) {
+      const uniforms = this.material.uniforms
+      uniforms.fromBillboard.value = fromBillboard ?? uniforms.toBillboard.value
+      uniforms.toBillboard.value = toBillboard ?? uniforms.toBillboard.value
+      uniforms.fromHideBackHemisphere.value = fromHideBackHemisphere ?? uniforms.toHideBackHemisphere.value
+      uniforms.toHideBackHemisphere.value = toHideBackHemisphere ?? uniforms.toHideBackHemisphere.value
+    }
     geometry.setAttribute('fromPosition', new InstancedBufferAttribute(fromPosition, 3))
     geometry.setAttribute('toPosition', new InstancedBufferAttribute(toPosition, 3))
     geometry.setAttribute('fromQuaternion', new InstancedBufferAttribute(fromQuaternion, 4))
@@ -303,11 +336,17 @@ export class InstancedCardRenderer {
   }
 
   setOrientation(orientation: 'surface' | 'camera'): void {
-    if (this.material) this.material.uniforms.billboard.value = orientation === 'camera' ? 1 : 0
+    if (!this.material) return
+    const value = orientation === 'camera' ? 1 : 0
+    this.material.uniforms.fromBillboard.value = value
+    this.material.uniforms.toBillboard.value = value
   }
 
   setHideBackHemisphere(hidden: boolean): void {
-    if (this.material) this.material.uniforms.hideBackHemisphere.value = hidden ? 1 : 0
+    if (!this.material) return
+    const value = hidden ? 1 : 0
+    this.material.uniforms.fromHideBackHemisphere.value = value
+    this.material.uniforms.toHideBackHemisphere.value = value
   }
 
   enableEffect(data: StreamingEffectGpuData): void {
@@ -320,7 +359,8 @@ export class InstancedCardRenderer {
     setVector4(uniforms.effectParamsC.value as Vector4, data.parameters, 8)
     uniforms.effectTime.value = 0
     uniforms.effectMode.value = effectMode(data.kind)
-    uniforms.hideBackHemisphere.value = 0
+    uniforms.fromHideBackHemisphere.value = 0
+    uniforms.toHideBackHemisphere.value = 0
   }
 
   disableEffect(): void {
@@ -337,6 +377,10 @@ export class InstancedCardRenderer {
 
   setHoverIndex(index: number | null): void {
     if (this.material) this.material.uniforms.hoverIndex.value = index ?? -1
+  }
+
+  refreshTexture(): void {
+    if (this.atlas) this.atlas.texture.needsUpdate = true
   }
 
   getStats(): CardRendererStats {
