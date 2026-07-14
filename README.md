@@ -333,6 +333,24 @@ await stage.to(cone({
 
 这些布局会根据实例数量自动计算面分布、环数、圈数和卡片缩放，也可通过尺寸、`rings`、`turns`、`density` 等参数锁定视觉密度。它们遵循统一 `Layout` 契约，可直接插入 Timeline，并在任意中间帧切换到其他布局或流式特效。
 
+确定性的散开布局可用于爆炸、解散和重新聚合配方：
+
+```ts
+import { box, scatter } from '@itagan/spatial-motion'
+
+await stage.to(box())
+await stage.to(scatter({
+  direction: 'radial',
+  distance: 12,
+  depth: 8,
+  opacity: 0,
+  seed: 42,
+}), { duration: 900 })
+await stage.to(box(), { duration: 1300 })
+```
+
+`scatter()` 同样是普通 `Layout`，相同数量、配置和 `seed` 始终生成相同目标，因此可以安全插入 Timeline、被新布局中断或作为聚合动画的起点。
+
 连续编排：
 
 ```ts

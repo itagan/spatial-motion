@@ -8,6 +8,7 @@ import {
   linearShooter,
   radialBurst,
   ring,
+  scatter,
   sphere,
   tunnel,
   vortex,
@@ -99,7 +100,20 @@ const burstEffect = radialBurst({
   depthScale: 0.3,
   maxActiveItems: 190,
 })
+const scatterLayouts = {
+  random: scatter({ direction: 'random', distance: 11, depth: 7, opacity: 0, seed: 31 }),
+  radial: scatter({ direction: 'radial', distance: 12, depth: 8, opacity: 0, seed: 32 }),
+  right: scatter({ direction: 'right', distance: 12, depth: 6, opacity: 0, seed: 33 }),
+}
 let activeTimeline: Timeline | null = null
+
+const playRecipe = (steps: (timeline: Timeline) => Timeline) => {
+  activeTimeline?.cancel()
+  stage.stopRotation()
+  stage.setRotation(0, 0)
+  activeTimeline = steps(stage.timeline())
+  void activeTimeline.play()
+}
 
 document.querySelectorAll<HTMLButtonElement>('[data-layout]').forEach((button) => {
   button.addEventListener('click', () => {
@@ -219,6 +233,29 @@ document.querySelector('#sequence')?.addEventListener('click', () => {
     .add(() => stage.to(layouts.sphere, { duration: 1400 }))
   void activeTimeline.play()
 })
+
+document.querySelector('#recipe-sphere')?.addEventListener('click', () => playRecipe((timeline) => timeline
+  .add(() => stage.to(scatterLayouts.random, { duration: 700 }))
+  .add(() => stage.to(layouts.sphere, { duration: 1300 }))
+  .add(() => stage.autoRotate({ y: 0.24 }))))
+
+document.querySelector('#recipe-box')?.addEventListener('click', () => playRecipe((timeline) => timeline
+  .add(() => stage.to(layouts.box, { duration: 1000 }))
+  .wait(500)
+  .add(() => stage.to(scatterLayouts.radial, { duration: 900 }))
+  .add(() => stage.to(layouts.box, { duration: 1300 }))))
+
+document.querySelector('#recipe-cylinder')?.addEventListener('click', () => playRecipe((timeline) => timeline
+  .add(() => stage.to(layouts.cylinder, { duration: 1000 }))
+  .wait(500)
+  .add(() => stage.to(scatterLayouts.right, { duration: 900 }))
+  .add(() => stage.to(layouts.cylinder, { duration: 1200 }))))
+
+document.querySelector('#recipe-grid')?.addEventListener('click', () => playRecipe((timeline) => timeline
+  .add(() => stage.to(layouts.grid, { duration: 900 }))
+  .wait(500)
+  .add(() => stage.to(scatterLayouts.random, { duration: 900 }))
+  .add(() => stage.to(layouts.grid, { duration: 1200 }))))
 
 document.querySelector('#quality')!.textContent = `${stage.getQuality().toUpperCase()} QUALITY`
 const updateItemCount = () => {
