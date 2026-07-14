@@ -1,4 +1,4 @@
-import type { EasingFunction, Transform } from './types'
+import type { EasingFunction, Transform } from './types.js'
 
 export const identityTransform = (): Transform => ({
   x: 0,

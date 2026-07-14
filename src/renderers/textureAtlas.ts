@@ -1,5 +1,5 @@
 import { CanvasTexture, LinearFilter, SRGBColorSpace } from 'three'
-import type { MotionItem } from '../core/types'
+import type { MotionItem } from '../core/types.js'
 
 export interface TextureAtlasResult {
   texture: CanvasTexture

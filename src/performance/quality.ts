@@ -1,4 +1,4 @@
-import type { QualityLevel, QualityProfile } from '../core/types'
+import type { QualityLevel, QualityProfile } from '../core/types.js'
 
 export const qualityProfiles: Record<QualityLevel, QualityProfile> = {
   high: { maxPixelRatio: 1.5, maxVisibleItems: 2000, maxActiveEffectItems: 300, antialias: true, targetFps: 60 },

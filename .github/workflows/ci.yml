@@ -32,5 +32,11 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Build library
+        run: npm run build:lib
+
       - name: Build demo
-        run: npm run build
+        run: npm run build:demo
+
+      - name: Verify package
+        run: npm run pack:check

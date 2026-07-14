@@ -1,21 +1,81 @@
 {
-  "name": "spatial-motion",
+  "name": "@itagan/spatial-motion",
   "version": "0.1.0",
-  "private": true,
+  "description": "High-performance Three.js spatial card layouts and streaming effects for large-screen experiences.",
   "type": "module",
+  "license": "MIT",
+  "author": "itagan",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/itagan/spatial-motion.git"
+  },
+  "homepage": "https://github.com/itagan/spatial-motion#readme",
+  "bugs": {
+    "url": "https://github.com/itagan/spatial-motion/issues"
+  },
+  "keywords": [
+    "three.js",
+    "webgl",
+    "animation",
+    "large-screen",
+    "data-visualization"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./layouts": {
+      "types": "./dist/layouts/index.d.ts",
+      "import": "./dist/layouts/index.js",
+      "default": "./dist/layouts/index.js"
+    },
+    "./effects": {
+      "types": "./dist/effects/index.d.ts",
+      "import": "./dist/effects/index.js",
+      "default": "./dist/effects/index.js"
+    },
+    "./performance": {
+      "types": "./dist/performance/index.d.ts",
+      "import": "./dist/performance/index.js",
+      "default": "./dist/performance/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && vite build",
+    "build": "npm run build:lib && npm run build:demo",
+    "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.build.json",
+    "build:demo": "vite build",
+    "prepare": "npm run build:lib",
+    "prepack": "npm run build:lib",
+    "pack:check": "node scripts/verify-package.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts"
   },
-  "dependencies": {
-    "three": "^0.178.0"
+  "peerDependencies": {
+    "three": ">=0.178.0 <1.0.0"
   },
   "devDependencies": {
     "@types/three": "^0.178.1",
     "jsdom": "^29.1.1",
+    "three": "^0.178.0",
     "typescript": "^5.8.3",
     "vite": "^7.0.0",
     "vitest": "^3.2.4"

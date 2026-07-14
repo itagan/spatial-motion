@@ -1,4 +1,4 @@
-import type { Transform } from '../core/types'
+import type { Transform } from '../core/types.js'
 
 export type StreamingEffectKind = 'tunnel' | 'linear-shooter' | 'vortex' | 'radial-burst'
 

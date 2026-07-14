@@ -1,16 +1,16 @@
 import { Euler, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three'
-import type { Layout, MotionItem, QualityLevel, Transform, TransitionOptions } from './types'
-import { easing, identityTransform, interpolateTransform } from './math'
-import { InstancedCardRenderer } from '../renderers/InstancedCardRenderer'
-import { detectQuality, qualityProfiles, visibleRatios } from '../performance/quality'
+import type { Layout, MotionItem, QualityLevel, Transform, TransitionOptions } from './types.js'
+import { easing, identityTransform, interpolateTransform } from './math.js'
+import { InstancedCardRenderer } from '../renderers/InstancedCardRenderer.js'
+import { detectQuality, qualityProfiles, visibleRatios } from '../performance/quality.js'
 import {
   AdaptivePerformanceManager,
   type PerformanceStats,
-} from '../performance/AdaptivePerformanceManager'
-import { Timeline } from './Timeline'
-import { TunnelEffect } from '../effects/TunnelEffect'
-import { LinearShooterEffect } from '../effects/LinearShooterEffect'
-import type { StreamingEffect, StreamingEffectGpuData } from '../effects/types'
+} from '../performance/AdaptivePerformanceManager.js'
+import { Timeline } from './Timeline.js'
+import { TunnelEffect } from '../effects/TunnelEffect.js'
+import { LinearShooterEffect } from '../effects/LinearShooterEffect.js'
+import type { StreamingEffect, StreamingEffectGpuData } from '../effects/types.js'
 
 export interface MotionStageOptions {
   container: HTMLElement

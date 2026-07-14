@@ -10,9 +10,9 @@ import {
   ShaderMaterial,
   Vector4,
 } from 'three'
-import type { MotionItem, Transform } from '../core/types'
-import type { StreamingEffectGpuData, StreamingEffectKind } from '../effects/types'
-import { createTextureAtlas } from './textureAtlas'
+import type { MotionItem, Transform } from '../core/types.js'
+import type { StreamingEffectGpuData, StreamingEffectKind } from '../effects/types.js'
+import { createTextureAtlas } from './textureAtlas.js'
 
 export interface CardRendererStats {
   instanceCount: number

@@ -1,4 +1,4 @@
-import type { QualityMode, StagePerformanceStats } from '../core/MotionStage'
+import type { QualityMode, StagePerformanceStats } from '../core/MotionStage.js'
 
 export interface BenchmarkConfiguration {
   itemCount: number
