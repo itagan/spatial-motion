@@ -20,6 +20,9 @@ export interface MotionStageOptions {
   adaptivePerformance?: boolean
   onQualityChange?: (quality: QualityLevel, stats: PerformanceStats) => void
   onItemClick?: (item: MotionItem, index: number) => void
+  motionPreference?: MotionPreference
+  onItemHover?: (item: MotionItem | null, index: number | null) => void
+  hoverEffect?: 'none' | 'highlight'
 }
 
 export interface UpdateItemsOptions {
@@ -49,6 +52,7 @@ export interface PickOptions {
 }
 
 export type QualityMode = QualityLevel | 'auto'
+export type MotionPreference = 'auto' | 'full' | 'reduced'
 
 export interface StagePerformanceStats extends PerformanceStats {
   qualityMode: QualityMode
@@ -105,8 +109,20 @@ export class MotionStage {
   private destroyed = false
   private pausedByUser = false
   private pausedByVisibility = document.visibilityState === 'hidden'
+  private readonly motionPreference: MotionPreference
+  private readonly motionQuery: MediaQueryList | null
+  private reducedMotion = false
+  private hoveredIndex: number | null = null
+  private readonly hoverEnabled: boolean
 
   constructor(private readonly options: MotionStageOptions) {
+    this.motionPreference = options.motionPreference ?? 'auto'
+    this.motionQuery = typeof matchMedia === 'function'
+      ? matchMedia('(prefers-reduced-motion: reduce)')
+      : null
+    this.reducedMotion = this.motionPreference === 'reduced'
+      || (this.motionPreference === 'auto' && Boolean(this.motionQuery?.matches))
+    this.hoverEnabled = Boolean(options.onItemHover) || options.hoverEffect === 'highlight'
     this.qualityMode = options.quality ?? 'auto'
     this.quality = this.qualityMode === 'auto' ? detectQuality() : this.qualityMode
     this.performanceManager = new AdaptivePerformanceManager(this.quality)
@@ -117,6 +133,13 @@ export class MotionStage {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
     this.options.container.appendChild(this.renderer.domElement)
     this.renderer.domElement.addEventListener('pointerup', this.handlePointerUp)
+    if (this.hoverEnabled) {
+      this.renderer.domElement.addEventListener('pointermove', this.handlePointerMove)
+      this.renderer.domElement.addEventListener('pointerleave', this.handlePointerLeave)
+    }
+    if (this.motionPreference === 'auto') {
+      this.motionQuery?.addEventListener('change', this.handleMotionPreferenceChange)
+    }
     document.addEventListener('visibilitychange', this.handleVisibilityChange)
     this.cards = new InstancedCardRenderer(this.scene)
     this.resizeObserver = new ResizeObserver(() => {
@@ -177,7 +200,7 @@ export class MotionStage {
     this.hideBackHemisphere = layout.hideBackHemisphere ?? false
     this.cards.setOrientation(this.currentOrientation)
     this.cards.setHideBackHemisphere(this.hideBackHemisphere)
-    const duration = Math.max(0, options.duration ?? 1200)
+    const duration = this.reducedMotion ? 0 : Math.max(0, options.duration ?? 1200)
     const ease = options.easing ?? easing.cubicInOut
     if (duration === 0) {
       this.transforms = target
@@ -233,6 +256,11 @@ export class MotionStage {
       options,
     )
     if (!entered) return false
+    if (this.reducedMotion) {
+      this.transforms = target
+      this.cards.setTransforms(target)
+      return true
+    }
     const gpuData = effect.getGpuData()
     this.cards.enableEffect(gpuData)
     this.activeEffect = { effect, gpuData, startedAt: performance.now() }
@@ -384,6 +412,11 @@ export class MotionStage {
 
   autoRotate(options: { x?: number; y?: number } = {}): void {
     this.assertActive()
+    if (this.reducedMotion) {
+      this.rotateSpeedX = 0
+      this.rotateSpeedY = 0
+      return
+    }
     this.rotateSpeedX = options.x ?? 0
     this.rotateSpeedY = options.y ?? 0.25
   }
@@ -455,6 +488,9 @@ export class MotionStage {
     this.frameId = 0
     this.resizeObserver.disconnect()
     this.renderer.domElement.removeEventListener('pointerup', this.handlePointerUp)
+    this.renderer.domElement.removeEventListener('pointermove', this.handlePointerMove)
+    this.renderer.domElement.removeEventListener('pointerleave', this.handlePointerLeave)
+    this.motionQuery?.removeEventListener('change', this.handleMotionPreferenceChange)
     document.removeEventListener('visibilitychange', this.handleVisibilityChange)
     this.cards.dispose()
     this.renderer.dispose()
@@ -491,7 +527,16 @@ export class MotionStage {
   }
 
   private context() {
-    return { width: this.options.container.clientWidth, height: this.options.container.clientHeight }
+    const width = this.options.container.clientWidth
+    const height = this.options.container.clientHeight
+    const distance = Math.abs(this.camera.position.z)
+    const viewportHeight = 2 * Math.tan(this.camera.fov * Math.PI / 360) * distance
+    return {
+      width,
+      height,
+      viewportWidth: viewportHeight * (width / Math.max(1, height)),
+      viewportHeight,
+    }
   }
 
   private resolveCurrentTransforms(now: number): Transform[] {
@@ -573,6 +618,35 @@ export class MotionStage {
     if (this.destroyed) return
     const result = this.pick(event.clientX, event.clientY)
     if (result) this.options.onItemClick?.(result.item, result.index)
+  }
+
+  private readonly handlePointerMove = (event: PointerEvent) => {
+    if (this.destroyed) return
+    const result = this.pick(event.clientX, event.clientY)
+    const index = result?.index ?? null
+    if (index === this.hoveredIndex) return
+    this.hoveredIndex = index
+    this.cards.setHoverIndex(this.options.hoverEffect === 'highlight' ? index : null)
+    this.options.onItemHover?.(result?.item ?? null, index)
+  }
+
+  private readonly handlePointerLeave = () => {
+    if (this.destroyed || this.hoveredIndex === null) return
+    this.hoveredIndex = null
+    this.cards.setHoverIndex(null)
+    this.options.onItemHover?.(null, null)
+  }
+
+  private readonly handleMotionPreferenceChange = (event: MediaQueryListEvent) => {
+    if (this.destroyed || this.motionPreference !== 'auto') return
+    this.reducedMotion = event.matches
+    if (!this.reducedMotion) return
+    this.stopRotation()
+    if (!this.activeEffect) return
+    this.transforms = this.activeEffect.effect.calculateTransforms(this.items.length, 0)
+    this.activeEffect = null
+    this.cards.disableEffect()
+    this.cards.setTransforms(this.transforms)
   }
 
   private assertActive(): void {

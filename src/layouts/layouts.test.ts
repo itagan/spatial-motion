@@ -50,6 +50,25 @@ describe('layouts', () => {
     expect(new Set(result.map(({ x, y }) => `${x},${y}`)).size).toBe(100)
   })
 
+  it('grid contain stays inside the camera-visible world bounds', () => {
+    const viewportContext = { width: 1600, height: 900, viewportWidth: 16, viewportHeight: 9 }
+    const result = grid({ fit: 'contain' }).calculate(37, viewportContext)
+    result.forEach(({ x, y, scale }) => {
+      expect(Math.abs(x) + scale / 2).toBeLessThanOrEqual(8)
+      expect(Math.abs(y) + scale / 2).toBeLessThanOrEqual(4.5)
+    })
+  })
+
+  it('grid cover spans the complete camera-visible world bounds', () => {
+    const viewportContext = { width: 1600, height: 900, viewportWidth: 16, viewportHeight: 9 }
+    const result = grid({ fit: 'cover' }).calculate(37, viewportContext)
+    const width = Math.max(...result.map(({ x, scale }) => x + scale / 2))
+      - Math.min(...result.map(({ x, scale }) => x - scale / 2))
+    const height = Math.max(...result.map(({ y, scale }) => y + scale / 2))
+      - Math.min(...result.map(({ y, scale }) => y - scale / 2))
+    expect(width >= 16 || height >= 9).toBe(true)
+  })
+
   it.each([sphere(), cylinder(), grid(), ring(), helix(), cone(), box(), scatter()])(
     '$name handles empty and single-item data',
     (layout) => {

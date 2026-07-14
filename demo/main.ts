@@ -41,6 +41,7 @@ function createAvatar(index: number): string {
 
 const container = document.querySelector<HTMLElement>('#stage')
 if (!container) throw new Error('Stage container not found')
+const pickDebug = document.querySelector<HTMLElement>('#pick-debug')
 const updateSelection = (count: number) => {
   document.querySelector('#selection')!.textContent = `${count} SELECTED`
 }
@@ -60,6 +61,13 @@ const stage = new MotionStage({
     updateSelection(1)
     void stage.focusItems([item.id])
   },
+  onItemHover(item) {
+    if (!pickDebug) return
+    pickDebug.hidden = !item
+    if (item) pickDebug.textContent = `${item.title ?? item.id} · depth pick`
+  },
+  hoverEffect: 'highlight',
+  motionPreference: 'auto',
 })
 await stage.setItems(items)
 stage.autoRotate({ y: 0.24 })
@@ -69,7 +77,7 @@ const layouts: Record<string, Layout> = {
   sphere: sphere({ radius: 5.2 }),
   box: box({ width: 8, height: 7, depth: 6 }),
   cylinder: cylinder({ radius: 5 }),
-  grid: grid({ columns: 30, gap: 0.42 }),
+  grid: grid({ fit: 'contain' }),
   ring: ring({ innerRadius: 0.8, spacing: 0.42 }),
   helix: helix({ radius: 4.6, height: 9 }),
   cone: cone({ radius: 5, height: 9, stagger: true }),
@@ -263,22 +271,11 @@ const updateItemCount = () => {
 }
 updateItemCount()
 
-const pickDebug = document.querySelector<HTMLElement>('#pick-debug')
 container.addEventListener('pointermove', (event) => {
-  if (!pickDebug) return
-  const hit = stage.pick(event.clientX, event.clientY, { padding: 3 })
-  if (!hit) {
-    pickDebug.hidden = true
-    return
-  }
+  if (!pickDebug || pickDebug.hidden) return
   const rect = container.getBoundingClientRect()
-  pickDebug.hidden = false
-  pickDebug.textContent = `${hit.item.title ?? hit.item.id} · depth pick`
   pickDebug.style.left = `${event.clientX - rect.left + 12}px`
   pickDebug.style.top = `${event.clientY - rect.top + 12}px`
-})
-container.addEventListener('pointerleave', () => {
-  if (pickDebug) pickDebug.hidden = true
 })
 
 let frames = 0

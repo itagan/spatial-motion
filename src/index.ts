@@ -2,6 +2,7 @@ export { MotionStage } from './core/MotionStage.js'
 export type {
   FocusItemsOptions,
   MotionStageOptions,
+  MotionPreference,
   PickOptions,
   PickResult,
   QualityMode,
