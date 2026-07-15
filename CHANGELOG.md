@@ -12,6 +12,7 @@
 - `cardResolution`、`imageTimeout`、`onContextChange` 与 `contextLost` 性能状态。
 - GPU 最大纹理尺寸自动收敛、mipmap、各向异性采样和图片加载超时回退。
 - benchmark 的 500/1000/2000 固定规模、WebGL 状态和 60 秒至 30 分钟切换压力测试。
+- Scatter 的稳定距离分层和 directional spin，并修复 billboard 导致 spin 不生效的问题。
 - 可重复执行的视觉验收矩阵。
 
 ### Changed

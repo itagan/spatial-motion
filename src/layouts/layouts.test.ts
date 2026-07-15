@@ -168,6 +168,36 @@ describe('layouts', () => {
     expect(result.every(({ x }) => direction === 'left' ? x < 0 : x > 0)).toBe(true)
   })
 
+  it('scatter exposes spin through surface orientation and deterministic distance layers', () => {
+    const layout = scatter({
+      direction: 'radial',
+      distance: 10,
+      depth: 10,
+      spinMode: 'directional',
+      layers: 3,
+      seed: 12,
+    })
+    const result = layout.calculate(30, context)
+    const layerMeans = Array.from({ length: 3 }, (_, layerIndex) => {
+      const radii = result
+        .filter((_transform, index) => index % 3 === layerIndex)
+        .map(({ x, y, z }) => Math.hypot(x, y, z))
+      return radii.reduce((sum, radius) => sum + radius, 0) / radii.length
+    })
+
+    expect(layout.orientation).toBe('surface')
+    expect(layerMeans[0]).toBeLessThan(layerMeans[1])
+    expect(layerMeans[1]).toBeLessThan(layerMeans[2])
+    expect(result.every(({ rotationZ }) => rotationZ > 0)).toBe(true)
+  })
+
+  it('directional left scatter rotates opposite to right scatter', () => {
+    const left = scatter({ direction: 'left', spinMode: 'directional', seed: 9 }).calculate(20, context)
+    const right = scatter({ direction: 'right', spinMode: 'directional', seed: 9 }).calculate(20, context)
+    expect(left.every(({ rotationZ }) => rotationZ < 0)).toBe(true)
+    expect(right.every(({ rotationZ }) => rotationZ > 0)).toBe(true)
+  })
+
   it('scatter clamps visual values and handles invalid distances safely', () => {
     const result = scatter({ distance: -1, depth: -1, scale: -2, opacity: 5 }).calculate(3, context)
     result.forEach((transform) => {

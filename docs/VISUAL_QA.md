@@ -53,6 +53,8 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 
 在 `/benchmark.html` 选择 500、1000、2000，分别运行普通采样和“切换压力测试”。提交前至少 60 秒，发布候选建议 30 分钟。
 
+压力序列覆盖 Sphere、Box、Tunnel Burst、Grid、Vortex、Cylinder、Shooter Wave、Ring、Radial Burst、Helix、Square Tunnel 和 Cone，因而同时包含 layout→layout、layout→effect、effect→layout 与 effect→effect。
+
 - [ ] 压力模式持续布局/特效中断和稳定 id 局部更新，无未处理异常。
 - [ ] 页面隐藏后 FPS 采样暂停，恢复后不计入后台长帧。
 - [ ] 手动 pause 后发生 context lost/restored，仍保持用户暂停。
@@ -62,6 +64,6 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 
 ## 自动化覆盖
 
-`npm run verify` 覆盖类型、93+ 单测、库/demo 构建、tgz 消费者、稳定子路径、Tree Shaking 和体积预算。自动化可证明数值、竞态和资源契约，但不能替代目标设备上的视觉判断；人工结果应随发布记录保存。
+`npm run verify` 覆盖类型、95+ 单测、库/demo 构建、tgz 消费者、稳定子路径、Tree Shaking 和体积预算。自动化可证明数值、竞态和资源契约，但不能替代目标设备上的视觉判断；人工结果应随发布记录保存。
 
 2026-07-15 已完成本地 Chromium / 2000 items / auto-high 的 60 秒压力基线：67 次中断/局部更新，平均 59.96 FPS、最低 59.15 FPS、最大 1 Draw Call、WebGL READY、无页面 error 日志。详细数值记录在 `docs/RELEASE.md`。

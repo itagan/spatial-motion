@@ -64,7 +64,20 @@ let runTimer = 0
 let sampleTimer = 0
 let stressTimer = 0
 let stressOperations = 0
-const stressSequence = ['sphere', 'box', 'tunnel-burst', 'grid', 'vortex', 'cylinder']
+const stressSequence = [
+  'sphere',
+  'box',
+  'tunnel-burst',
+  'grid',
+  'vortex',
+  'cylinder',
+  'shooter-wave',
+  'ring',
+  'burst',
+  'helix',
+  'tunnel-square',
+  'cone',
+]
 
 await stage.setItems(createItems(itemCount))
 stage.autoRotate({ y: 0.24 })

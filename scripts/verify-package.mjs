@@ -123,7 +123,7 @@ try {
     const updates: MotionItemUpdate[] = [{ id: 'one', patch: { title: 'updated' } }]
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
-    void [items, stage, sphere(), box(), ring(), scatter(), vortex(), BenchmarkSession, emission, motion, cardStyle, stageOptions]
+    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), vortex(), BenchmarkSession, emission, motion, cardStyle, stageOptions]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {

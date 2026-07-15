@@ -279,8 +279,8 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 27.2 KB |
-| npm tarball | ≤ 150 KB | 105.9 KB |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 27.5 KB |
+| npm tarball | ≤ 150 KB | 107.3 KB |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 2.1 KB |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。
@@ -416,13 +416,15 @@ await stage.to(scatter({
   direction: 'radial',
   distance: 12,
   depth: 8,
+  layers: 6,
+  spinMode: 'directional',
   opacity: 0,
   seed: 42,
 }), { duration: 900 })
 await stage.to(box(), { duration: 1300 })
 ```
 
-`scatter()` 同样是普通 `Layout`，相同数量、配置和 `seed` 始终生成相同目标，因此可以安全插入 Timeline、被新布局中断或作为聚合动画的起点。
+`scatter()` 同样是普通 `Layout`，相同数量、配置和 `seed` 始终生成相同目标，因此可以安全插入 Timeline、被新布局中断或作为聚合动画的起点。`layers` 提供稳定的远近分层；`spinMode: 'directional'` 会沿散开方向旋转。Scatter 使用 surface 过渡，使 `spin` 真正参与 GPU 四元数插值。
 
 连续编排：
 

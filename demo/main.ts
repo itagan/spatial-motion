@@ -115,9 +115,9 @@ const burstEffect = radialBurst({
   maxActiveItems: 190,
 })
 const scatterLayouts = {
-  random: scatter({ direction: 'random', distance: 11, depth: 7, opacity: 0, seed: 31 }),
-  radial: scatter({ direction: 'radial', distance: 12, depth: 8, opacity: 0, seed: 32 }),
-  right: scatter({ direction: 'right', distance: 12, depth: 6, opacity: 0, seed: 33 }),
+  random: scatter({ direction: 'random', distance: 11, depth: 7, opacity: 0, layers: 5, seed: 31 }),
+  radial: scatter({ direction: 'radial', distance: 12, depth: 8, opacity: 0, spinMode: 'directional', layers: 6, seed: 32 }),
+  right: scatter({ direction: 'right', distance: 12, depth: 6, opacity: 0, spinMode: 'directional', layers: 5, seed: 33 }),
 }
 let activeTimeline: Timeline | null = null
 
