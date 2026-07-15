@@ -7,6 +7,8 @@ export interface AdaptivePerformanceOptions {
   cooldownMs?: number
   degradeThreshold?: number
   recoveryThreshold?: number
+  degradeLongFrameRatio?: number
+  recoveryLongFrameRatio?: number
 }
 
 export interface PerformanceStats {
@@ -44,6 +46,8 @@ export class AdaptivePerformanceManager {
       cooldownMs: options.cooldownMs ?? 5000,
       degradeThreshold: options.degradeThreshold ?? 0.78,
       recoveryThreshold: options.recoveryThreshold ?? 0.9,
+      degradeLongFrameRatio: options.degradeLongFrameRatio ?? 0.08,
+      recoveryLongFrameRatio: options.recoveryLongFrameRatio ?? 0.01,
     }
     this.stats = {
       fps: 0,
@@ -76,11 +80,13 @@ export class AdaptivePerformanceManager {
     const averageFrameMs = this.samples.reduce((sum, value) => sum + value, 0) / this.samples.length
     const fps = 1000 / averageFrameMs
     const orderedSamples = [...this.samples].sort((a, b) => a - b)
+    const frameTimeP95 = percentile(orderedSamples, 0.95)
+    const windowLongFrameRatio = this.samples.filter((value) => value > 33).length / this.samples.length
     this.stats = {
       fps,
       averageFrameMs,
       frameTimeP50: percentile(orderedSamples, 0.5),
-      frameTimeP95: percentile(orderedSamples, 0.95),
+      frameTimeP95,
       frameTimeP99: percentile(orderedSamples, 0.99),
       longFramesOver24Ms: this.longFramesOver24Ms,
       longFramesOver33Ms: this.longFramesOver33Ms,
@@ -97,7 +103,10 @@ export class AdaptivePerformanceManager {
     const currentIndex = levels.indexOf(this.quality)
     const currentTarget = qualityProfiles[this.quality].targetFps
 
-    if (currentIndex > 0 && fps < currentTarget * this.options.degradeThreshold) {
+    const degradeFps = currentTarget * this.options.degradeThreshold
+    const exceedsFrameBudget = frameTimeP95 > 1000 / degradeFps
+    const hasLongFramePressure = windowLongFrameRatio >= this.options.degradeLongFrameRatio
+    if (currentIndex > 0 && (fps < degradeFps || exceedsFrameBudget || hasLongFramePressure)) {
       this.quality = levels[currentIndex - 1]
       this.lastChangedAt = now
       this.stableSince = 0
@@ -107,7 +116,10 @@ export class AdaptivePerformanceManager {
 
     if (currentIndex < levels.length - 1) {
       const nextTarget = qualityProfiles[levels[currentIndex + 1]].targetFps
-      if (fps >= nextTarget * this.options.recoveryThreshold) {
+      const recoveryFps = nextTarget * this.options.recoveryThreshold
+      const recoveredFrameBudget = frameTimeP95 <= 1000 / recoveryFps
+      const recoveredLongFrames = windowLongFrameRatio <= this.options.recoveryLongFrameRatio
+      if (fps >= recoveryFps && recoveredFrameBudget && recoveredLongFrames) {
         if (!this.stableSince) this.stableSince = now
         if (now - this.stableSince >= this.options.recoveryWindowMs) {
           this.quality = levels[currentIndex + 1]
