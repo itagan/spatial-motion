@@ -31,14 +31,15 @@
 - [x] **v1.0 稳定与发布准备**：稳定入口、SemVer 策略、CHANGELOG、release checklist、兼容范围和独立消费者检查。
 - [x] **v1.1 视觉打磨与运行时加固**：统一运动/淡出曲线、纹理采样与尺寸保护、图片超时、WebGL context 恢复和切换压力基准。
 - [x] **v1.2 性能可观测性**：帧分位数、长帧、Stage/图集分阶段耗时、运行环境、四类基准场景和结果对比。
+- [x] **v1.3 GPU 与纹理优化**：活动实例提交、DataTexture 局部行上传和同 turn 稳定 id 更新合并。
 
-以上状态以当前源码、测试、构建脚本和提交历史为依据。`package.json` 已推进到 `1.2.0`，但当前阶段不执行 npm publish、tag 或 GitHub Release。
+以上状态以当前源码、测试、构建脚本和提交历史为依据。`package.json` 已推进到 `1.3.0`，但当前阶段不执行 npm publish、tag 或 GitHub Release。
 
 ## 当前优化阶段
 
 - [x] 建立可比较的 steady、cold-start、atlas-update 与 transition-stress 基准。
 - [x] 暴露 P50/P95/P99、长帧、CPU/提交、图集和图片加载指标。
-- [ ] **v1.3 GPU 与纹理优化**：降低休眠实例工作量，合并更新，并减少局部更新导致的整图上传成本。
+- [x] **v1.3 GPU 与纹理优化**：降低休眠实例工作量，合并更新，并减少局部更新导致的整图上传成本。
 - [ ] **v1.4 布局视觉精修**：球体极点、Box 接缝、Cylinder 首尾、Cone 顶部和响应式密度。
 - [ ] **v1.5 特效视觉精修**：Tunnel、Shooter、Vortex、Radial Burst 的速度、密度、淡出和周期边界。
 - [ ] **v1.6 动画与自适应质量**：速度连续中断、旋转最短路径和基于 P95/长帧的质量迟滞。

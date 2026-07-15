@@ -30,6 +30,7 @@ vi.mock('../renderers/InstancedCardRenderer', () => ({
     refreshTexture = vi.fn()
     getStats = vi.fn(() => ({
       instanceCount: 0,
+      submittedInstanceCount: 0,
       textureBytes: 0,
       atlasBuilds: 0,
       atlasPatches: 0,
@@ -187,6 +188,7 @@ describe('MotionStage', () => {
     cards.getStats.mockReturnValue({
       ...cards.getStats(),
       instanceCount: 500,
+      submittedInstanceCount: 500,
       textureBytes: 1_048_576,
     })
     await stage.setItems(Array.from({ length: 520 }, (_, index) => ({ id: `item-${index}` })))
@@ -197,6 +199,7 @@ describe('MotionStage', () => {
       qualityMode: 'low',
       inputItems: 520,
       renderedItems: 500,
+      submittedItems: 500,
       drawCalls: 1,
       triangles: 2,
       textureBytes: 1_048_576,
@@ -349,6 +352,25 @@ describe('MotionStage', () => {
       { id: 'a', patch: { title: 'one' } },
       { id: 'a', patch: { title: 'two' } },
     ])).toThrow('Duplicate MotionItem update id: a')
+    stage.destroy()
+  })
+
+  it('coalesces same-turn item patches into one atlas update', async () => {
+    const stage = createStage()
+    const cards = currentCards()
+    await stage.setItems([{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }])
+    cards.updateItems.mockClear()
+
+    const first = stage.updateItem('a', { title: 'A2' })
+    const second = stage.updateItem('b', { title: 'B2' })
+    const third = stage.updateItem('a', { meta: { selected: true } })
+
+    await expect(Promise.all([first, second, third])).resolves.toEqual([true, true, true])
+    expect(cards.updateItems).toHaveBeenCalledOnce()
+    expect(cards.updateItems).toHaveBeenCalledWith([
+      { id: 'a', title: 'A2', meta: { selected: true } },
+      { id: 'b', title: 'B2' },
+    ], [0, 1])
     stage.destroy()
   })
 

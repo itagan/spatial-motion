@@ -31,7 +31,7 @@
 - WebGL context loss 暂停/恢复、图片超时回退和长时间压力基准
 - P50/P95/P99、长帧、Stage/图集分阶段成本和可导入对比的性能基准
 
-源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.2.0 优化阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.3.0 优化阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
 
 ## 项目文档
 
@@ -121,7 +121,7 @@ import { BenchmarkSession, compareBenchmarkResults } from '@itagan/spatial-motio
 ```ts
 stage.getQuality()          // 'high' | 'medium' | 'low'
 stage.getQualityMode()      // 'auto' | 'high' | 'medium' | 'low'
-stage.getPerformanceStats() // FPS、P50/P95/P99、长帧、CPU/提交、图集、实例和 Draw Call 等
+stage.getPerformanceStats() // FPS、P50/P95/P99、长帧、CPU/提交、实例池/实际提交量、图集和 Draw Call 等
 stage.getPerformanceEnvironment() // 浏览器、GPU、视口、DPR、MAX_TEXTURE_SIZE
 ```
 
@@ -270,15 +270,15 @@ http://localhost:5173/benchmark.html
 - auto、high、medium、low 质量模式
 - 球体、立方体/长方体、圆柱体、平面、同心圆环、螺旋和圆锥布局
 - 时空隧道、漩涡和径向爆发特效及实际活跃实例统计
-- FPS、平均帧时间、渲染/可见实例、Draw Call、三角形和纹理图集内存
+- FPS、平均帧时间、实例池/实际提交/可见实例、Draw Call、三角形和纹理图集内存
 - P50/P95/P99、24/33/50ms 长帧、Stage CPU 与 WebGL 提交耗时
 - 图集构建/patch、图片加载失败和估算纹理上传字节
 - steady、cold-start、atlas-update、transition-stress 四类可复现场景
 - 导入基线 JSON，并通过 `compareBenchmarkResults()` 输出同配置前后差异
 - 3 秒至 30 分钟采样、持续布局/特效中断与局部图集更新压力模式
 
-重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。
-图集默认使用 4px 隔离、mipmap 和最高 4x 各向异性采样；`cardResolution` 会被限制在 32–256px，并在实例规模超过设备 `MAX_TEXTURE_SIZE` 时自动降低实际单元分辨率，避免创建无效纹理。
+重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。同一 JavaScript turn 内的稳定 id 更新会合并；已初始化图集只上传变化单元对应的数据行。
+图集默认使用 4px 隔离、mipmap 和最高 4x 各向异性采样；`cardResolution` 会被限制在 32–256px，并在实例规模超过设备 `MAX_TEXTURE_SIZE` 时自动降低实际单元分辨率，避免创建无效纹理。首次上传和 WebGL context 恢复仍使用完整图集上传。
 
 ## 包构建与体积基准
 
@@ -286,8 +286,8 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 29.7 KB |
-| npm tarball | ≤ 150 KB | 118.1 KB |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 30.5 KB |
+| npm tarball | ≤ 150 KB | 121.9 KB |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 2.1 KB |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

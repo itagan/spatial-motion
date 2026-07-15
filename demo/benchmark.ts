@@ -241,6 +241,7 @@ function updateMetrics(): void {
     : '--')
   setText('#metric-cpu', `${stats.frameCpuMs.toFixed(2)} / ${stats.renderSubmitMs.toFixed(2)} ms`)
   setText('#metric-items', `${stats.renderedItems} / ${stats.inputItems}`)
+  setText('#metric-submitted', String(stats.submittedItems))
   setText('#metric-visible', String(stats.visibleItems))
   setText('#metric-effect', stats.effect ? `${stats.effect} / ${stats.activeEffectItems}` : 'layout / 0')
   setText('#metric-calls', String(stats.drawCalls))
@@ -274,6 +275,7 @@ function renderResult(result: BenchmarkResult): void {
     maximumTriangles: result.maximumTriangles,
     maximumTextureBytes: result.maximumTextureBytes,
     renderedItems: result.renderedItems,
+    submittedItems: result.submittedItems,
     visibleItems: result.visibleItems,
     contextLost: result.samples.some(({ stats }) => stats.contextLost),
     atlas: {
