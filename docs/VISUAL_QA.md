@@ -1,4 +1,4 @@
-# v1.1 视觉与稳定性验收矩阵
+# v1.7 视觉与稳定性验收矩阵
 
 本矩阵把“效果更顺、更清晰、更稳定”转化为可重复检查。每次修改布局、Shader、图集或运行时生命周期时，至少执行受影响组合；发布候选执行完整矩阵并保存 benchmark JSON。
 
@@ -27,6 +27,15 @@ Sphere、Box、Cylinder、Grid contain/cover、Ring、Helix、Cone 分别检查�
 - [ ] 主体场景 `CALLS = 1`，质量切换不创建额外 Mesh。
 
 重点序列：`sphere → box → cylinder → grid contain → ring → helix → cone → sphere`，每 700ms 切换一次以覆盖中断。
+
+## 布局参数实验室
+
+- [ ] 桌面右侧抽屉和 390×844 底部面板都可滚动、关闭，且不会遮住必要操作。
+- [ ] 八种布局切换后保留本次会话中的配置，自动字段不会被当前实例数固化。
+- [ ] 连续拖动数值控件只应用防抖后的最终值，旧过渡不会覆盖最终配置。
+- [ ] 预设、恢复默认、复制 JSON、复制 TypeScript 和合法 JSON 导入均与画面一致。
+- [ ] URL 刷新恢复当前布局；无效 URL/导入显示字段路径、恢复默认且清除无效参数。
+- [ ] 500/2000 实例快速调整时 Stage、Mesh 与图集构建数不增加，主体保持单 Draw Call。
 
 ## 流式特效矩阵
 
@@ -64,6 +73,8 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 
 ## 自动化覆盖
 
-`npm run verify` 覆盖类型、97+ 单测、库/demo 构建、tgz 消费者、稳定子路径、Tree Shaking 和体积预算。自动化可证明数值、竞态和资源契约，但不能替代目标设备上的视觉判断；人工结果应随发布记录保存。
+`npm run verify` 覆盖类型、布局配置解析与等价性单测、库/demo 构建、tgz 消费者、稳定子路径、Tree Shaking 和体积预算。自动化可证明数值、竞态和资源契约，但不能替代目标设备上的视觉判断；人工结果应随发布记录保存。
 
 2026-07-15 已完成本地 Chromium / 2000 items / auto-high 的 60 秒与 30 分钟压力基线。30 分钟长测完成 2001 次中断/局部更新，平均 60.00 FPS、最低 56.65 FPS、最大帧时 17.65ms、最大 1 Draw Call，纹理内存保持 55,987,200 bytes，WebGL READY、无 context loss、无页面 error 日志。详细数值记录在 `docs/RELEASE.md`。
+
+2026-07-16 已完成 v1.7 参数实验室桌面浏览器验收：八布局控件可访问，预设、会话记忆、严格 JSON 回退、无效 URL 清理、URL 刷新恢复和 TypeScript 复制通过；500/2000 items 快速参数写入均保持 60 FPS、1 Draw Call，且参数变化前后图集构建计数不变。响应式底部面板由 390×844 媒体规则覆盖，仍需在目标触控设备上完成最终手势验收。

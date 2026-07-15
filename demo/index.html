@@ -12,9 +12,33 @@
           <p class="eyebrow">SPATIAL MOTION / PERFORMANCE DEMO</p>
           <h1>可编排的 3D 卡片动效引擎</h1>
         </div>
-        <div class="stats"><span id="quality">--</span><span id="fps">-- FPS</span><span id="count">-- ITEMS</span><span id="effect">LAYOUT MODE</span><span id="selection">0 SELECTED</span></div>
+        <div class="stats"><span id="quality">--</span><span id="fps">-- FPS</span><span id="count">-- ITEMS</span><span id="render-stats">-- CALLS</span><span id="effect">LAYOUT MODE</span><span id="selection">0 SELECTED</span></div>
       </header>
       <section id="stage" aria-label="3D motion stage"><div id="pick-debug" hidden></div></section>
+      <button id="layout-lab-toggle" class="lab-toggle" aria-controls="layout-lab" aria-expanded="false">布局参数</button>
+      <aside id="layout-lab" class="layout-lab" data-open="false" aria-label="布局参数实验室">
+        <div class="lab-heading">
+          <div><span>LAYOUT LAB</span><strong>实例生成参数</strong></div>
+          <button id="layout-lab-close" aria-label="关闭参数面板">×</button>
+        </div>
+        <label class="lab-select">布局
+          <select id="layout-lab-type" aria-label="布局类型"></select>
+        </label>
+        <label class="lab-select">预设
+          <select id="layout-lab-preset" aria-label="布局预设"></select>
+        </label>
+        <div id="layout-lab-controls" class="lab-controls"></div>
+        <div class="lab-actions">
+          <button id="layout-lab-reset">恢复默认</button>
+          <button id="layout-lab-copy-json">复制 JSON</button>
+          <button id="layout-lab-copy-ts">复制 TypeScript</button>
+        </div>
+        <label class="lab-transfer">JSON 导入 / 复制结果
+          <textarea id="layout-lab-transfer" rows="5" spellcheck="false"></textarea>
+        </label>
+        <button id="layout-lab-import" class="primary">导入 JSON</button>
+        <p id="layout-lab-status" class="lab-status" aria-live="polite">调整参数以实时预览</p>
+      </aside>
       <footer>
         <div class="controls">
           <button data-layout="sphere">球体</button>
@@ -24,6 +48,7 @@
           <button data-layout="ring">圆环</button>
           <button data-layout="helix">螺旋</button>
           <button data-layout="cone">圆锥</button>
+          <button data-layout="scatter">散开</button>
           <button id="tunnel">时空隧道</button>
           <button id="shooter">线性发射</button>
           <button id="vortex">漩涡吸入</button>

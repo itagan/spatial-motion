@@ -21,6 +21,15 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 - 缺陷修复可能纠正非法输入、竞态或与文档不符的行为，但默认视觉和合法调用应保持兼容。
 - `MotionItem.id` 必须是非空、唯一、稳定的字符串；依赖数组索引维持身份从来不是受支持行为。
 - Three.js 是 peer dependency，支持范围记录在 `package.json`；升级到超出范围的 Three.js 不在兼容保证内。
+- `LayoutConfig` 当前格式版本为 `1`；新增可选配置字段兼容，未来不兼容的序列化格式使用新的版本号并提供迁移说明。
+
+## 可序列化布局配置
+
+- `LayoutConfig` 是 Sphere、Box、Cylinder、Grid、Ring、Helix、Cone 和 Scatter 的可辨识联合类型，从主入口与 `layouts` 入口导出。
+- `parseLayoutConfig(value)` 接受未知对象或 JSON 字符串，严格验证顶层字段和布局选项，并返回不补默认字段的配置。
+- `createLayout(config)` 在运行时再次验证配置，再委托给对应布局函数；外部 JSON 不能绕过字段检查。
+- 自动计算参数通过省略属性表达。解析与序列化不会根据当前实例数写入 `rings`、`columns` 或 `turns`。
+- 配置 API 的严格验证不改变直接布局函数对已有合法调用和默认值的兼容承诺。
 
 ## 性能契约
 

@@ -1,21 +1,17 @@
 import {
   MotionStage,
-  box,
-  cone,
-  cylinder,
-  grid,
-  helix,
+  createLayout,
   linearShooter,
   radialBurst,
-  ring,
   scatter,
-  sphere,
   tunnel,
   vortex,
-  type Layout,
+  type LayoutConfig,
+  type LayoutConfigType,
   type MotionItem,
   type Timeline,
 } from '@spatial-motion'
+import { createLayoutLab } from './layoutLab'
 import './style.css'
 
 const avatarPool = Array.from({ length: 24 }, (_, index) => createAvatar(index))
@@ -76,18 +72,25 @@ const stage = new MotionStage({
   },
 })
 await stage.setItems(items)
-stage.autoRotate({ y: 0.24 })
-await stage.to(sphere({ radius: 5.2 }), { duration: 1600 })
+let activeTimeline: Timeline | null = null
 
-const layouts: Record<string, Layout> = {
-  sphere: sphere({ radius: 5.2 }),
-  box: box({ width: 8, height: 7, depth: 6 }),
-  cylinder: cylinder({ radius: 5 }),
-  grid: grid({ fit: 'contain' }),
-  ring: ring({ innerRadius: 0.8, spacing: 0.42 }),
-  helix: helix({ radius: 4.6, height: 9 }),
-  cone: cone({ radius: 5, height: 9, stagger: true }),
+const applyLayoutConfig = async (config: LayoutConfig, duration: number) => {
+  activeTimeline?.cancel()
+  updateSelection(0)
+  if (config.type === 'grid' || config.type === 'ring' || config.type === 'scatter') {
+    stage.stopRotation()
+    stage.setRotation(0, 0)
+  } else {
+    stage.autoRotate({ y: 0.24 })
+  }
+  return stage.to(createLayout(config), { duration })
 }
+
+const labRoot = document.querySelector<HTMLElement>('#layout-lab')
+if (!labRoot) throw new Error('Layout lab not found')
+const layoutLab = createLayoutLab({ root: labRoot, onApply: applyLayoutConfig })
+await applyLayoutConfig(layoutLab.getConfig(layoutLab.currentType), 1600)
+
 const tunnelEffect = tunnel({
   directionCount: 20,
   speed: 0.18,
@@ -119,7 +122,6 @@ const scatterLayouts = {
   radial: scatter({ direction: 'radial', distance: 12, depth: 8, opacity: 0, spinMode: 'directional', layers: 6, seed: 32 }),
   right: scatter({ direction: 'right', distance: 12, depth: 6, opacity: 0, spinMode: 'directional', layers: 5, seed: 33 }),
 }
-let activeTimeline: Timeline | null = null
 
 const playRecipe = (steps: (timeline: Timeline) => Timeline) => {
   activeTimeline?.cancel()
@@ -131,17 +133,7 @@ const playRecipe = (steps: (timeline: Timeline) => Timeline) => {
 
 document.querySelectorAll<HTMLButtonElement>('[data-layout]').forEach((button) => {
   button.addEventListener('click', () => {
-    activeTimeline?.cancel()
-    updateSelection(0)
-    const layoutName = button.dataset.layout ?? 'sphere'
-    const layout = layouts[layoutName]
-    if (layoutName === 'grid' || layoutName === 'ring') {
-      stage.stopRotation()
-      stage.setRotation(0, 0)
-    } else {
-      stage.autoRotate({ y: 0.24 })
-    }
-    if (layout) void stage.to(layout, { duration: 1300 })
+    layoutLab.select((button.dataset.layout ?? 'sphere') as LayoutConfigType)
   })
 })
 
@@ -196,7 +188,7 @@ document.querySelector('#restore')?.addEventListener('click', () => {
 document.querySelector('#add-items')?.addEventListener('click', async () => {
   activeTimeline?.cancel()
   updateSelection(0)
-  items = createItems(Math.min(1200, items.length + 100))
+  items = createItems(Math.min(2000, items.length + 100))
   await stage.updateItems(items)
   updateItemCount()
 })
@@ -215,17 +207,17 @@ document.querySelector('#sequence')?.addEventListener('click', () => {
   activeTimeline = stage
     .timeline()
     .add(() => stage.autoRotate({ y: 0.24 }))
-    .add(() => stage.to(layouts.sphere, { duration: 1200 }))
+    .add(() => stage.to(layoutLab.getLayout('sphere'), { duration: 1200 }))
     .wait(900)
-    .add(() => stage.to(layouts.box, { duration: 1300 }))
+    .add(() => stage.to(layoutLab.getLayout('box'), { duration: 1300 }))
     .wait(900)
     .add(() => stage.enterEffect(vortexEffect, { duration: 1300 }))
     .wait(2600)
-    .add(() => stage.to(layouts.ring, { duration: 1200 }))
+    .add(() => stage.to(layoutLab.getLayout('ring'), { duration: 1200 }))
     .wait(700)
     .add(() => stage.enterEffect(burstEffect, { duration: 1100 }))
     .wait(2200)
-    .add(() => stage.to(layouts.cylinder, { duration: 1300 }))
+    .add(() => stage.to(layoutLab.getLayout('cylinder'), { duration: 1300 }))
     .wait(800)
     .add(() => {
       stage.stopRotation()
@@ -235,41 +227,41 @@ document.querySelector('#sequence')?.addEventListener('click', () => {
     .wait(3200)
     .add(() => stage.enterEffect(shooterEffect, { duration: 1200 }))
     .wait(2600)
-    .add(() => stage.to(layouts.cylinder, { duration: 1300 }))
+    .add(() => stage.to(layoutLab.getLayout('cylinder'), { duration: 1300 }))
     .wait(900)
     .add(() => {
       stage.stopRotation()
       stage.setRotation(0, 0)
     })
-    .add(() => stage.to(layouts.grid, { duration: 1200 }))
+    .add(() => stage.to(layoutLab.getLayout('grid'), { duration: 1200 }))
     .wait(900)
     .add(() => stage.autoRotate({ y: 0.24 }))
-    .add(() => stage.to(layouts.sphere, { duration: 1400 }))
+    .add(() => stage.to(layoutLab.getLayout('sphere'), { duration: 1400 }))
   void activeTimeline.play()
 })
 
 document.querySelector('#recipe-sphere')?.addEventListener('click', () => playRecipe((timeline) => timeline
   .add(() => stage.to(scatterLayouts.random, { duration: 700 }))
-  .add(() => stage.to(layouts.sphere, { duration: 1300 }))
+  .add(() => stage.to(layoutLab.getLayout('sphere'), { duration: 1300 }))
   .add(() => stage.autoRotate({ y: 0.24 }))))
 
 document.querySelector('#recipe-box')?.addEventListener('click', () => playRecipe((timeline) => timeline
-  .add(() => stage.to(layouts.box, { duration: 1000 }))
+  .add(() => stage.to(layoutLab.getLayout('box'), { duration: 1000 }))
   .wait(500)
   .add(() => stage.to(scatterLayouts.radial, { duration: 900 }))
-  .add(() => stage.to(layouts.box, { duration: 1300 }))))
+  .add(() => stage.to(layoutLab.getLayout('box'), { duration: 1300 }))))
 
 document.querySelector('#recipe-cylinder')?.addEventListener('click', () => playRecipe((timeline) => timeline
-  .add(() => stage.to(layouts.cylinder, { duration: 1000 }))
+  .add(() => stage.to(layoutLab.getLayout('cylinder'), { duration: 1000 }))
   .wait(500)
   .add(() => stage.to(scatterLayouts.right, { duration: 900 }))
-  .add(() => stage.to(layouts.cylinder, { duration: 1200 }))))
+  .add(() => stage.to(layoutLab.getLayout('cylinder'), { duration: 1200 }))))
 
 document.querySelector('#recipe-grid')?.addEventListener('click', () => playRecipe((timeline) => timeline
-  .add(() => stage.to(layouts.grid, { duration: 900 }))
+  .add(() => stage.to(layoutLab.getLayout('grid'), { duration: 900 }))
   .wait(500)
   .add(() => stage.to(scatterLayouts.random, { duration: 900 }))
-  .add(() => stage.to(layouts.grid, { duration: 1200 }))))
+  .add(() => stage.to(layoutLab.getLayout('grid'), { duration: 1200 }))))
 
 document.querySelector('#quality')!.textContent = `${stage.getQuality().toUpperCase()} QUALITY`
 const updateItemCount = () => {
@@ -291,6 +283,7 @@ const updateFps = (now: number) => {
   if (now - measuredAt >= 1000) {
     document.querySelector('#fps')!.textContent = `${Math.round((frames * 1000) / (now - measuredAt))} FPS`
     const stats = stage.getPerformanceStats()
+    document.querySelector('#render-stats')!.textContent = `${stats.drawCalls} CALL · ${stats.atlasBuilds} ATLAS`
     document.querySelector('#effect')!.textContent = stats.effect
       ? `${stats.effect.toUpperCase()} · ${stats.activeEffectItems} ACTIVE`
       : 'LAYOUT MODE'

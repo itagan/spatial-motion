@@ -55,3 +55,11 @@ Sphere 与 Cone 的奇点卡片增加留白，Box 六面使用统一尺度，Cyl
 ## 优化阶段结论
 
 v1.2–v1.6 已形成从可观测基线、GPU/纹理、布局、特效到动画/自适应质量的闭环。后续继续优化前应先积累不同设备的 Benchmark JSON；当前阶段不执行 npm publish、Tag 或 GitHub Release。
+
+## v1.7 参数化验收
+
+布局配置层只在创建或切换布局时解析 JSON 和选项，不进入逐帧渲染路径。参数实验室复用 `stage.to()` 的中断语义，不重建 Stage、Mesh 或纹理图集；快速滑动采用 100ms 防抖和 300ms GPU 过渡。
+
+验收同时记录 500/2000 实例的快速参数切换、Draw Call、图集构建次数、P95 和长帧。新的 `createLayout()` 聚合入口允许主动引入全部布局，但继续验证只导入 `sphere()` 的 layout-only 消费者不突破既有 8 KB 预算。
+
+2026-07-16 本地 Chromium 验收：500 items 连续写入 5 次 Sphere 半径后保持 60 FPS、1 Draw Call，图集构建数保持 2；2000 items 连续写入 4 次后保持 60 FPS、1 Draw Call，图集构建数保持 17，证明布局参数更新未新增图集构建。独立 2000 items / transition-stress / 3 秒测得平均 59.55 FPS、P95 17.94ms、P99 18.47ms、0 长帧、1 Draw Call。
