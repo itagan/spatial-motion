@@ -11,13 +11,14 @@ import {
   grid,
   helix,
   ring,
+  scatter,
   sphere,
 } from './index'
 
 const context = { width: 1920, height: 1080 }
 
 describe('layouts', () => {
-  it.each([sphere(), cylinder(), grid(), ring(), helix(), cone(), box()])('$name returns one finite transform per item', (layout) => {
+  it.each([sphere(), cylinder(), grid(), ring(), helix(), cone(), box(), scatter()])('$name returns one finite transform per item', (layout) => {
     const result = layout.calculate(500, context)
     expect(result).toHaveLength(500)
     expect(result.every((value) => Object.values(value).every(Number.isFinite))).toBe(true)
@@ -49,7 +50,7 @@ describe('layouts', () => {
     expect(new Set(result.map(({ x, y }) => `${x},${y}`)).size).toBe(100)
   })
 
-  it.each([sphere(), cylinder(), grid(), ring(), helix(), cone(), box()])(
+  it.each([sphere(), cylinder(), grid(), ring(), helix(), cone(), box(), scatter()])(
     '$name handles empty and single-item data',
     (layout) => {
       expect(layout.calculate(0, context)).toEqual([])
@@ -129,6 +130,32 @@ describe('layouts', () => {
     result.forEach((transform) => {
       expect(Object.values(transform).every(Number.isFinite)).toBe(true)
       expect([transform.rotationX, transform.rotationY, transform.rotationZ]).toEqual([0, 0, 0])
+    })
+  })
+
+  it('scatter is deterministic for the same seed and changes with another seed', () => {
+    const options = { direction: 'radial' as const, distance: 12, depth: 5, seed: 42 }
+    const first = scatter(options).calculate(500, context)
+    const second = scatter(options).calculate(500, context)
+    const changed = scatter({ ...options, seed: 43 }).calculate(500, context)
+
+    expect(first).toEqual(second)
+    expect(changed).not.toEqual(first)
+    expect(new Set(first.map(({ x, y, z }) => `${x},${y},${z}`)).size).toBe(500)
+  })
+
+  it.each(['left', 'right'] as const)('scatter %s keeps every item on the requested side', (direction) => {
+    const result = scatter({ direction, distance: 8, seed: 7 }).calculate(100, context)
+    expect(result.every(({ x }) => direction === 'left' ? x < 0 : x > 0)).toBe(true)
+  })
+
+  it('scatter clamps visual values and handles invalid distances safely', () => {
+    const result = scatter({ distance: -1, depth: -1, scale: -2, opacity: 5 }).calculate(3, context)
+    result.forEach((transform) => {
+      expect(Object.values(transform).every(Number.isFinite)).toBe(true)
+      expect(transform.scale).toBe(0)
+      expect(transform.opacity).toBe(1)
+      expect(transform.z).toBeCloseTo(0)
     })
   })
 })
