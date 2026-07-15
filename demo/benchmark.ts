@@ -5,6 +5,7 @@ import {
   cylinder,
   grid,
   helix,
+  linearShooter,
   radialBurst,
   ring,
   sphere,
@@ -36,6 +37,10 @@ const layouts: Record<string, Layout> = {
 }
 const effects: Record<string, StreamingEffect> = {
   tunnel: tunnel({ maxActiveItems: 300 }),
+  'tunnel-square': tunnel({ crossSection: 'square', maxActiveItems: 300 }),
+  'tunnel-burst': tunnel({ emission: { mode: 'burst' }, maxActiveItems: 300 }),
+  'tunnel-wave': tunnel({ emission: { mode: 'wave' }, maxActiveItems: 300 }),
+  'shooter-wave': linearShooter({ emission: { mode: 'wave' }, maxActiveItems: 300 }),
   vortex: vortex({ maxActiveItems: 300 }),
   burst: radialBurst({ maxActiveItems: 300 }),
 }

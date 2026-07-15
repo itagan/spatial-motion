@@ -7,6 +7,8 @@ export type { VortexOptions, VortexGpuData } from './VortexEffect.js'
 export { radialBurst, RadialBurstEffect } from './RadialBurstEffect.js'
 export type { RadialBurstOptions, RadialBurstGpuData } from './RadialBurstEffect.js'
 export type {
+  EmissionMode,
+  EmissionOptions,
   StreamingEffect,
   StreamingEffectGpuData,
   StreamingEffectKind,

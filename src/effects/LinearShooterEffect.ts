@@ -1,6 +1,11 @@
 import type { Transform } from '../core/types.js'
 import {
   createEffectParameters,
+  emissionEnvelope,
+  emissionModeCode,
+  resolveEmissionOptions,
+  type EmissionOptions,
+  type ResolvedEmissionOptions,
   type StreamingEffect,
   type StreamingEffectGpuData,
 } from './types.js'
@@ -16,6 +21,7 @@ export interface LinearShooterOptions {
   maxActiveItems?: number
   directionJitter?: number
   seed?: number
+  emission?: EmissionOptions
 }
 
 export type LinearShooterGpuData = StreamingEffectGpuData
@@ -23,7 +29,7 @@ export type LinearShooterGpuData = StreamingEffectGpuData
 export class LinearShooterEffect implements StreamingEffect {
   readonly name = 'linear-shooter'
   readonly kind = 'linear-shooter' as const
-  private readonly options: Required<LinearShooterOptions>
+  private readonly options: Omit<Required<LinearShooterOptions>, 'emission'> & { emission: ResolvedEmissionOptions }
   private paths = new Float32Array(0)
   private speedFactors = new Float32Array(0)
   private preparedCount = -1
@@ -41,6 +47,7 @@ export class LinearShooterEffect implements StreamingEffect {
       maxActiveItems: options.maxActiveItems ?? 180,
       directionJitter: options.directionJitter ?? 0.45,
       seed: options.seed ?? 2027,
+      emission: resolveEmissionOptions(options.emission),
     }
   }
 
@@ -91,7 +98,7 @@ export class LinearShooterEffect implements StreamingEffect {
         rotationX: 0,
         rotationY: 0,
         rotationZ: 0,
-        opacity: enabled ? edgeFade(progress) : 0,
+        opacity: enabled ? edgeFade(progress) * emissionEnvelope(this.options.emission, elapsedSeconds) : 0,
       }
     })
   }
@@ -108,6 +115,13 @@ export class LinearShooterEffect implements StreamingEffect {
         this.options.startScale,
         this.options.endScale,
         this.options.z,
+        0,
+        0,
+        emissionModeCode(this.options.emission.mode),
+        this.options.emission.burstInterval,
+        this.options.emission.burstDuration,
+        this.options.emission.waveFrequency,
+        this.options.emission.waveStrength,
       ),
     }
   }
