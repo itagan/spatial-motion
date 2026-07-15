@@ -117,6 +117,24 @@ stage.pause()
 stage.resume()
 ```
 
+响应式平面、低动态偏好与悬停高亮：
+
+```ts
+const stage = new MotionStage({
+  container,
+  motionPreference: 'auto', // 跟随 prefers-reduced-motion
+  hoverEffect: 'highlight',
+  onItemHover(item, index) {
+    console.log(item?.id ?? null, index)
+  },
+})
+
+await stage.to(grid({ fit: 'contain' })) // 完整放入相机可视范围
+await stage.to(grid({ fit: 'cover' }))   // 铺满相机可视范围
+```
+
+低动态模式会立即完成布局切换、停止自动旋转，并把流式特效固定为确定性的静态首帧。`full` 可强制保留动画，`reduced` 可强制使用低动态行为。
+
 页面隐藏时 Stage 会自动停止 `requestAnimationFrame`，恢复可见时重置帧时间再继续，后台停留时间不会污染性能样本。
 
 动态更新数据：

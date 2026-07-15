@@ -19,6 +19,10 @@ export interface Transform {
 export interface LayoutContext {
   width: number
   height: number
+  /** Camera-visible width in world units at the default layout plane. */
+  viewportWidth?: number
+  /** Camera-visible height in world units at the default layout plane. */
+  viewportHeight?: number
 }
 
 export interface Layout {

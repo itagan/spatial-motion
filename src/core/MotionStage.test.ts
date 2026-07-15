@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Layout, MotionItem, Transform } from './types'
+import type { Layout, LayoutContext, MotionItem, Transform } from './types'
 import { MotionStage } from './MotionStage'
 import { TunnelEffect } from '../effects/TunnelEffect'
 import { radialBurst } from '../effects/RadialBurstEffect'
@@ -25,6 +25,7 @@ vi.mock('../renderers/InstancedCardRenderer', () => ({
     disableEffect = vi.fn()
     setEffectTime = vi.fn()
     setVisibleRatio = vi.fn()
+    setHoverIndex = vi.fn()
     getStats = vi.fn(() => ({ instanceCount: 0, textureBytes: 0 }))
     dispose = vi.fn()
 
@@ -337,6 +338,58 @@ describe('MotionStage', () => {
 
     await stage.to(layout(() => [transform({ opacity: 0.01 })]), { duration: 0 })
     expect(stage.pick(50, 50)).toBeNull()
+    stage.destroy()
+  })
+
+  it('reports hover changes once and clears GPU highlighting on pointer leave', async () => {
+    const onItemHover = vi.fn()
+    const stage = createStage({ onItemHover, hoverEffect: 'highlight' })
+    const cards = currentCards()
+    await stage.setItems([{ id: 'center' }])
+    await stage.to(layout(() => [transform()]), { duration: 0 })
+    const canvas = document.querySelector('canvas')
+
+    canvas?.dispatchEvent(new PointerEvent('pointermove', { clientX: 50, clientY: 50 }))
+    canvas?.dispatchEvent(new PointerEvent('pointermove', { clientX: 50, clientY: 50 }))
+    expect(onItemHover).toHaveBeenCalledTimes(1)
+    expect(onItemHover).toHaveBeenCalledWith({ id: 'center' }, 0)
+    expect(cards.setHoverIndex).toHaveBeenLastCalledWith(0)
+
+    canvas?.dispatchEvent(new PointerEvent('pointerleave'))
+    expect(onItemHover).toHaveBeenLastCalledWith(null, null)
+    expect(cards.setHoverIndex).toHaveBeenLastCalledWith(null)
+    stage.destroy()
+  })
+
+  it('makes transitions immediate and freezes streaming effects in reduced motion mode', async () => {
+    const stage = createStage({ motionPreference: 'reduced' })
+    const cards = currentCards()
+    await stage.setItems([{ id: 'a' }])
+
+    expect(await stage.to(layout(() => [transform({ x: 4 })]), { duration: 1000 })).toBe(true)
+    expect((cards.setTransforms.mock.calls.at(-1)?.[0] as Transform[])[0].x).toBe(4)
+    expect(await stage.enterEffect(radialBurst(), { duration: 1000 })).toBe(true)
+    expect(cards.enableEffect).not.toHaveBeenCalled()
+    stage.autoRotate({ y: 1 })
+    stage.destroy()
+  })
+
+  it('passes camera-visible world dimensions to layouts', async () => {
+    let received: LayoutContext | undefined
+    const stage = createStage({ cameraZ: 18 })
+    await stage.setItems([{ id: 'a' }])
+    await stage.to({
+      name: 'context-reader',
+      calculate: (_count, context) => {
+        received = context
+        return [transform()]
+      },
+    }, { duration: 0 })
+
+    if (!received) throw new Error('Layout context was not received')
+    expect(received.viewportWidth).toBeGreaterThan(0)
+    expect(received.viewportHeight).toBeGreaterThan(0)
+    expect(received.viewportWidth).toBeCloseTo(received.viewportHeight ?? 0)
     stage.destroy()
   })
 

@@ -50,6 +50,7 @@ export class InstancedCardRenderer {
     geometry.setAttribute('effectPath', new InstancedBufferAttribute(new Float32Array(items.length * 4), 4))
     geometry.setAttribute('effectSpeedFactor', new InstancedBufferAttribute(new Float32Array(items.length), 1))
     geometry.setAttribute('visibilityRank', new InstancedBufferAttribute(createVisibilityRanks(items.length), 1))
+    geometry.setAttribute('itemIndex', new InstancedBufferAttribute(createItemIndices(items.length), 1))
     this.material = new ShaderMaterial({
       uniforms: {
         atlas: { value: atlas.texture },
@@ -62,6 +63,7 @@ export class InstancedCardRenderer {
         effectParamsB: { value: new Vector4() },
         effectParamsC: { value: new Vector4() },
         visibleRatio: { value: 1 },
+        hoverIndex: { value: -1 },
       },
       vertexShader: `
         attribute vec4 atlasRect;
@@ -76,6 +78,7 @@ export class InstancedCardRenderer {
         attribute vec4 effectPath;
         attribute float effectSpeedFactor;
         attribute float visibilityRank;
+        attribute float itemIndex;
         uniform float progress;
         uniform float billboard;
         uniform float hideBackHemisphere;
@@ -85,10 +88,12 @@ export class InstancedCardRenderer {
         uniform vec4 effectParamsB;
         uniform vec4 effectParamsC;
         uniform float visibleRatio;
+        uniform float hoverIndex;
         varying vec2 vAtlasUv;
         varying vec2 vLocalUv;
         varying float vOpacity;
         varying float vInstanceVisible;
+        varying float vHighlight;
 
         vec3 rotateByQuaternion(vec3 value, vec4 quaternion) {
           return value + 2.0 * cross(quaternion.xyz, cross(quaternion.xyz, value) + quaternion.w * value);
@@ -122,6 +127,8 @@ export class InstancedCardRenderer {
           vOpacity = mix(fromOpacity, toOpacity, progress);
           vec3 center = mix(fromPosition, toPosition, progress);
           float itemScale = mix(fromScale, toScale, progress);
+          vHighlight = 1.0 - step(0.5, abs(itemIndex - hoverIndex));
+          itemScale *= mix(1.0, 1.08, vHighlight);
           vec4 itemQuaternion = interpolateQuaternion(fromQuaternion, toQuaternion, progress);
           float effectVisible = 1.0;
 
@@ -208,13 +215,15 @@ export class InstancedCardRenderer {
         varying vec2 vLocalUv;
         varying float vOpacity;
         varying float vInstanceVisible;
+        varying float vHighlight;
         void main() {
           if (vInstanceVisible < 0.5) discard;
           vec4 color = texture2D(atlas, vAtlasUv);
           vec2 edgeIn = smoothstep(vec2(0.0), vec2(0.04), vLocalUv);
           vec2 edgeOut = smoothstep(vec2(0.0), vec2(0.04), vec2(1.0) - vLocalUv);
           float edge = edgeIn.x * edgeIn.y * edgeOut.x * edgeOut.y;
-          gl_FragColor = vec4(color.rgb, color.a * edge * vOpacity);
+          vec3 highlighted = mix(color.rgb, min(vec3(1.0), color.rgb * 1.16 + 0.06), vHighlight);
+          gl_FragColor = vec4(highlighted, color.a * edge * vOpacity);
         }
       `,
       transparent: true,
@@ -304,6 +313,10 @@ export class InstancedCardRenderer {
     if (this.material) this.material.uniforms.visibleRatio.value = Math.min(1, Math.max(0.05, ratio))
   }
 
+  setHoverIndex(index: number | null): void {
+    if (this.material) this.material.uniforms.hoverIndex.value = index ?? -1
+  }
+
   getStats(): CardRendererStats {
     return {
       instanceCount: this.mesh?.geometry.instanceCount ?? 0,
@@ -376,4 +389,8 @@ function createVisibilityRanks(count: number): Float32Array {
     ranks[index] = (index * 0.618033988749895) % 1
   }
   return ranks
+}
+
+function createItemIndices(count: number): Float32Array {
+  return Float32Array.from({ length: count }, (_, index) => index)
 }
