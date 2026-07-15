@@ -9,7 +9,7 @@ Spatial Motion 是面向活动大屏、数据展示和互动场景的高性能 3
 - 正式源码、测试、演示和文档全部位于本仓库内。
 - 仓库之外的同级目录属于早期参考材料，不是依赖、兼容目标或事实来源；不要读取、修改或复制其中的实现，除非用户明确要求。
 - 当前包名是 `@itagan/spatial-motion`，Three.js 必须保持为 peer dependency。
-- 当前尚未发布到 npm Registry；README 中的 GitHub 安装方式是现阶段可用方式。
+- v1.0.0 源码已具备发布形态，但 npm Registry 状态必须以 release 记录为准；README 中的 GitHub 安装方式始终可用于未发布提交。
 
 ## 事实来源与优先级
 
@@ -20,7 +20,8 @@ Spatial Motion 是面向活动大屏、数据展示和互动场景的高性能 3
 3. 本文件中的开发约束。
 4. `ROADMAP.md` 中的当前目标和计划。
 5. `docs/DEVELOPMENT.md` 中的工作流程。
-6. `README.md` 中面向使用者的功能说明。
+6. `docs/PUBLIC_API.md` 和 `docs/COMPATIBILITY.md` 中的公开兼容承诺。
+7. `README.md` 中面向使用者的功能说明。
 
 不要把提交历史、分支名或历史参考项目当成未声明的产品需求。发现文档与实现不一致时，在同一变更中修正文档，或明确报告差异。
 

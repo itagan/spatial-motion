@@ -25,13 +25,19 @@
 - 基于投影四边形和相机深度的精确遮挡拾取、卡片点击回调和任意 `id` 聚焦
 - 聚焦后恢复最近一次业务布局
 - ResizeObserver 响应式画布及完整资源释放
+- 圆角、圆形、边框与背景卡片样式，以及安全的 Canvas 自定义绘制
+- 按稳定 `id` 局部重绘单张或多张图集卡片
 
-源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名已确定为 `@itagan/spatial-motion`，目前可从 GitHub 安装，尚未发布到 npm Registry。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已准备为 v1.0.0，目前可从 GitHub 安装，npm Registry 发布仍以正式 release 公告为准。
 
 ## 项目文档
 
 - [开发指南](./docs/DEVELOPMENT.md)：环境、命令、架构职责、测试与发布检查。
 - [路线图](./ROADMAP.md)：已完成阶段、当前目标和后续候选方向。
+- [公共 API 与兼容策略](./docs/PUBLIC_API.md)：稳定入口、SemVer 承诺和迁移边界。
+- [浏览器支持与限制](./docs/COMPATIBILITY.md)：运行环境、图片 CORS 和已知限制。
+- [发布清单](./docs/RELEASE.md)：版本验证、发布及发布后空项目安装步骤。
+- [变更记录](./CHANGELOG.md)：各阶段功能与兼容说明。
 - [开发代理指南](./AGENTS.md)：Codex、Claude Code 等自动化开发代理的项目边界与完成标准。
 
 ## 安装
@@ -261,11 +267,11 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 21.6 KB |
-| npm tarball | ≤ 150 KB | 72.0 KB |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 26.2 KB |
+| npm tarball | ≤ 150 KB | 99.5 KB |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 2.1 KB |
 
-`npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、README、LICENSE 和包元数据。
+`npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。
 
 连续低帧率约 2.5 秒后下降一级，质量切换后有 5 秒冷却；性能稳定约 8 秒后才允许恢复。页面切到后台、调试暂停及超过 100ms 的异常长帧不会参与判断。
 手动锁定 high、medium 或 low 时仍持续记录 FPS 和帧时间，但采样结果不会触发自动升降级。
@@ -429,9 +435,9 @@ src/
 demo/              性能和连续动画演示
 ```
 
-## 后续路线
+## 兼容性与后续路线
 
-CSS3D 可选渲染器、Vue/React 薄适配器及发布准备工作的状态统一维护在[路线图](./ROADMAP.md)中。
+v1.x 的公共入口和兼容承诺见[公共 API 文档](./docs/PUBLIC_API.md)，运行环境与已知限制见[兼容性文档](./docs/COMPATIBILITY.md)。CSS3D 可选渲染器、Vue/React 薄适配器等后续方向统一维护在[路线图](./ROADMAP.md)中。
 
 ## License
 

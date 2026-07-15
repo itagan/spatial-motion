@@ -1,0 +1,38 @@
+# 公共 API 与兼容策略
+
+Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使用者可以依赖的边界，不代表所有内部类和生成声明都属于公共 API。
+
+## 稳定入口
+
+以下包入口在 v1.x 内保持兼容：
+
+- `@itagan/spatial-motion`
+- `@itagan/spatial-motion/layouts`
+- `@itagan/spatial-motion/effects`
+- `@itagan/spatial-motion/performance`
+- `@itagan/spatial-motion/package.json`
+
+`src`、`core`、`renderers` 及 `dist` 中其他文件是内部实现。即使文件存在，也不能通过未声明的深层路径导入；`pack:check` 会验证这条边界。
+
+## v1.x 承诺
+
+- 已公开的函数、类方法、选项和联合类型不会在 minor/patch 版本中无迁移方案地移除或改成不兼容含义。
+- 新增可选字段、布局、特效和性能统计字段属于向后兼容变更。
+- 缺陷修复可能纠正非法输入、竞态或与文档不符的行为，但默认视觉和合法调用应保持兼容。
+- `MotionItem.id` 必须是非空、唯一、稳定的字符串；依赖数组索引维持身份从来不是受支持行为。
+- Three.js 是 peer dependency，支持范围记录在 `package.json`；升级到超出范围的 Three.js 不在兼容保证内。
+
+## 性能契约
+
+- 主体卡片场景使用一个实例 Mesh，正常布局、过渡、悬停和内置流式特效不为每张卡片增加 Draw Call。
+- 布局过渡使用 GPU 插值；内置流式特效使用固定实例池，不使用 CPU 定时器生成卡片。
+- 数据量、渲染上限和特效活跃数量受质量档位约束。
+- 40 KB gzip、150 KB tarball 和 8 KB layout-only 是自动化预算，不是运行时网络大小承诺；调整预算需要单独评审。
+
+## 生命周期与并发
+
+- 新布局或新 Timeline 会使旧动画失效，旧回调不能覆盖新状态。
+- 图片与自定义异步绘制使用 token 保护；过期结果不应用到当前图集。
+- `destroy()` 幂等并释放监听器、Observer、纹理、几何体、材质和 WebGLRenderer；其他 API 在销毁后抛错。
+
+CSS3D 渲染器、Vue/React 适配器和业务动画配方不属于 v1.0 稳定核心；未来如加入，会使用独立入口或薄适配层设计。

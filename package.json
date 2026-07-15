@@ -1,6 +1,6 @@
 {
   "name": "@itagan/spatial-motion",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "High-performance Three.js spatial card layouts and streaming effects for large-screen experiences.",
   "type": "module",
   "license": "MIT",
@@ -26,7 +26,12 @@
   "sideEffects": false,
   "files": [
     "dist",
+    "docs",
     "README.md",
+    "ROADMAP.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "module": "./dist/index.js",
@@ -65,6 +70,7 @@
     "prepare": "npm run build:lib",
     "prepack": "npm run build:lib",
     "pack:check": "node scripts/verify-package.mjs",
+    "verify": "npm run typecheck && npm test && npm run build && npm run pack:check",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts"

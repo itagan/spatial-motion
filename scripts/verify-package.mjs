@@ -41,7 +41,12 @@ for (const file of dryRun.files) {
   assert(
     file.path === 'package.json'
       || file.path === 'README.md'
+      || file.path === 'ROADMAP.md'
+      || file.path === 'AGENTS.md'
+      || file.path === 'CLAUDE.md'
+      || file.path === 'CHANGELOG.md'
       || file.path === 'LICENSE'
+      || file.path.startsWith('docs/')
       || file.path.startsWith('dist/'),
     `Unexpected published file: ${file.path}`,
   )
@@ -77,8 +82,12 @@ try {
     const performance = await import('${packageName}/performance')
     assert.equal(typeof main.MotionStage, 'function')
     assert.equal(typeof layouts.sphere, 'function')
+    assert.equal(typeof layouts.box, 'function')
+    assert.equal(typeof layouts.scatter, 'function')
     assert.equal(typeof effects.vortex, 'function')
     assert.equal(typeof performance.BenchmarkSession, 'function')
+    assert.equal(typeof main.MotionStage.prototype.updateItem, 'function')
+    assert.equal(typeof main.MotionStage.prototype.updateItemsById, 'function')
     await assert.rejects(
       import('${packageName}/renderers/InstancedCardRenderer'),
       (error) => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED',

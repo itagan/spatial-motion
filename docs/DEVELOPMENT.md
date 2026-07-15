@@ -28,6 +28,7 @@ npm run dev
 | `npm run build:demo` | 构建演示站点到 `dist-demo/` |
 | `npm run build` | 依次构建库和演示站点 |
 | `npm run pack:check` | 验证发布文件、体积、导出、类型、运行时消费和 Tree Shaking |
+| `npm run verify` | 串行执行类型、全部测试、库/demo 构建和包消费者验证 |
 
 `dist/` 和 `dist-demo/` 是生成目录且已被忽略，不要手工编辑或提交。
 
@@ -92,6 +93,8 @@ npm run pack:check
 6. 运行 `npm run pack:check`，确认深层内部路径仍不可导入。
 
 当前自动化硬预算：库 JavaScript gzip 合计不超过 40 KB，npm tarball 不超过 150 KB，仅消费布局的 Tree Shaking 产物不超过 8 KB。预算变化属于需要明确讨论的工程决策。
+
+v1.x 的稳定入口和 SemVer 规则记录在 `docs/PUBLIC_API.md`。正式发布严格按照 `docs/RELEASE.md` 执行；准备发布的代码变更不自动授权 npm publish、tag 或 GitHub Release。
 
 ## 测试策略
 
