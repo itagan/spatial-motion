@@ -185,7 +185,7 @@ try {
     const stats = stage.getPerformanceStats()
     const environment = stage.getPerformanceEnvironment()
     stage.destroy()
-    const smoke = { ready: true, renderedItems: stats.renderedItems, drawCalls: stats.drawCalls, contextLost: stats.contextLost, p95: stats.frameTimeP95, maxTextureSize: environment.maxTextureSize, destroyed: !container.querySelector('canvas') }
+    const smoke = { ready: true, renderedItems: stats.renderedItems, submittedItems: stats.submittedItems, drawCalls: stats.drawCalls, contextLost: stats.contextLost, p95: stats.frameTimeP95, maxTextureSize: environment.maxTextureSize, destroyed: !container.querySelector('canvas') }
     document.documentElement.dataset.packageSmoke = smoke.destroyed ? 'passed' : 'failed'
     result.textContent = JSON.stringify(smoke)
   `)

@@ -81,6 +81,7 @@ export interface StagePerformanceStats extends PerformanceStats {
   qualityMode: QualityMode
   inputItems: number
   renderedItems: number
+  submittedItems: number
   visibleItems: number
   drawCalls: number
   triangles: number
@@ -183,6 +184,12 @@ export class MotionStage {
   private transformCalculations = 0
   private pickingMs = 0
   private pickOperations = 0
+  private pendingItemUpdateBatch: {
+    updates: MotionItemUpdate[]
+    resolve: Array<(applied: boolean) => void>
+    reject: Array<(reason: unknown) => void>
+  } | null = null
+  private itemUpdateChain: Promise<unknown> = Promise.resolve()
 
   constructor(private readonly options: MotionStageOptions) {
     this.motionPreference = options.motionPreference ?? 'auto'
@@ -231,6 +238,11 @@ export class MotionStage {
   setItems(items: MotionItem[]): Promise<void> {
     this.assertActive()
     validateItems(items)
+    return this.setItemsAfterPendingUpdates(items)
+  }
+
+  private async setItemsAfterPendingUpdates(items: MotionItem[]): Promise<void> {
+    await this.flushPendingItemUpdates()
     return this.setItemsInternal(items)
   }
 
@@ -378,6 +390,14 @@ export class MotionStage {
   updateItems(items: MotionItem[], options: UpdateItemsOptions = {}): Promise<boolean> {
     this.assertActive()
     validateItems(items)
+    return this.updateItemsAfterPendingUpdates(items, options)
+  }
+
+  private async updateItemsAfterPendingUpdates(
+    items: MotionItem[],
+    options: UpdateItemsOptions,
+  ): Promise<boolean> {
+    await this.flushPendingItemUpdates()
     return this.updateItemsInternal(items, options)
   }
 
@@ -388,7 +408,54 @@ export class MotionStage {
   updateItemsById(updates: MotionItemUpdate[], options: UpdateItemsOptions = {}): Promise<boolean> {
     this.assertActive()
     validateItemUpdates(updates)
+    if (!updates.length) return Promise.resolve(true)
+    if (!isBatchableItemUpdate(options)) {
+      return this.updateItemsByIdAfterPendingUpdates(updates, options)
+    }
+    return this.queueItemUpdates(updates)
+  }
+
+  private async updateItemsByIdAfterPendingUpdates(
+    updates: MotionItemUpdate[],
+    options: UpdateItemsOptions,
+  ): Promise<boolean> {
+    await this.flushPendingItemUpdates()
     return this.updateItemsByIdInternal(updates, options)
+  }
+
+  private queueItemUpdates(updates: MotionItemUpdate[]): Promise<boolean> {
+    return new Promise<boolean>((resolve, reject) => {
+      if (!this.pendingItemUpdateBatch) {
+        this.pendingItemUpdateBatch = { updates: [], resolve: [], reject: [] }
+        queueMicrotask(() => { void this.flushPendingItemUpdates() })
+      }
+      this.pendingItemUpdateBatch.updates.push(...updates)
+      this.pendingItemUpdateBatch.resolve.push(resolve)
+      this.pendingItemUpdateBatch.reject.push(reject)
+    })
+  }
+
+  private flushPendingItemUpdates(): Promise<unknown> {
+    const batch = this.pendingItemUpdateBatch
+    if (!batch) return this.itemUpdateChain
+    this.pendingItemUpdateBatch = null
+    const mergedPatches = new Map<string, MotionItemPatch>()
+    batch.updates.forEach(({ id, patch }) => {
+      mergedPatches.set(id, { ...mergedPatches.get(id), ...patch })
+    })
+    const updates = [...mergedPatches].map(([id, patch]) => ({ id, patch }))
+    const operation = this.itemUpdateChain.then(() => this.destroyed
+      ? false
+      : this.updateItemsByIdInternal(updates, {}))
+    this.itemUpdateChain = operation.then(
+      (applied) => {
+        batch.resolve.forEach((resolve) => resolve(applied))
+      },
+      (error) => {
+        batch.reject.forEach((reject) => reject(error))
+      },
+    )
+    return operation
   }
 
   private async updateItemsByIdInternal(
@@ -682,6 +749,7 @@ export class MotionStage {
       qualityMode: this.qualityMode,
       inputItems: this.inputItemCount,
       renderedItems: cardStats.instanceCount,
+      submittedItems: cardStats.submittedInstanceCount,
       visibleItems: this.activeEffect
         ? countVisibleEffectItems(this.activeEffect.gpuData.speedFactors, this.visibleRatio)
         : countVisibleItems(cardStats.instanceCount, this.visibleRatio),
@@ -1027,4 +1095,10 @@ function validateItemUpdates(updates: MotionItemUpdate[]): void {
     if (ids.has(id)) throw new Error(`Duplicate MotionItem update id: ${id}`)
     ids.add(id)
   })
+}
+
+function isBatchableItemUpdate(options: UpdateItemsOptions): boolean {
+  return options.layout === undefined
+    && options.duration === undefined
+    && options.easing === undefined
 }

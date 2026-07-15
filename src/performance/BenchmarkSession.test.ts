@@ -18,6 +18,7 @@ function stats(overrides: Partial<StagePerformanceStats> = {}): StagePerformance
     qualityMode: 'high',
     inputItems: 600,
     renderedItems: 600,
+    submittedItems: 600,
     visibleItems: 600,
     drawCalls: 1,
     triangles: 1200,

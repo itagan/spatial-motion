@@ -56,6 +56,7 @@ export interface BenchmarkResult {
   maximumTriangles: number
   maximumTextureBytes: number
   renderedItems: number
+  submittedItems: number
   visibleItems: number
   samples: BenchmarkSample[]
 }
@@ -147,6 +148,7 @@ export class BenchmarkSession {
       maximumTriangles: maximum(this.samples.map(({ stats }) => stats.triangles)),
       maximumTextureBytes: maximum(this.samples.map(({ stats }) => stats.textureBytes)),
       renderedItems: latest?.renderedItems ?? 0,
+      submittedItems: latest?.submittedItems ?? 0,
       visibleItems: latest?.visibleItems ?? 0,
       samples: this.samples.map((sample) => ({ elapsedMs: sample.elapsedMs, stats: { ...sample.stats } })),
     }

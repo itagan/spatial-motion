@@ -27,6 +27,12 @@ function createContext() {
     stroke: vi.fn(),
     clearRect: vi.fn(),
     drawImage: vi.fn(),
+    getImageData: vi.fn((_x: number, _y: number, width: number, height: number) => ({
+      data: new Uint8ClampedArray(width * height * 4),
+      width,
+      height,
+      colorSpace: 'srgb',
+    })),
     fillRect: vi.fn(),
     fillText: vi.fn(),
     fillStyle: '',
@@ -72,6 +78,9 @@ describe('texture atlas card rendering', () => {
     expect(atlas).toMatchObject({ width: 64, height: 64, cellSize: 56, padding: 4 })
     expect(atlas.texture.generateMipmaps).toBe(true)
     expect(atlas.texture.anisotropy).toBe(4)
+    expect(atlas.texture.isDataTexture).toBe(true)
+    expect(atlas.data).toHaveLength(64 * 64 * 4)
+    expect(atlas.metrics.uploadBytes).toBe(64 * 64 * 4)
     atlas.texture.dispose()
   })
 
@@ -147,23 +156,34 @@ describe('texture atlas card rendering', () => {
     expect(patch.cells.map(({ index }) => index)).toEqual([2])
     expect(patch.metrics.cells).toBe(1)
 
-    const canvas = document.createElement('canvas')
-    const texture = { needsUpdate: false }
+    const texture = {
+      needsUpdate: false,
+      addUpdateRange: vi.fn(),
+      clearUpdateRanges: vi.fn(),
+    }
+    const data = new Uint8Array(40 * 40 * 4)
     const atlas = {
-      canvas,
+      data,
+      width: 40,
+      height: 40,
       columns: 2,
       cellSize: 16,
       padding: 2,
       stride: 20,
       texture,
+      initialized: true,
     } as unknown as TextureAtlasResult
     const applyMs = applyTextureAtlasPatch(atlas, patch)
 
-    const context = contexts.get(canvas)!
-    expect(context.clearRect).toHaveBeenCalledWith(2, 22, 16, 16)
-    expect(context.drawImage).toHaveBeenCalledWith(patch.cells[0].canvas, 2, 22)
     expect(texture.needsUpdate).toBe(true)
+    expect(texture.clearUpdateRanges).not.toHaveBeenCalled()
+    expect(texture.addUpdateRange).toHaveBeenCalledTimes(16)
+    expect(patch.metrics.uploadBytes).toBe(16 * 16 * 4)
     expect(applyMs).toBeGreaterThanOrEqual(0)
+
+    applyTextureAtlasPatch(atlas, patch)
+    expect(texture.clearUpdateRanges).not.toHaveBeenCalled()
+    expect(texture.addUpdateRange).toHaveBeenCalledTimes(32)
   })
 
   it('falls back to the built-in card when custom drawing fails', async () => {

@@ -27,19 +27,26 @@ function deferred<T>() {
 
 function atlas(count: number) {
   const dispose = vi.fn()
-  const texture = { dispose, needsUpdate: false }
-  const canvas = document.createElement('canvas')
+  const texture = {
+    dispose,
+    needsUpdate: false,
+    clearUpdateRanges: vi.fn(),
+    addUpdateRange: vi.fn(),
+  }
+  const width = 128
+  const height = 128
   return {
     result: {
       texture: texture as unknown as TextureAtlasResult['texture'],
       rects: new Float32Array(count * 4),
-      width: 128,
-      height: 128,
-      canvas,
+      width,
+      height,
+      data: new Uint8Array(width * height * 4),
       columns: Math.ceil(Math.sqrt(count || 1)),
       cellSize: 64,
       padding: 2,
       stride: 68,
+      initialized: true,
       metrics: {
         cells: count,
         renderMs: 4,
@@ -47,6 +54,7 @@ function atlas(count: number) {
         imageLoadMs: 2,
         imageRequests: count,
         imageFailures: 0,
+        uploadBytes: width * height * 4,
       },
     },
     dispose,
@@ -113,12 +121,13 @@ describe('InstancedCardRenderer item loading', () => {
     expect(atlasMock.create).toHaveBeenCalledOnce()
     expect(renderer.getStats()).toMatchObject({
       instanceCount: 1,
+      submittedInstanceCount: 1,
       textureBytes: 87_382,
       atlasBuilds: 1,
       atlasPatches: 0,
       atlasCellsUpdated: 1,
       imageRequests: 1,
-      estimatedTextureUploadBytes: 87_382,
+      estimatedTextureUploadBytes: 65_536,
     })
     renderer.refreshTexture()
     expect(currentAtlas.texture.needsUpdate).toBe(true)
@@ -147,6 +156,10 @@ describe('InstancedCardRenderer item loading', () => {
     expect(mesh.material.uniforms.effectMode.value).toBe(3)
     expect(mesh.material.uniforms.effectParamsA.value.toArray()).toEqual([1, 2, 3, 4])
     expect(mesh.material.uniforms.effectParamsC.value.toArray()).toEqual([9, 10, 11, 12])
+    expect(mesh.geometry.instanceCount).toBe(1)
+    expect(renderer.getStats()).toMatchObject({ instanceCount: 2, submittedInstanceCount: 1 })
+    renderer.disableEffect()
+    expect(mesh.geometry.instanceCount).toBe(2)
     renderer.setHoverIndex(1)
     expect(mesh.material.uniforms.hoverIndex.value).toBe(1)
     renderer.setHoverIndex(null)
@@ -208,6 +221,7 @@ describe('InstancedCardRenderer item loading', () => {
         imageLoadMs: 0,
         imageRequests: 0,
         imageFailures: 0,
+        uploadBytes: 0,
       },
     }
     first.resolve(emptyPatch)

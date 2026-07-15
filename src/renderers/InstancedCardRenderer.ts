@@ -22,6 +22,7 @@ import {
 
 export interface CardRendererStats {
   instanceCount: number
+  submittedInstanceCount: number
   textureBytes: number
   atlasBuilds: number
   atlasPatches: number
@@ -43,6 +44,7 @@ interface CardRendererOptions extends TextureAtlasOptions {
 
 export class InstancedCardRenderer {
   private mesh: Mesh<InstancedBufferGeometry, ShaderMaterial> | null = null
+  private instanceCapacity = 0
   private material: ShaderMaterial | null = null
   private generation = 0
   private itemsFingerprint = ''
@@ -281,6 +283,7 @@ export class InstancedCardRenderer {
       side: FrontSide,
     })
     this.mesh = new Mesh(geometry, this.material)
+    this.instanceCapacity = items.length
     this.mesh.frustumCulled = false
     this.scene.add(this.mesh)
     this.itemsFingerprint = fingerprint
@@ -292,13 +295,13 @@ export class InstancedCardRenderer {
     this.imageLoadMs += atlas.metrics.imageLoadMs
     this.imageRequests += atlas.metrics.imageRequests
     this.imageFailures += atlas.metrics.imageFailures
-    this.estimatedTextureUploadBytes += this.textureBytes
+    this.estimatedTextureUploadBytes += atlas.metrics.uploadBytes
     this.atlas = atlas
     return true
   }
 
   async updateItems(items: MotionItem[], changedIndices: number[]): Promise<boolean> {
-    if (!this.mesh || !this.atlas || items.length !== this.mesh.geometry.instanceCount) {
+    if (!this.mesh || !this.atlas || items.length !== this.instanceCapacity) {
       return this.setItems(items)
     }
     const fingerprint = createItemsFingerprint(items)
@@ -317,7 +320,7 @@ export class InstancedCardRenderer {
     this.imageLoadMs += patch.metrics.imageLoadMs
     this.imageRequests += patch.metrics.imageRequests
     this.imageFailures += patch.metrics.imageFailures
-    this.estimatedTextureUploadBytes += this.textureBytes
+    this.estimatedTextureUploadBytes += patch.metrics.uploadBytes
     this.itemsFingerprint = fingerprint
     return true
   }
@@ -336,7 +339,7 @@ export class InstancedCardRenderer {
     toHideBackHemisphere?: number,
   ): void {
     if (!this.mesh) return
-    const count = Math.min(from.length, to.length, this.mesh.geometry.instanceCount)
+    const count = Math.min(from.length, to.length, this.instanceCapacity)
     const fromPosition = new Float32Array(count * 3)
     const toPosition = new Float32Array(count * 3)
     const fromQuaternion = new Float32Array(count * 4)
@@ -405,10 +408,16 @@ export class InstancedCardRenderer {
     uniforms.effectMode.value = effectMode(data.kind)
     uniforms.fromHideBackHemisphere.value = 0
     uniforms.toHideBackHemisphere.value = 0
+    let activeCount = 0
+    while (activeCount < data.speedFactors.length && data.speedFactors[activeCount] >= 0) {
+      activeCount += 1
+    }
+    this.mesh.geometry.instanceCount = Math.min(this.instanceCapacity, activeCount)
   }
 
   disableEffect(): void {
     if (this.material) this.material.uniforms.effectMode.value = 0
+    if (this.mesh) this.mesh.geometry.instanceCount = this.instanceCapacity
   }
 
   setEffectTime(elapsedSeconds: number): void {
@@ -425,14 +434,17 @@ export class InstancedCardRenderer {
 
   refreshTexture(): void {
     if (this.atlas) {
+      this.atlas.initialized = false
+      this.atlas.texture.clearUpdateRanges()
       this.atlas.texture.needsUpdate = true
-      this.estimatedTextureUploadBytes += this.textureBytes
+      this.estimatedTextureUploadBytes += this.atlas.data.byteLength
     }
   }
 
   getStats(): CardRendererStats {
     return {
-      instanceCount: this.mesh?.geometry.instanceCount ?? 0,
+      instanceCount: this.mesh ? this.instanceCapacity : 0,
+      submittedInstanceCount: this.mesh?.geometry.instanceCount ?? 0,
       textureBytes: this.textureBytes,
       atlasBuilds: this.atlasBuilds,
       atlasPatches: this.atlasPatches,
@@ -462,6 +474,7 @@ export class InstancedCardRenderer {
     texture?.dispose?.()
     this.material?.dispose()
     this.mesh = null
+    this.instanceCapacity = 0
     this.material = null
     this.itemsFingerprint = ''
     this.textureBytes = 0

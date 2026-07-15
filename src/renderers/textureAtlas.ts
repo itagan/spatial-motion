@@ -1,4 +1,4 @@
-import { CanvasTexture, LinearFilter, LinearMipmapLinearFilter, SRGBColorSpace } from 'three'
+import { DataTexture, LinearFilter, LinearMipmapLinearFilter, SRGBColorSpace } from 'three'
 import type { CardDrawBounds, CardStyle, DrawCard, MotionItem } from '../core/types.js'
 
 export interface TextureAtlasOptions {
@@ -10,15 +10,16 @@ export interface TextureAtlasOptions {
 }
 
 export interface TextureAtlasResult {
-  texture: CanvasTexture
+  texture: DataTexture
   rects: Float32Array
   width: number
   height: number
-  canvas: HTMLCanvasElement
+  data: Uint8Array
   columns: number
   cellSize: number
   padding: number
   stride: number
+  initialized: boolean
   metrics: TextureAtlasMetrics
 }
 
@@ -34,6 +35,7 @@ export interface TextureAtlasMetrics {
   imageLoadMs: number
   imageRequests: number
   imageFailures: number
+  uploadBytes: number
 }
 
 interface ImageLoadResult {
@@ -95,27 +97,42 @@ export async function createTextureAtlas(
     )
   })
 
-  const texture = new CanvasTexture(canvas)
+  const patch = await createTextureAtlasPatch(items, items.map((_item, index) => index), resolvedCellSize, options)
+  const applyStartedAt = now()
+  drawPatchToCanvas(canvas, columns, resolvedCellSize, padding, stride, patch)
+  patch.metrics.applyMs = now() - applyStartedAt
+  const imageData = canvas.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height)
+  if (!imageData) throw new Error('Canvas 2D image data is unavailable')
+  const data = new Uint8Array(imageData.data)
+  const texture = new DataTexture(data, canvas.width, canvas.height)
   texture.colorSpace = SRGBColorSpace
   texture.minFilter = LinearMipmapLinearFilter
   texture.magFilter = LinearFilter
   texture.generateMipmaps = true
+  texture.flipY = true
   texture.anisotropy = Math.max(1, Math.floor(options.anisotropy ?? 1))
-  const patch = await createTextureAtlasPatch(items, items.map((_item, index) => index), resolvedCellSize, options)
+  texture.needsUpdate = true
   const atlas: TextureAtlasResult = {
     texture,
     rects,
     width: canvas.width,
     height: canvas.height,
-    canvas,
+    data,
     columns,
     cellSize: resolvedCellSize,
     padding,
     stride,
+    initialized: false,
     metrics: patch.metrics,
   }
-  patch.metrics.applyMs = applyTextureAtlasPatch(atlas, patch)
-  atlas.metrics = { ...patch.metrics, renderMs: now() - startedAt }
+  texture.onUpdate = () => {
+    atlas.initialized = true
+  }
+  atlas.metrics = {
+    ...patch.metrics,
+    renderMs: now() - startedAt,
+    uploadBytes: data.byteLength,
+  }
   return atlas
 }
 
@@ -140,22 +157,54 @@ export async function createTextureAtlasPatch(
       imageLoadMs: renderedCells.reduce((sum, { rendered }) => sum + rendered.imageLoadMs, 0),
       imageRequests: renderedCells.reduce((sum, { rendered }) => sum + rendered.imageRequests, 0),
       imageFailures: renderedCells.reduce((sum, { rendered }) => sum + rendered.imageFailures, 0),
+      uploadBytes: 0,
     },
   }
 }
 
 export function applyTextureAtlasPatch(atlas: TextureAtlasResult, patch: TextureAtlasPatch): number {
   const startedAt = now()
-  const context = atlas.canvas.getContext('2d')
-  if (!context) throw new Error('Canvas 2D context is unavailable')
+  let uploadBytes = 0
   patch.cells.forEach(({ index, canvas }) => {
     const x = (index % atlas.columns) * atlas.stride + atlas.padding
     const y = Math.floor(index / atlas.columns) * atlas.stride + atlas.padding
-    context.clearRect(x, y, atlas.cellSize, atlas.cellSize)
-    context.drawImage(canvas, x, y)
+    const context = canvas.getContext('2d')
+    const imageData = context?.getImageData(0, 0, atlas.cellSize, atlas.cellSize)
+    if (!imageData) throw new Error('Canvas 2D image data is unavailable')
+    for (let row = 0; row < atlas.cellSize; row += 1) {
+      const sourceOffset = row * atlas.cellSize * 4
+      const targetOffset = ((y + row) * atlas.width + x) * 4
+      const rowLength = atlas.cellSize * 4
+      atlas.data.set(imageData.data.subarray(sourceOffset, sourceOffset + rowLength), targetOffset)
+      if (atlas.initialized) atlas.texture.addUpdateRange(targetOffset, rowLength)
+      uploadBytes += rowLength
+    }
   })
+  if (!atlas.initialized) {
+    atlas.texture.clearUpdateRanges()
+    uploadBytes = atlas.data.byteLength
+  }
+  patch.metrics.uploadBytes = uploadBytes
   atlas.texture.needsUpdate = true
   return now() - startedAt
+}
+
+function drawPatchToCanvas(
+  canvas: HTMLCanvasElement,
+  columns: number,
+  cellSize: number,
+  padding: number,
+  stride: number,
+  patch: TextureAtlasPatch,
+): void {
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Canvas 2D context is unavailable')
+  patch.cells.forEach(({ index, canvas: cellCanvas }) => {
+    const x = (index % columns) * stride + padding
+    const y = Math.floor(index / columns) * stride + padding
+    context.clearRect(x, y, cellSize, cellSize)
+    context.drawImage(cellCanvas, x, y)
+  })
 }
 
 async function renderCell(
