@@ -30,7 +30,7 @@ export function sphere(options: SphereOptions = {}): Layout {
       const rings = Math.max(2, Math.min(count, options.rings ?? calculateRingCount(count)))
       const distribution = calculateRingDistribution(count, rings)
       const angularStep = Math.PI / Math.max(1, rings - 1)
-      const itemScale = Math.min(1, radius * angularStep * (options.density ?? 0.86))
+      const density = Math.max(0, options.density ?? 0.86)
       const transforms: Transform[] = []
 
       for (let ring = 0; ring < rings; ring += 1) {
@@ -39,6 +39,14 @@ export function sphere(options: SphereOptions = {}): Layout {
         const ringRadius = Math.sin(phi)
         const itemsInRing = distribution[ring]
         const offset = options.stagger && ring % 2 === 1 ? Math.PI / itemsInRing : 0
+        const meridianSpacing = radius * angularStep
+        const circumferenceSpacing = itemsInRing > 1
+          ? (2 * Math.PI * radius * ringRadius) / itemsInRing
+          : meridianSpacing
+        const polarBreathingRoom = ring === 0 || ring === rings - 1 ? 0.72 : 1
+        const itemScale = Math.min(1, meridianSpacing, circumferenceSpacing)
+          * density
+          * polarBreathingRoom
 
         for (let index = 0; index < itemsInRing; index += 1) {
           const theta = itemsInRing === 1 ? 0 : (2 * Math.PI * index) / itemsInRing + offset

@@ -17,7 +17,7 @@ export function grid(options: GridOptions = {}): Layout {
       const columns = Math.max(1, options.columns ?? Math.ceil(Math.sqrt(count)))
       const rows = Math.ceil(count / columns)
       return Array.from({ length: count }, (_, index) => ({
-        x: (index % columns - (columns - 1) / 2) * gap,
+        x: centeredColumn(index, count, columns) * gap,
         y: ((rows - 1) / 2 - Math.floor(index / columns)) * gap,
         z: 0,
         scale: Math.min(1, gap * 0.82),
@@ -53,7 +53,7 @@ function fittedGrid(
   const itemScale = cellSize * 0.82
 
   return Array.from({ length: count }, (_, index) => ({
-    x: (index % columns - (columns - 1) / 2) * cellSize,
+    x: centeredColumn(index, count, columns) * cellSize,
     y: ((rows - 1) / 2 - Math.floor(index / columns)) * cellSize,
     z: 0,
     scale: itemScale,
@@ -62,6 +62,12 @@ function fittedGrid(
     rotationZ: 0,
     opacity: 1,
   }))
+}
+
+function centeredColumn(index: number, count: number, columns: number): number {
+  const row = Math.floor(index / columns)
+  const itemsInRow = Math.min(columns, count - row * columns)
+  return index % columns - (itemsInRow - 1) / 2
 }
 
 function bestColumns(count: number, width: number, height: number, fit: 'contain' | 'cover'): number {

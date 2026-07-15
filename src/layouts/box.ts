@@ -32,12 +32,13 @@ export function box(options: BoxOptions = {}): Layout {
     calculate(count): Transform[] {
       if (count <= 0) return []
       const distribution = calculateBoxFaceDistribution(count, width, height, depth)
-      return faces.flatMap((face, index) => createFaceTransforms(
-        face,
-        distribution[index],
-        density,
-        orientation,
-      ))
+      const plans = faces.map((face, index) => createFacePlan(face, distribution[index]))
+      const occupiedPlans = plans.filter(({ count }) => count > 0)
+      const sharedScale = Math.min(
+        1,
+        ...occupiedPlans.flatMap(({ cellWidth, cellHeight }) => [cellWidth, cellHeight]),
+      ) * density
+      return plans.flatMap((plan) => createFaceTransforms(plan, sharedScale, orientation))
     },
   }
 }
@@ -115,18 +116,37 @@ function createFaces(width: number, height: number, depth: number): FaceDefiniti
   ]
 }
 
+interface FacePlan {
+  face: FaceDefinition
+  count: number
+  columns: number
+  rows: number
+  cellWidth: number
+  cellHeight: number
+}
+
+function createFacePlan(face: FaceDefinition, count: number): FacePlan {
+  const columns = count > 0
+    ? Math.max(1, Math.ceil(Math.sqrt(count * face.width / face.height)))
+    : 1
+  const rows = Math.max(1, Math.ceil(count / columns))
+  return {
+    face,
+    count,
+    columns,
+    rows,
+    cellWidth: face.width / columns,
+    cellHeight: face.height / rows,
+  }
+}
+
 function createFaceTransforms(
-  face: FaceDefinition,
-  count: number,
-  density: number,
+  plan: FacePlan,
+  scale: number,
   orientation: NonNullable<BoxOptions['orientation']>,
 ): Transform[] {
+  const { face, count, columns, rows, cellWidth, cellHeight } = plan
   if (count <= 0) return []
-  const columns = Math.max(1, Math.ceil(Math.sqrt(count * face.width / face.height)))
-  const rows = Math.ceil(count / columns)
-  const cellWidth = face.width / columns
-  const cellHeight = face.height / rows
-  const scale = Math.min(1, cellWidth, cellHeight) * density
 
   return Array.from({ length: count }, (_, index) => {
     const row = Math.floor(index / columns)

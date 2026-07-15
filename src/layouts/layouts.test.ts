@@ -45,6 +45,15 @@ describe('layouts', () => {
     expect(distribution[distribution.length - 1]).toBe(1)
   })
 
+  it('sphere gives the singular poles breathing room without changing ring density', () => {
+    const result = sphere({ radius: 5, rings: 8 }).calculate(100, context)
+    const northPole = result[0]
+    const firstNonPolar = result.find(({ y }) => y < northPole.y)!
+
+    expect(northPole.scale).toBeLessThan(firstNonPolar.scale)
+    expect(result.at(-1)?.scale).toBeCloseTo(northPole.scale)
+  })
+
   it('grid creates unique positions', () => {
     const result = grid({ columns: 10 }).calculate(100, context)
     expect(new Set(result.map(({ x, y }) => `${x},${y}`)).size).toBe(100)
@@ -67,6 +76,15 @@ describe('layouts', () => {
     const height = Math.max(...result.map(({ y, scale }) => y + scale / 2))
       - Math.min(...result.map(({ y, scale }) => y - scale / 2))
     expect(width >= 16 || height >= 9).toBe(true)
+  })
+
+  it.each(['fixed', 'contain', 'cover'] as const)('grid %s centers an incomplete final row', (fit) => {
+    const result = grid({ columns: 4, fit }).calculate(10, {
+      ...context,
+      viewportWidth: 16,
+      viewportHeight: 9,
+    })
+    expect(result[8].x).toBeCloseTo(-result[9].x)
   })
 
   it.each([sphere(), cylinder(), grid(), ring(), helix(), cone(), box(), scatter()])(
@@ -122,6 +140,18 @@ describe('layouts', () => {
     expect(Math.max(...result.map(({ x, z }) => Math.hypot(x, z)))).toBeCloseTo(5, 5)
   })
 
+  it('cone reduces the apex card at the surface singularity', () => {
+    const result = cone({ radius: 5, height: 9, rings: 10 }).calculate(100, context)
+    expect(result[0].scale).toBeLessThan(result[1].scale)
+  })
+
+  it('cylinder closes incomplete rows and staggers adjacent seams', () => {
+    const result = cylinder({ radius: 5, columns: 4 }).calculate(10, context)
+    const finalRowAngles = result.slice(8).map(({ x, z }) => Math.atan2(x, z))
+    expect(Math.abs(finalRowAngles[1] - finalRowAngles[0])).toBeCloseTo(Math.PI)
+    expect(result[0].x).not.toBeCloseTo(result[4].x)
+  })
+
   it('box distributes items by face area and keeps them on the six surfaces', () => {
     const dimensions = { width: 12, height: 8, depth: 4 }
     const distribution = calculateBoxFaceDistribution(600, dimensions.width, dimensions.height, dimensions.depth)
@@ -150,6 +180,11 @@ describe('layouts', () => {
       expect(Object.values(transform).every(Number.isFinite)).toBe(true)
       expect([transform.rotationX, transform.rotationY, transform.rotationZ]).toEqual([0, 0, 0])
     })
+  })
+
+  it('box keeps card scale continuous across all occupied faces', () => {
+    const result = box({ width: 12, height: 8, depth: 4 }).calculate(600, context)
+    expect(new Set(result.map(({ scale }) => scale.toFixed(8))).size).toBe(1)
   })
 
   it('scatter is deterministic for the same seed and changes with another seed', () => {
