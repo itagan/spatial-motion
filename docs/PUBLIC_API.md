@@ -34,5 +34,9 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 - 新布局或新 Timeline 会使旧动画失效，旧回调不能覆盖新状态。
 - 图片与自定义异步绘制使用 token 保护；过期结果不应用到当前图集。
 - `destroy()` 幂等并释放监听器、Observer、纹理、几何体、材质和 WebGLRenderer；其他 API 在销毁后抛错。
+- `transition` 可设置 Stage 默认 duration/easing，单次调用仍可覆盖；数据更新同样透传 easing。
+- `cardResolution` 请求 32–256px 的图集单元，实际值可能为遵守 GPU 最大纹理尺寸而降低。
+- `imageTimeout` 控制单图等待时间；`onContextChange` 与 `getPerformanceStats().contextLost` 暴露 WebGL 上下文状态。
+- `scatter()` 的 `layers` 和 `spinMode` 是向后兼容的可选视觉控制；默认 seed 行为仍保持确定性。
 
 CSS3D 渲染器、Vue/React 适配器和业务动画配方不属于 v1.0 稳定核心；未来如加入，会使用独立入口或薄适配层设计。

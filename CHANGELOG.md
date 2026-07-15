@@ -2,6 +2,25 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)。日期使用 `YYYY-MM-DD`。
 
+## 1.1.0 - 2026-07-15
+
+视觉打磨与运行时加固版本。
+
+### Added
+
+- Stage 级默认过渡参数、`sineInOut` 缓动和 update API 的 easing 透传。
+- `cardResolution`、`imageTimeout`、`onContextChange` 与 `contextLost` 性能状态。
+- GPU 最大纹理尺寸自动收敛、mipmap、各向异性采样和图片加载超时回退。
+- benchmark 的 500/1000/2000 固定规模、WebGL 状态和 60 秒至 30 分钟切换压力测试。
+- Scatter 的稳定距离分层和 directional spin，并修复 billboard 导致 spin 不生效的问题。
+- 可重复执行的视觉验收矩阵。
+
+### Changed
+
+- Tunnel、Linear Shooter、Vortex、Radial Burst 统一使用端点零速度运动曲线和双边淡出窗口。
+- Burst 发射在周期开始与结束均平滑过渡，避免周期边界闪烁。
+- WebGL context loss 会暂停渲染，恢复时重新上传图集并按原暂停状态恢复。
+
 ## 1.0.0 - 2026-07-14
 
 首个稳定 API 版本。主体 WebGL 卡片场景继续使用单个实例 Mesh、固定实例池和 GPU 插值。

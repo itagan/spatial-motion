@@ -27,6 +27,7 @@ vi.mock('../renderers/InstancedCardRenderer', () => ({
     setEffectTime = vi.fn()
     setVisibleRatio = vi.fn()
     setHoverIndex = vi.fn()
+    refreshTexture = vi.fn()
     getStats = vi.fn(() => ({ instanceCount: 0, textureBytes: 0 }))
     dispose = vi.fn()
 
@@ -46,6 +47,7 @@ vi.mock('three', async (importOriginal) => {
     dispose = vi.fn()
     getPixelRatio = vi.fn(() => 1.5)
     info = { render: { calls: 1, triangles: 2 } }
+    capabilities = { maxTextureSize: 4096, getMaxAnisotropy: vi.fn(() => 8) }
 
     constructor() {
       this.domElement.getBoundingClientRect = () => ({
@@ -203,6 +205,46 @@ describe('MotionStage', () => {
     visibilitySpy.mockRestore()
   })
 
+  it('pauses on WebGL context loss and refreshes the atlas after restoration', () => {
+    const contextChanges = vi.fn()
+    const stage = createStage({ onContextChange: contextChanges })
+    const cards = currentCards()
+    const canvas = document.querySelector('canvas')!
+    const lost = new Event('webglcontextlost', { cancelable: true })
+
+    canvas.dispatchEvent(lost)
+    expect(lost.defaultPrevented).toBe(true)
+    expect(stage.getPerformanceStats()).toMatchObject({ paused: true, contextLost: true })
+    expect(contextChanges).toHaveBeenCalledWith('lost')
+
+    canvas.dispatchEvent(new Event('webglcontextrestored'))
+    expect(cards.refreshTexture).toHaveBeenCalledOnce()
+    expect(stage.getPerformanceStats()).toMatchObject({ paused: false, contextLost: false })
+    expect(contextChanges).toHaveBeenLastCalledWith('restored')
+
+    stage.pause()
+    canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
+    canvas.dispatchEvent(new Event('webglcontextrestored'))
+    expect(stage.getPerformanceStats()).toMatchObject({ paused: true, contextLost: false })
+    stage.resume()
+
+    stage.destroy()
+    canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
+    expect(contextChanges).toHaveBeenCalledTimes(4)
+  })
+
+  it('uses stage transition defaults when a call omits its own options', async () => {
+    const stage = createStage({ transition: { duration: 0 } })
+    const cards = currentCards()
+    await stage.setItems([{ id: 'a' }])
+    cards.prepareTransition.mockClear()
+
+    expect(await stage.to(layout(() => [transform({ x: 5 })]))).toBe(true)
+    expect(cards.setTransforms).toHaveBeenLastCalledWith([transform({ x: 5 })])
+    expect(cards.prepareTransition).not.toHaveBeenCalled()
+    stage.destroy()
+  })
+
   it('allows only the newest concurrent item update to mutate stage transforms', async () => {
     const stage = createStage()
     const cards = currentCards()
@@ -300,6 +342,7 @@ describe('MotionStage', () => {
     const secondLayout = layout(() => [transform({ x: 5 })], 'second')
 
     const firstTransition = stage.to(firstLayout, { duration: 100 })
+    expect(cards.prepareTransition.mock.calls.at(-1)?.slice(2)).toEqual([0, 1, 0, 0])
     const secondTransition = stage.to(secondLayout, { duration: 0 })
     callbacks.at(-1)?.(100)
 

@@ -5,6 +5,8 @@ export interface ScatterOptions {
   distance?: number
   depth?: number
   spin?: number
+  spinMode?: 'random' | 'directional'
+  layers?: number
   scale?: number
   opacity?: number
   seed?: number
@@ -15,22 +17,25 @@ export function scatter(options: ScatterOptions = {}): Layout {
   const distance = positive(options.distance, 10)
   const depth = Math.max(0, options.depth ?? distance * 0.6)
   const spin = Math.max(0, options.spin ?? Math.PI * 2)
+  const spinMode = options.spinMode ?? 'random'
+  const layers = Math.max(1, Math.floor(options.layers ?? 4))
   const scale = Math.max(0, options.scale ?? 0.25)
   const opacity = Math.min(1, Math.max(0, options.opacity ?? 0))
   const seed = Number.isFinite(options.seed) ? options.seed as number : 2030
 
   return {
     name: `scatter-${direction}`,
-    orientation: 'camera',
+    // Surface orientation lets the transition interpolate the configured spin.
+    // The cards are normally transparent at rest, so random final tilt is not exposed.
+    orientation: 'surface',
     calculate(count): Transform[] {
       return Array.from({ length: Math.max(0, count) }, (_, index) => {
-        const position = scatterPosition(index, direction, distance, depth, seed)
+        const position = scatterPosition(index, direction, distance, depth, seed, layers)
+        const rotations = scatterRotation(index, direction, spin, spinMode, seed)
         return {
           ...position,
           scale,
-          rotationX: centeredRandom(index * 7 + 4, seed) * spin,
-          rotationY: centeredRandom(index * 7 + 5, seed) * spin,
-          rotationZ: centeredRandom(index * 7 + 6, seed) * spin,
+          ...rotations,
           opacity,
         }
       })
@@ -44,8 +49,11 @@ function scatterPosition(
   distance: number,
   depth: number,
   seed: number,
+  layers: number,
 ): Pick<Transform, 'x' | 'y' | 'z'> {
-  const distanceFactor = 0.7 + random(index * 7 + 1, seed) * 0.3
+  const layer = index % layers
+  const layerJitter = random(index * 7 + 1, seed) * 0.45 + 0.275
+  const distanceFactor = 0.68 + ((layer + layerJitter) / layers) * 0.32
   if (direction === 'left' || direction === 'right') {
     return {
       x: (direction === 'left' ? -1 : 1) * distance * distanceFactor,
@@ -70,6 +78,29 @@ function scatterPosition(
     x: centeredRandom(index * 7 + 1, seed) * distance * 2,
     y: centeredRandom(index * 7 + 2, seed) * distance * 2,
     z: centeredRandom(index * 7 + 3, seed) * depth * 2,
+  }
+}
+
+function scatterRotation(
+  index: number,
+  direction: NonNullable<ScatterOptions['direction']>,
+  spin: number,
+  spinMode: NonNullable<ScatterOptions['spinMode']>,
+  seed: number,
+): Pick<Transform, 'rotationX' | 'rotationY' | 'rotationZ'> {
+  if (spinMode === 'random') {
+    return {
+      rotationX: centeredRandom(index * 7 + 4, seed) * spin,
+      rotationY: centeredRandom(index * 7 + 5, seed) * spin,
+      rotationZ: centeredRandom(index * 7 + 6, seed) * spin,
+    }
+  }
+  const directionSign = direction === 'left' ? -1 : 1
+  const magnitude = spin * (0.55 + random(index * 7 + 6, seed) * 0.45)
+  return {
+    rotationX: centeredRandom(index * 7 + 4, seed) * spin * 0.25,
+    rotationY: centeredRandom(index * 7 + 5, seed) * spin * 0.25,
+    rotationZ: directionSign * magnitude,
   }
 }
 

@@ -1,6 +1,8 @@
 import type { Transform } from '../core/types.js'
 import {
   createEffectParameters,
+  effectEdgeFade,
+  effectTravel,
   emissionEnvelope,
   emissionModeCode,
   resolveEmissionOptions,
@@ -88,17 +90,18 @@ export class LinearShooterEffect implements StreamingEffect {
       const offset = this.paths[pathIndex + 2]
       const enabled = this.speedFactors[index] >= 0
       const progress = fract(offset + elapsedSeconds * this.options.speed * Math.abs(this.speedFactors[index]))
+      const travel = effectTravel(progress)
       const distance = this.options.sourceRadius
-        + (outerRadius - this.options.sourceRadius) * progress
+        + (outerRadius - this.options.sourceRadius) * travel
       return {
         x: Math.cos(angle) * distance,
         y: Math.sin(angle) * distance,
         z: this.options.z,
-        scale: this.options.startScale + (this.options.endScale - this.options.startScale) * progress,
+        scale: this.options.startScale + (this.options.endScale - this.options.startScale) * travel,
         rotationX: 0,
         rotationY: 0,
         rotationZ: 0,
-        opacity: enabled ? edgeFade(progress) * emissionEnvelope(this.options.emission, elapsedSeconds) : 0,
+        opacity: enabled ? effectEdgeFade(progress, 0.06, 0.22) * emissionEnvelope(this.options.emission, elapsedSeconds) : 0,
       }
     })
   }
@@ -136,13 +139,4 @@ function random(index: number, seed: number): number {
 
 function fract(value: number): number {
   return value - Math.floor(value)
-}
-
-function smoothstep(min: number, max: number, value: number): number {
-  const normalized = Math.min(1, Math.max(0, (value - min) / (max - min)))
-  return normalized * normalized * (3 - 2 * normalized)
-}
-
-function edgeFade(progress: number): number {
-  return smoothstep(0, 0.04, progress) * (1 - smoothstep(0.82, 1, progress))
 }

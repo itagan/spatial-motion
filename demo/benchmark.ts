@@ -1,6 +1,7 @@
 import {
   BenchmarkSession,
   MotionStage,
+  box,
   cone,
   cylinder,
   grid,
@@ -29,8 +30,9 @@ const createItems = (count: number): MotionItem[] => Array.from({ length: count 
 
 const layouts: Record<string, Layout> = {
   sphere: sphere({ radius: 5.2 }),
+  box: box({ width: 8, height: 7, depth: 6 }),
   cylinder: cylinder({ radius: 5 }),
-  grid: grid({ columns: 30, gap: 0.42 }),
+  grid: grid({ fit: 'contain' }),
   ring: ring({ innerRadius: 0.8, spacing: 0.42 }),
   helix: helix({ radius: 4.6, height: 9 }),
   cone: cone({ radius: 5, height: 9, stagger: true }),
@@ -48,13 +50,34 @@ const effects: Record<string, StreamingEffect> = {
 const container = document.querySelector<HTMLElement>('#benchmark-stage')
 if (!container) throw new Error('Benchmark stage container not found')
 
-const stage = new MotionStage({ container, quality: 'auto', adaptivePerformance: true })
-let itemCount = 600
+const stage = new MotionStage({
+  container,
+  quality: 'auto',
+  adaptivePerformance: true,
+  cardResolution: 64,
+})
+let itemCount = 500
 let qualityMode: QualityMode = 'auto'
 let layoutName = 'sphere'
 let lastResult: BenchmarkResult | null = null
 let runTimer = 0
 let sampleTimer = 0
+let stressTimer = 0
+let stressOperations = 0
+const stressSequence = [
+  'sphere',
+  'box',
+  'tunnel-burst',
+  'grid',
+  'vortex',
+  'cylinder',
+  'shooter-wave',
+  'ring',
+  'burst',
+  'helix',
+  'tunnel-square',
+  'cone',
+]
 
 await stage.setItems(createItems(itemCount))
 stage.autoRotate({ y: 0.24 })
@@ -92,7 +115,8 @@ document.querySelectorAll<HTMLButtonElement>('[data-benchmark-effect]').forEach(
   })
 })
 
-document.querySelector('#run-benchmark')?.addEventListener('click', runBenchmark)
+document.querySelector('#run-benchmark')?.addEventListener('click', () => runBenchmark(false))
+document.querySelector('#run-stress')?.addEventListener('click', () => runBenchmark(true))
 document.querySelector('#export-result')?.addEventListener('click', exportResult)
 
 const metricsTimer = window.setInterval(updateMetrics, 500)
@@ -116,36 +140,60 @@ async function applyConfiguration(): Promise<void> {
   updateMetrics()
 }
 
-function runBenchmark(): void {
+function runBenchmark(stressMode: boolean): void {
   cancelRun()
   const durationSeconds = Number((document.querySelector<HTMLSelectElement>('#duration'))?.value ?? 10)
-  const session = new BenchmarkSession({ itemCount, qualityMode, layout: layoutName })
-  const runButton = document.querySelector<HTMLButtonElement>('#run-benchmark')
-  if (runButton) runButton.disabled = true
-  setStatus(`正在采样 ${durationSeconds} 秒…`)
+  const session = new BenchmarkSession({
+    itemCount,
+    qualityMode,
+    layout: stressMode ? 'transition-stress' : layoutName,
+  })
+  stressOperations = 0
+  setRunButtonsDisabled(true)
+  setStatus(stressMode
+    ? `正在运行 ${durationSeconds} 秒切换/更新压力测试…`
+    : `正在采样 ${durationSeconds} 秒…`)
   sampleTimer = window.setInterval(() => session.record(stage.getPerformanceStats()), 500)
+  if (stressMode) {
+    void runStressOperation()
+    stressTimer = window.setInterval(() => void runStressOperation(), 900)
+  }
   session.record(stage.getPerformanceStats())
   runTimer = window.setTimeout(() => {
     window.clearInterval(sampleTimer)
+    window.clearInterval(stressTimer)
     sampleTimer = 0
+    stressTimer = 0
     runTimer = 0
     session.record(stage.getPerformanceStats())
     lastResult = session.finish()
-    renderResult(lastResult)
-    if (runButton) runButton.disabled = false
+    renderResult(lastResult, stressMode)
+    setRunButtonsDisabled(false)
     const exportButton = document.querySelector<HTMLButtonElement>('#export-result')
     if (exportButton) exportButton.disabled = false
-    setStatus(`采样完成：平均 ${lastResult.averageFps.toFixed(1)} FPS，最低 ${lastResult.minimumFps.toFixed(1)} FPS`)
+    setStatus(`采样完成：平均 ${lastResult.averageFps.toFixed(1)} FPS，最低 ${lastResult.minimumFps.toFixed(1)} FPS${stressMode ? `，完成 ${stressOperations} 次压力操作` : ''}`)
   }, durationSeconds * 1000)
+}
+
+async function runStressOperation(): Promise<void> {
+  const target = stressSequence[stressOperations % stressSequence.length]
+  const operation = stressOperations
+  stressOperations += 1
+  const itemId = `benchmark-${operation % Math.max(1, itemCount) + 1}`
+  await stage.updateItem(itemId, { title: String(operation).padStart(4, '0') })
+  const effect = effects[target]
+  if (effect) await stage.enterEffect(effect, { duration: 700 })
+  else await stage.to(layouts[target], { duration: 700 })
 }
 
 function cancelRun(message?: string): void {
   if (runTimer) window.clearTimeout(runTimer)
   if (sampleTimer) window.clearInterval(sampleTimer)
+  if (stressTimer) window.clearInterval(stressTimer)
   runTimer = 0
   sampleTimer = 0
-  const runButton = document.querySelector<HTMLButtonElement>('#run-benchmark')
-  if (runButton) runButton.disabled = false
+  stressTimer = 0
+  setRunButtonsDisabled(false)
   if (message) setStatus(message)
 }
 
@@ -160,9 +208,10 @@ function updateMetrics(): void {
   setText('#metric-triangles', stats.triangles.toLocaleString())
   setText('#metric-texture', formatBytes(stats.textureBytes))
   setText('#metric-quality', `${stats.quality.toUpperCase()} / ${stats.qualityMode.toUpperCase()}`)
+  setText('#metric-context', stats.contextLost ? 'LOST' : 'READY')
 }
 
-function renderResult(result: BenchmarkResult): void {
+function renderResult(result: BenchmarkResult, stressMode: boolean): void {
   const summary = {
     configuration: result.configuration,
     durationMs: Math.round(result.durationMs),
@@ -176,8 +225,17 @@ function renderResult(result: BenchmarkResult): void {
     maximumTextureBytes: result.maximumTextureBytes,
     renderedItems: result.renderedItems,
     visibleItems: result.visibleItems,
+    contextLost: result.samples.some(({ stats }) => stats.contextLost),
+    stressOperations: stressMode ? stressOperations : 0,
   }
   setText('#benchmark-result', JSON.stringify(summary, null, 2))
+}
+
+function setRunButtonsDisabled(disabled: boolean): void {
+  const runButton = document.querySelector<HTMLButtonElement>('#run-benchmark')
+  const stressButton = document.querySelector<HTMLButtonElement>('#run-stress')
+  if (runButton) runButton.disabled = disabled
+  if (stressButton) stressButton.disabled = disabled
 }
 
 function exportResult(): void {

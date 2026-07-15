@@ -1,6 +1,8 @@
 import type { Transform } from '../core/types.js'
 import {
   createEffectParameters,
+  effectEdgeFade,
+  effectTravel,
   type StreamingEffect,
   type StreamingEffectGpuData,
 } from './types.js'
@@ -77,7 +79,8 @@ export class RadialBurstEffect implements StreamingEffect {
       const speedFactor = this.speedFactors[index]
       const enabled = speedFactor >= 0
       const progress = fract(offset + elapsedSeconds * this.options.speed * Math.abs(speedFactor))
-      const travel = this.options.direction === 'out' ? progress : 1 - progress
+      const curvedProgress = effectTravel(progress)
+      const travel = this.options.direction === 'out' ? curvedProgress : 1 - curvedProgress
       const distance = this.options.sourceRadius
         + (outerRadius - this.options.sourceRadius) * smoothstep(0, 1, travel)
       const horizontal = Math.cos(elevation) * distance
@@ -89,7 +92,7 @@ export class RadialBurstEffect implements StreamingEffect {
         rotationX: 0,
         rotationY: 0,
         rotationZ: 0,
-        opacity: enabled ? edgeFade(progress) : 0,
+        opacity: enabled ? effectEdgeFade(progress, 0.06, 0.2) : 0,
       }
     })
   }
@@ -128,8 +131,4 @@ function fract(value: number): number {
 function smoothstep(min: number, max: number, value: number): number {
   const normalized = Math.min(1, Math.max(0, (value - min) / (max - min)))
   return normalized * normalized * (3 - 2 * normalized)
-}
-
-function edgeFade(progress: number): number {
-  return smoothstep(0, 0.04, progress) * (1 - smoothstep(0.86, 1, progress))
 }

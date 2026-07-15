@@ -13,6 +13,7 @@ export const identityTransform = (): Transform => ({
 
 export const easing = {
   linear: (t: number) => t,
+  sineInOut: ((t: number) => -(Math.cos(Math.PI * t) - 1) / 2) satisfies EasingFunction,
   cubicInOut: ((t: number) =>
     t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2) satisfies EasingFunction,
 }

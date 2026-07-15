@@ -19,6 +19,7 @@ function stats(overrides: Partial<StagePerformanceStats> = {}): StagePerformance
     paused: false,
     effect: null,
     activeEffectItems: 0,
+    contextLost: false,
     ...overrides,
   }
 }

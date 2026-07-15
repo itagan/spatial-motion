@@ -27,10 +27,11 @@ function deferred<T>() {
 
 function atlas(count: number) {
   const dispose = vi.fn()
+  const texture = { dispose, needsUpdate: false }
   const canvas = document.createElement('canvas')
   return {
     result: {
-      texture: { dispose } as unknown as TextureAtlasResult['texture'],
+      texture: texture as unknown as TextureAtlasResult['texture'],
       rects: new Float32Array(count * 4),
       width: 128,
       height: 128,
@@ -41,6 +42,7 @@ function atlas(count: number) {
       stride: 68,
     },
     dispose,
+    texture,
   }
 }
 
@@ -100,7 +102,9 @@ describe('InstancedCardRenderer item loading', () => {
     expect(await renderer.setItems(items.map((item) => ({ ...item })))).toBe(true)
 
     expect(atlasMock.create).toHaveBeenCalledOnce()
-    expect(renderer.getStats()).toEqual({ instanceCount: 1, textureBytes: 65_536 })
+    expect(renderer.getStats()).toEqual({ instanceCount: 1, textureBytes: 87_382 })
+    renderer.refreshTexture()
+    expect(currentAtlas.texture.needsUpdate).toBe(true)
     renderer.dispose()
   })
 
@@ -130,6 +134,38 @@ describe('InstancedCardRenderer item loading', () => {
     expect(mesh.material.uniforms.hoverIndex.value).toBe(1)
     renderer.setHoverIndex(null)
     expect(mesh.material.uniforms.hoverIndex.value).toBe(-1)
+    renderer.dispose()
+  })
+
+  it('interpolates billboard orientation and hemisphere hiding with the same GPU progress', async () => {
+    const currentAtlas = atlas(1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene)
+    await renderer.setItems([{ id: 'a' }])
+    const transform = {
+      x: 0,
+      y: 0,
+      z: 0,
+      scale: 1,
+      rotationX: 0,
+      rotationY: 0,
+      rotationZ: 0,
+      opacity: 1,
+    }
+
+    renderer.prepareTransition([transform], [transform], 0, 1, 0, 1)
+    renderer.setProgress(0.5)
+
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+    expect(mesh.material.uniforms).toMatchObject({
+      progress: { value: 0.5 },
+      fromBillboard: { value: 0 },
+      toBillboard: { value: 1 },
+      fromHideBackHemisphere: { value: 0 },
+      toHideBackHemisphere: { value: 1 },
+    })
+    expect(mesh.material.vertexShader).toContain('mix(surfaceView, billboardView, billboardAmount)')
     renderer.dispose()
   })
 

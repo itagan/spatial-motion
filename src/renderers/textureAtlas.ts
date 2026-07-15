@@ -1,9 +1,12 @@
-import { CanvasTexture, LinearFilter, SRGBColorSpace } from 'three'
+import { CanvasTexture, LinearFilter, LinearMipmapLinearFilter, SRGBColorSpace } from 'three'
 import type { CardDrawBounds, CardStyle, DrawCard, MotionItem } from '../core/types.js'
 
 export interface TextureAtlasOptions {
   cardStyle?: CardStyle
   drawCard?: DrawCard
+  imageTimeout?: number
+  maxTextureSize?: number
+  anisotropy?: number
 }
 
 export interface TextureAtlasResult {
@@ -22,12 +25,22 @@ export interface TextureAtlasPatch {
   cells: Array<{ index: number; canvas: HTMLCanvasElement }>
 }
 
-const loadImage = (url: string): Promise<HTMLImageElement | null> =>
+const loadImage = (url: string, timeoutMs: number): Promise<HTMLImageElement | null> =>
   new Promise((resolve) => {
     const image = new Image()
+    let settled = false
+    const complete = (result: HTMLImageElement | null) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeoutId)
+      image.onload = null
+      image.onerror = null
+      resolve(result)
+    }
+    const timeoutId = window.setTimeout(() => complete(null), timeoutMs)
     image.crossOrigin = 'anonymous'
-    image.onload = () => resolve(image)
-    image.onerror = () => resolve(null)
+    image.onload = () => complete(image)
+    image.onerror = () => complete(null)
     image.src = url
   })
 
@@ -36,10 +49,11 @@ export async function createTextureAtlas(
   cellSize = 64,
   options: TextureAtlasOptions = {},
 ): Promise<TextureAtlasResult> {
-  const padding = 2
-  const stride = cellSize + padding * 2
-  const columns = Math.ceil(Math.sqrt(items.length || 1))
-  const rows = Math.ceil(Math.max(1, items.length) / columns)
+  const { padding, stride, columns, rows, cellSize: resolvedCellSize } = resolveAtlasMetrics(
+    items.length,
+    cellSize,
+    options.maxTextureSize,
+  )
   const canvas = document.createElement('canvas')
   canvas.width = columns * stride
   canvas.height = rows * stride
@@ -50,18 +64,19 @@ export async function createTextureAtlas(
     const x = (index % columns) * stride + padding
     const y = Math.floor(index / columns) * stride + padding
     rects.set(
-      [x / canvas.width, 1 - (y + cellSize) / canvas.height, cellSize / canvas.width, cellSize / canvas.height],
+      [x / canvas.width, 1 - (y + resolvedCellSize) / canvas.height, resolvedCellSize / canvas.width, resolvedCellSize / canvas.height],
       index * 4,
     )
   })
 
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
-  texture.minFilter = LinearFilter
+  texture.minFilter = LinearMipmapLinearFilter
   texture.magFilter = LinearFilter
-  texture.generateMipmaps = false
-  const atlas = { texture, rects, width: canvas.width, height: canvas.height, canvas, columns, cellSize, padding, stride }
-  const patch = await createTextureAtlasPatch(items, items.map((_item, index) => index), cellSize, options)
+  texture.generateMipmaps = true
+  texture.anisotropy = Math.max(1, Math.floor(options.anisotropy ?? 1))
+  const atlas = { texture, rects, width: canvas.width, height: canvas.height, canvas, columns, cellSize: resolvedCellSize, padding, stride }
+  const patch = await createTextureAtlasPatch(items, items.map((_item, index) => index), resolvedCellSize, options)
   applyTextureAtlasPatch(atlas, patch)
   return atlas
 }
@@ -104,7 +119,10 @@ async function renderCell(
   if (!context) throw new Error('Canvas 2D context is unavailable')
   const style = options.cardStyle ?? {}
   const bounds = { x: 0, y: 0, width: cellSize, height: cellSize }
-  const image = !options.drawCard && item.image ? await loadImage(item.image) : null
+  const imageTimeout = Number.isFinite(options.imageTimeout) && (options.imageTimeout ?? 0) > 0
+    ? Math.min(60_000, Math.max(100, options.imageTimeout as number))
+    : 10_000
+  const image = !options.drawCard && item.image ? await loadImage(item.image, imageTimeout) : null
 
   context.save()
   createCardPath(context, bounds, style)
@@ -132,6 +150,26 @@ async function renderCell(
     context.restore()
   }
   return canvas
+}
+
+export function resolveAtlasMetrics(
+  count: number,
+  requestedCellSize = 64,
+  requestedMaxTextureSize = 16_384,
+): { columns: number; rows: number; cellSize: number; padding: number; stride: number } {
+  const safeCount = Math.max(1, Math.floor(Number.isFinite(count) ? count : 1))
+  const columns = Math.ceil(Math.sqrt(safeCount))
+  const rows = Math.ceil(safeCount / columns)
+  const maxTextureSize = Math.max(1, Math.floor(
+    Number.isFinite(requestedMaxTextureSize) ? requestedMaxTextureSize : 16_384,
+  ))
+  const requested = Math.min(256, Math.max(32, Math.round(
+    Number.isFinite(requestedCellSize) ? requestedCellSize : 64,
+  )))
+  const strideLimit = Math.max(1, Math.floor(maxTextureSize / Math.max(columns, rows)))
+  const padding = Math.min(4, Math.max(0, Math.floor((strideLimit - 1) / 2)))
+  const cellSize = Math.min(requested, Math.max(1, strideLimit - padding * 2))
+  return { columns, rows, cellSize, padding, stride: cellSize + padding * 2 }
 }
 
 function drawDefaultCard(

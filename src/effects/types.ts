@@ -68,8 +68,20 @@ export function emissionEnvelope(options: ResolvedEmissionOptions, elapsedSecond
     return 1 - options.waveStrength + wave * options.waveStrength
   }
   const phase = modulo(elapsedSeconds, options.burstInterval)
-  const edge = Math.min(0.08, options.burstDuration * 0.25)
-  return 1 - smoothstep(options.burstDuration - edge, options.burstDuration, phase)
+  const edge = Math.min(0.1, options.burstDuration * 0.25)
+  return smoothstep(0, edge, phase)
+    * (1 - smoothstep(options.burstDuration - edge, options.burstDuration, phase))
+}
+
+/** Smooth travel with zero velocity at both ends, hidden by the effect edge fade before wrapping. */
+export function effectTravel(progress: number): number {
+  const value = Math.min(1, Math.max(0, progress))
+  return value * value * value * (value * (value * 6 - 15) + 10)
+}
+
+export function effectEdgeFade(progress: number, fadeIn: number, fadeOut: number): number {
+  return smoothstep(0, fadeIn, progress)
+    * (1 - smoothstep(1 - fadeOut, 1, progress))
 }
 
 function positive(value: number | undefined, fallback: number): number {
