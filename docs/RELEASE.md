@@ -77,5 +77,6 @@ npm install @itagan/spatial-motion three typescript vite
 - 包指标：Library JavaScript gzip 28,117 bytes；tarball 约 110 KB；layout-only 消费者 2,086 bytes。
 - 本地 Chromium：2000 items / high / burst tunnel，活跃实例 300，主体 1 Draw Call，无 error 级控制台日志。
 - 60 秒压力采样完成 67 次布局/特效中断与局部图集更新，共 122 个样本：平均 59.96 FPS、最低 59.15 FPS、最大帧时 16.91ms、最大 1 Draw Call、纹理内存稳定为 55,987,200 bytes，WebGL READY 且无页面 error 日志。该数字只描述当前测试环境，不作为设备性能承诺。
+- 30 分钟压力采样完成 2001 次布局/特效中断与局部图集更新，共 3602 个样本：平均 60.00 FPS、最低 56.65 FPS、平均帧时 16.67ms、最大帧时 17.65ms、最大 1 Draw Call、最大 4,000 triangles、纹理内存稳定为 55,987,200 bytes，2000 items 全部保持可渲染，WebGL 未发生 context loss 且无页面 error 日志。
 
-仍需在发布候选阶段执行目标设备 30 分钟采样和多浏览器人工画面检查。
+仍需在发布候选阶段执行 Firefox、Safari、Edge 和目标低配硬件的人工画面与性能检查；本地 Chromium 长测不替代这些设备结果。

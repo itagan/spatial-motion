@@ -66,4 +66,4 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 
 `npm run verify` 覆盖类型、95+ 单测、库/demo 构建、tgz 消费者、稳定子路径、Tree Shaking 和体积预算。自动化可证明数值、竞态和资源契约，但不能替代目标设备上的视觉判断；人工结果应随发布记录保存。
 
-2026-07-15 已完成本地 Chromium / 2000 items / auto-high 的 60 秒压力基线：67 次中断/局部更新，平均 59.96 FPS、最低 59.15 FPS、最大 1 Draw Call、WebGL READY、无页面 error 日志。详细数值记录在 `docs/RELEASE.md`。
+2026-07-15 已完成本地 Chromium / 2000 items / auto-high 的 60 秒与 30 分钟压力基线。30 分钟长测完成 2001 次中断/局部更新，平均 60.00 FPS、最低 56.65 FPS、最大帧时 17.65ms、最大 1 Draw Call，纹理内存保持 55,987,200 bytes，WebGL READY、无 context loss、无页面 error 日志。详细数值记录在 `docs/RELEASE.md`。
