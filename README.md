@@ -31,7 +31,7 @@
 - WebGL context loss 暂停/恢复、图片超时回退和长时间压力基准
 - P50/P95/P99、长帧、Stage/图集分阶段成本和可导入对比的性能基准
 
-源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.3.0 优化阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.4.0 优化阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
 
 ## 项目文档
 
@@ -286,9 +286,9 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 30.5 KB |
-| npm tarball | ≤ 150 KB | 121.9 KB |
-| 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 2.1 KB |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 30.7 KB |
+| npm tarball | ≤ 150 KB | 123.4 KB |
+| 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 2.2 KB |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。
 

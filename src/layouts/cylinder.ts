@@ -19,9 +19,10 @@ export function cylinder(options: CylinderOptions = {}): Layout {
       const spacing = options.spacing ?? horizontalSpacing
       const itemScale = Math.min(1, horizontalSpacing, spacing) * 0.78
       return Array.from({ length: count }, (_, index) => {
-        const column = index % columns
         const row = Math.floor(index / columns)
-        const angle = (column / columns) * Math.PI * 2
+        const column = index % columns
+        const rowItems = Math.min(columns, count - row * columns)
+        const angle = ((column + (row % 2 === 1 ? 0.5 : 0)) / rowItems) * Math.PI * 2
         return {
           x: Math.sin(angle) * radius,
           y: (rows / 2 - row - 0.5) * spacing,

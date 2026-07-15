@@ -34,4 +34,10 @@
 
 ## v1.4 下一步
 
-以相机正视、斜视和快速中断三组固定视角精修 Sphere 极点、Box 接缝、Cylinder 首尾、Cone 顶部与响应式密度。每项修改同时保存截图、变换确定性测试和 500/2000 实例 steady/transition-stress 指标，避免用额外几何体或 Draw Call 换取观感。
+Sphere 与 Cone 的奇点卡片增加留白，Box 六面使用统一尺度，Cylinder 各行独立闭环并交错接缝，Grid 残缺末行在三种 fit 模式下居中。浏览器固定视角已覆盖 Sphere、Box、Cylinder、Cone；2000 items / transition-stress / 3 秒保持平均 60 FPS、最大窗口 P95 17.60ms、0 长帧、1 Draw Call，平均 WebGL 提交 0.075ms。
+
+布局测试新增奇点尺度、跨面尺度连续性、圆柱闭环/交错和三种 Grid 末行居中检查；布局测试共 40 项。
+
+## v1.5 下一步
+
+统一 Tunnel、Linear Shooter、Vortex 与 Radial Burst 的速度曲线、密度包络、近远端淡出和周期边界。先使用 CPU/Shader 同帧测试锁定数学一致性，再在 500/2000 实例下检查静态首帧、周期循环、快速进入/退出和 Reduced Motion。

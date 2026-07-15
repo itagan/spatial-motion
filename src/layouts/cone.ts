@@ -39,7 +39,8 @@ export function cone(options: ConeOptions = {}): Layout {
         const y = height * (0.5 - progress)
         const itemsInRing = distribution[ringIndex]
         const angularSpacing = itemsInRing > 1 ? (2 * Math.PI * ringRadius) / itemsInRing : slantSpacing
-        const itemScale = Math.min(1, slantSpacing, angularSpacing) * density
+        const polarBreathingRoom = ringIndex === 0 ? 0.72 : 1
+        const itemScale = Math.min(1, slantSpacing, angularSpacing) * density * polarBreathingRoom
         const offset = options.stagger && ringIndex % 2 === 1 ? Math.PI / itemsInRing : 0
 
         for (let index = 0; index < itemsInRing; index += 1) {
