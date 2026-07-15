@@ -87,15 +87,26 @@ try {
   run(process.execPath, ['runtime-check.mjs'], consumer)
 
   await writeFile(join(consumer, 'consumer.ts'), `
-    import { type MotionItem, type MotionPreference, type MotionStage, sphere } from '${packageName}'
+    import {
+      type CardStyle,
+      type MotionItem,
+      type MotionItemUpdate,
+      type MotionPreference,
+      type MotionStage,
+      sphere,
+    } from '${packageName}'
     import { box, ring, scatter } from '${packageName}/layouts'
     import { vortex, type EmissionOptions } from '${packageName}/effects'
     import { BenchmarkSession } from '${packageName}/performance'
     const items: MotionItem[] = [{ id: 'one' }]
-    const stage: MotionStage | undefined = undefined
+    declare const stage: MotionStage | undefined
     const emission: EmissionOptions = { mode: 'wave' }
     const motion: MotionPreference = 'auto'
-    void [items, stage, sphere(), box(), ring(), scatter(), vortex(), BenchmarkSession, emission, motion]
+    const cardStyle: CardStyle = { shape: 'rounded', cornerRadius: 8 }
+    const updates: MotionItemUpdate[] = [{ id: 'one', patch: { title: 'updated' } }]
+    stage?.updateItem('one', { title: 'winner' })
+    stage?.updateItemsById(updates)
+    void [items, stage, sphere(), box(), ring(), scatter(), vortex(), BenchmarkSession, emission, motion, cardStyle]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
@@ -136,9 +147,15 @@ try {
     const container = document.querySelector<HTMLElement>('#stage')!
     const result = document.querySelector<HTMLElement>('#result')!
     const items: MotionItem[] = Array.from({ length: 12 }, (_, index) => ({ id: String(index), title: String(index) }))
-    const stage = new MotionStage({ container, quality: 'low', adaptivePerformance: false })
+    const stage = new MotionStage({
+      container,
+      quality: 'low',
+      adaptivePerformance: false,
+      cardStyle: { shape: 'rounded', cornerRadius: 8 },
+    })
     await stage.setItems(items)
     await stage.to(sphere({ radius: 3 }), { duration: 0 })
+    await stage.updateItem('0', { title: 'updated' })
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
     const stats = stage.getPerformanceStats()
     stage.destroy()

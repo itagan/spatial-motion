@@ -12,7 +12,13 @@ import {
 } from 'three'
 import type { MotionItem, Transform } from '../core/types.js'
 import type { StreamingEffectGpuData, StreamingEffectKind } from '../effects/types.js'
-import { createTextureAtlas } from './textureAtlas.js'
+import {
+  applyTextureAtlasPatch,
+  createTextureAtlas,
+  createTextureAtlasPatch,
+  type TextureAtlasOptions,
+  type TextureAtlasResult,
+} from './textureAtlas.js'
 
 export interface CardRendererStats {
   instanceCount: number
@@ -25,16 +31,17 @@ export class InstancedCardRenderer {
   private generation = 0
   private itemsFingerprint = ''
   private textureBytes = 0
+  private atlas: TextureAtlasResult | null = null
   private readonly euler = new Euler()
   private readonly quaternion = new Quaternion()
 
-  constructor(private readonly scene: Scene) {}
+  constructor(private readonly scene: Scene, private readonly atlasOptions: TextureAtlasOptions = {}) {}
 
   async setItems(items: MotionItem[]): Promise<boolean> {
     const fingerprint = createItemsFingerprint(items)
     if (this.mesh && fingerprint === this.itemsFingerprint) return true
     const generation = ++this.generation
-    const atlas = await createTextureAtlas(items)
+    const atlas = await createTextureAtlas(items, 64, this.atlasOptions)
     if (generation !== this.generation) {
       atlas.texture.dispose()
       return false
@@ -234,6 +241,21 @@ export class InstancedCardRenderer {
     this.scene.add(this.mesh)
     this.itemsFingerprint = fingerprint
     this.textureBytes = atlas.width * atlas.height * 4
+    this.atlas = atlas
+    return true
+  }
+
+  async updateItems(items: MotionItem[], changedIndices: number[]): Promise<boolean> {
+    if (!this.mesh || !this.atlas || items.length !== this.mesh.geometry.instanceCount) {
+      return this.setItems(items)
+    }
+    const fingerprint = createItemsFingerprint(items)
+    if (fingerprint === this.itemsFingerprint) return true
+    const generation = ++this.generation
+    const patch = await createTextureAtlasPatch(items, changedIndices, this.atlas.cellSize, this.atlasOptions)
+    if (generation !== this.generation || !this.atlas) return false
+    applyTextureAtlasPatch(this.atlas, patch)
+    this.itemsFingerprint = fingerprint
     return true
   }
 
@@ -340,6 +362,7 @@ export class InstancedCardRenderer {
     this.material = null
     this.itemsFingerprint = ''
     this.textureBytes = 0
+    this.atlas = null
   }
 
   private writeTransform(
@@ -377,7 +400,15 @@ function setVector4(target: Vector4, values: Float32Array, offset: number): void
 
 function createItemsFingerprint(items: MotionItem[]): string {
   return items
-    .map((item) => `${item.id.length}:${item.id}|${item.image?.length ?? 0}:${item.image ?? ''}|${item.title?.length ?? 0}:${item.title ?? ''}`)
+    .map((item) => {
+      let meta = ''
+      try {
+        meta = JSON.stringify(item.meta) ?? ''
+      } catch {
+        meta = String(item.meta ?? '')
+      }
+      return `${item.id.length}:${item.id}|${item.image?.length ?? 0}:${item.image ?? ''}|${item.title?.length ?? 0}:${item.title ?? ''}|${meta.length}:${meta}`
+    })
     .join('\n')
 }
 

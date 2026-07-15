@@ -1,14 +1,20 @@
+// @vitest-environment jsdom
+
 import { InstancedBufferGeometry, Mesh, Scene, ShaderMaterial } from 'three'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { TextureAtlasResult } from './textureAtlas'
+import type { TextureAtlasPatch, TextureAtlasResult } from './textureAtlas'
 import { InstancedCardRenderer } from './InstancedCardRenderer'
 
 const atlasMock = vi.hoisted(() => ({
   create: vi.fn(),
+  createPatch: vi.fn(),
+  applyPatch: vi.fn(),
 }))
 
 vi.mock('./textureAtlas', () => ({
   createTextureAtlas: atlasMock.create,
+  createTextureAtlasPatch: atlasMock.createPatch,
+  applyTextureAtlasPatch: atlasMock.applyPatch,
 }))
 
 function deferred<T>() {
@@ -21,12 +27,18 @@ function deferred<T>() {
 
 function atlas(count: number) {
   const dispose = vi.fn()
+  const canvas = document.createElement('canvas')
   return {
     result: {
       texture: { dispose } as unknown as TextureAtlasResult['texture'],
       rects: new Float32Array(count * 4),
       width: 128,
       height: 128,
+      canvas,
+      columns: Math.ceil(Math.sqrt(count || 1)),
+      cellSize: 64,
+      padding: 2,
+      stride: 68,
     },
     dispose,
   }
@@ -35,6 +47,8 @@ function atlas(count: number) {
 describe('InstancedCardRenderer item loading', () => {
   beforeEach(() => {
     atlasMock.create.mockReset()
+    atlasMock.createPatch.mockReset()
+    atlasMock.applyPatch.mockReset()
   })
 
   it('keeps only the newest asynchronous atlas result', async () => {
@@ -116,6 +130,29 @@ describe('InstancedCardRenderer item loading', () => {
     expect(mesh.material.uniforms.hoverIndex.value).toBe(1)
     renderer.setHoverIndex(null)
     expect(mesh.material.uniforms.hoverIndex.value).toBe(-1)
+    renderer.dispose()
+  })
+
+  it('applies only the newest asynchronous cell patch without replacing the mesh', async () => {
+    const currentAtlas = atlas(2)
+    const first = deferred<TextureAtlasPatch>()
+    const second = deferred<TextureAtlasPatch>()
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    atlasMock.createPatch.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene)
+    await renderer.setItems([{ id: 'a' }, { id: 'b' }])
+    const mesh = scene.children[0]
+
+    const firstUpdate = renderer.updateItems([{ id: 'a', title: 'old' }, { id: 'b' }], [0])
+    const secondUpdate = renderer.updateItems([{ id: 'a', title: 'new' }, { id: 'b' }], [0])
+    first.resolve({ cells: [] })
+    expect(await firstUpdate).toBe(false)
+    second.resolve({ cells: [] })
+    expect(await secondUpdate).toBe(true)
+
+    expect(atlasMock.applyPatch).toHaveBeenCalledOnce()
+    expect(scene.children[0]).toBe(mesh)
     renderer.dispose()
   })
 })

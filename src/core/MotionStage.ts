@@ -1,5 +1,13 @@
 import { Euler, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three'
-import type { Layout, MotionItem, QualityLevel, Transform, TransitionOptions } from './types.js'
+import type {
+  CardStyle,
+  DrawCard,
+  Layout,
+  MotionItem,
+  QualityLevel,
+  Transform,
+  TransitionOptions,
+} from './types.js'
 import { easing, identityTransform, interpolateTransform } from './math.js'
 import { InstancedCardRenderer } from '../renderers/InstancedCardRenderer.js'
 import { detectQuality, qualityProfiles, visibleRatios } from '../performance/quality.js'
@@ -23,11 +31,20 @@ export interface MotionStageOptions {
   motionPreference?: MotionPreference
   onItemHover?: (item: MotionItem | null, index: number | null) => void
   hoverEffect?: 'none' | 'highlight'
+  cardStyle?: CardStyle
+  drawCard?: DrawCard
 }
 
 export interface UpdateItemsOptions {
   layout?: Layout
   duration?: number
+}
+
+export type MotionItemPatch = Partial<Omit<MotionItem, 'id'>>
+
+export interface MotionItemUpdate {
+  id: string
+  patch: MotionItemPatch
 }
 
 export interface FocusItemsOptions extends TransitionOptions {
@@ -77,6 +94,7 @@ export class MotionStage {
   private readonly projectionVector = new Vector3()
   private readonly groupEuler = new Euler()
   private items: MotionItem[] = []
+  private sourceItems: MotionItem[] = []
   private transforms: Transform[] = []
   private frameId = 0
   private lastFrame = 0
@@ -141,7 +159,10 @@ export class MotionStage {
       this.motionQuery?.addEventListener('change', this.handleMotionPreferenceChange)
     }
     document.addEventListener('visibilitychange', this.handleVisibilityChange)
-    this.cards = new InstancedCardRenderer(this.scene)
+    this.cards = new InstancedCardRenderer(this.scene, {
+      cardStyle: options.cardStyle,
+      drawCard: options.drawCard,
+    })
     this.resizeObserver = new ResizeObserver(() => {
       if (!this.destroyed) this.resizeInternal()
     })
@@ -168,6 +189,7 @@ export class MotionStage {
     const applied = await this.cards.setItems(nextItems)
     if (!applied || token !== this.itemsToken || this.destroyed) return
     this.items = nextItems
+    this.sourceItems = items.map((item) => ({ ...item }))
     this.inputItemCount = items.length
     this.transforms = nextTransforms
     this.cards.setTransforms(nextTransforms)
@@ -273,6 +295,48 @@ export class MotionStage {
     return this.updateItemsInternal(items, options)
   }
 
+  updateItem(id: string, patch: MotionItemPatch, options: UpdateItemsOptions = {}): Promise<boolean> {
+    return this.updateItemsById([{ id, patch }], options)
+  }
+
+  updateItemsById(updates: MotionItemUpdate[], options: UpdateItemsOptions = {}): Promise<boolean> {
+    this.assertActive()
+    validateItemUpdates(updates)
+    return this.updateItemsByIdInternal(updates, options)
+  }
+
+  private async updateItemsByIdInternal(
+    updates: MotionItemUpdate[],
+    options: UpdateItemsOptions,
+  ): Promise<boolean> {
+    if (!updates.length) return true
+    const updatesById = new Map(updates.map((update) => [update.id, update.patch]))
+    const knownIds = new Set(this.sourceItems.map((item) => item.id))
+    updates.forEach(({ id }) => {
+      if (!knownIds.has(id)) throw new Error(`Unknown MotionItem id: ${id}`)
+    })
+    const nextSource = this.sourceItems.map((item) => {
+      const patch = updatesById.get(item.id)
+      return patch ? { ...item, ...patch, id: item.id } : item
+    })
+    const maxItems = qualityProfiles[this.quality].maxVisibleItems
+    const nextItems = nextSource.slice(0, maxItems)
+    const changedIndices = nextItems
+      .map((item, index) => updatesById.has(item.id) ? index : -1)
+      .filter((index) => index >= 0)
+    const token = ++this.itemsToken
+    const applied = await this.cards.updateItems(nextItems, changedIndices)
+    if (!applied || token !== this.itemsToken || this.destroyed) return false
+    this.sourceItems = nextSource
+    this.items = nextItems
+    this.inputItemCount = nextSource.length
+
+    if (!options.layout) return true
+    const completed = await this.transitionTo(options.layout, { duration: options.duration ?? 800 })
+    if (completed) this.lastLayout = options.layout
+    return completed
+  }
+
   private async updateItemsInternal(items: MotionItem[], options: UpdateItemsOptions): Promise<boolean> {
     const now = performance.now()
     const current = this.resolveCurrentTransforms(now)
@@ -294,6 +358,7 @@ export class MotionStage {
     const applied = await this.cards.setItems(nextItems)
     if (!applied || token !== this.itemsToken || this.destroyed) return false
     this.items = nextItems
+    this.sourceItems = items.map((item) => ({ ...item }))
     this.inputItemCount = items.length
     this.transforms = nextTransforms
     this.cards.setTransforms(nextTransforms)
@@ -759,5 +824,14 @@ function validateItems(items: MotionItem[]): void {
     if (!item.id.trim()) throw new Error(`MotionItem at index ${index} must have a non-empty id`)
     if (ids.has(item.id)) throw new Error(`Duplicate MotionItem id: ${item.id}`)
     ids.add(item.id)
+  })
+}
+
+function validateItemUpdates(updates: MotionItemUpdate[]): void {
+  const ids = new Set<string>()
+  updates.forEach(({ id }, index) => {
+    if (!id.trim()) throw new Error(`MotionItem update at index ${index} must have a non-empty id`)
+    if (ids.has(id)) throw new Error(`Duplicate MotionItem update id: ${id}`)
+    ids.add(id)
   })
 }

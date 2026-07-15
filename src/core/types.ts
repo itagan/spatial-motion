@@ -5,6 +5,27 @@ export interface MotionItem {
   meta?: unknown
 }
 
+export interface CardStyle {
+  shape?: 'square' | 'rounded' | 'circle'
+  cornerRadius?: number
+  borderWidth?: number
+  borderColor?: string
+  backgroundColor?: string
+}
+
+export interface CardDrawBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export type DrawCard = (
+  context: CanvasRenderingContext2D,
+  item: MotionItem,
+  bounds: CardDrawBounds,
+) => void | Promise<void>
+
 export interface Transform {
   x: number
   y: number
