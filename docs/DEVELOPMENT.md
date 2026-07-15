@@ -113,9 +113,13 @@ v1.x 的稳定入口和 SemVer 规则记录在 `docs/PUBLIC_API.md`。正式发�
 
 - 实例数量与质量模式；
 - FPS 与平均帧时间；
+- P50/P95/P99、24/33/50ms 长帧和异常帧；
 - 渲染/可见/特效活跃实例数；
 - Draw Call、三角形和纹理图集内存；
+- Stage CPU、WebGL 提交、图集构建/patch、图片加载和估算纹理上传；
 - 设备、浏览器和采样时长。
+
+优先使用 steady、cold-start、atlas-update 与 transition-stress 四类固定场景，并导出完整 JSON。比较优化前后结果时，实例数、质量、布局、场景和环境应一致；`compareBenchmarkResults()` 会标记配置是否可直接比较。
 
 性能结果会受设备与浏览器影响，所以不要只报告一个孤立 FPS 数字，也不要以降低视觉数量之外的指标来掩盖退化。
 

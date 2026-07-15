@@ -37,6 +37,9 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 - `transition` 可设置 Stage 默认 duration/easing，单次调用仍可覆盖；数据更新同样透传 easing。
 - `cardResolution` 请求 32–256px 的图集单元，实际值可能为遵守 GPU 最大纹理尺寸而降低。
 - `imageTimeout` 控制单图等待时间；`onContextChange` 与 `getPerformanceStats().contextLost` 暴露 WebGL 上下文状态。
+- `getPerformanceStats()` 额外提供帧分位数、长帧、Stage CPU/提交、布局/拾取、图集更新、图片加载和估算纹理上传统计；累计字段在 Stage 生命周期内单调递增。
+- `getPerformanceEnvironment()` 返回浏览器、GPU、视口、DPR、实际像素比与最大纹理尺寸，用于保存可复现基准环境。
+- `BenchmarkSession` 汇总采样窗口，`compareBenchmarkResults()` 只在实例数、质量、布局与场景一致时标记结果可直接比较。
 - `scatter()` 的 `layers` 和 `spinMode` 是向后兼容的可选视觉控制；默认 seed 行为仍保持确定性。
 
 CSS3D 渲染器、Vue/React 适配器和业务动画配方不属于 v1.0 稳定核心；未来如加入，会使用独立入口或薄适配层设计。

@@ -19,14 +19,39 @@ export interface TextureAtlasResult {
   cellSize: number
   padding: number
   stride: number
+  metrics: TextureAtlasMetrics
 }
 
 export interface TextureAtlasPatch {
   cells: Array<{ index: number; canvas: HTMLCanvasElement }>
+  metrics: TextureAtlasMetrics
 }
 
-const loadImage = (url: string, timeoutMs: number): Promise<HTMLImageElement | null> =>
+export interface TextureAtlasMetrics {
+  cells: number
+  renderMs: number
+  applyMs: number
+  imageLoadMs: number
+  imageRequests: number
+  imageFailures: number
+}
+
+interface ImageLoadResult {
+  image: HTMLImageElement | null
+  durationMs: number
+  failed: boolean
+}
+
+interface RenderedCell {
+  canvas: HTMLCanvasElement
+  imageLoadMs: number
+  imageRequests: number
+  imageFailures: number
+}
+
+const loadImage = (url: string, timeoutMs: number): Promise<ImageLoadResult> =>
   new Promise((resolve) => {
+    const startedAt = now()
     const image = new Image()
     let settled = false
     const complete = (result: HTMLImageElement | null) => {
@@ -35,7 +60,7 @@ const loadImage = (url: string, timeoutMs: number): Promise<HTMLImageElement | n
       window.clearTimeout(timeoutId)
       image.onload = null
       image.onerror = null
-      resolve(result)
+      resolve({ image: result, durationMs: now() - startedAt, failed: result === null })
     }
     const timeoutId = window.setTimeout(() => complete(null), timeoutMs)
     image.crossOrigin = 'anonymous'
@@ -49,6 +74,7 @@ export async function createTextureAtlas(
   cellSize = 64,
   options: TextureAtlasOptions = {},
 ): Promise<TextureAtlasResult> {
+  const startedAt = now()
   const { padding, stride, columns, rows, cellSize: resolvedCellSize } = resolveAtlasMetrics(
     items.length,
     cellSize,
@@ -75,9 +101,21 @@ export async function createTextureAtlas(
   texture.magFilter = LinearFilter
   texture.generateMipmaps = true
   texture.anisotropy = Math.max(1, Math.floor(options.anisotropy ?? 1))
-  const atlas = { texture, rects, width: canvas.width, height: canvas.height, canvas, columns, cellSize: resolvedCellSize, padding, stride }
   const patch = await createTextureAtlasPatch(items, items.map((_item, index) => index), resolvedCellSize, options)
-  applyTextureAtlasPatch(atlas, patch)
+  const atlas: TextureAtlasResult = {
+    texture,
+    rects,
+    width: canvas.width,
+    height: canvas.height,
+    canvas,
+    columns,
+    cellSize: resolvedCellSize,
+    padding,
+    stride,
+    metrics: patch.metrics,
+  }
+  patch.metrics.applyMs = applyTextureAtlasPatch(atlas, patch)
+  atlas.metrics = { ...patch.metrics, renderMs: now() - startedAt }
   return atlas
 }
 
@@ -87,15 +125,27 @@ export async function createTextureAtlasPatch(
   cellSize: number,
   options: TextureAtlasOptions = {},
 ): Promise<TextureAtlasPatch> {
+  const startedAt = now()
   const uniqueIndices = [...new Set(indices)].filter((index) => index >= 0 && index < items.length)
-  const cells = await Promise.all(uniqueIndices.map(async (index) => ({
+  const renderedCells = await Promise.all(uniqueIndices.map(async (index) => ({
     index,
-    canvas: await renderCell(items[index], cellSize, options),
+    rendered: await renderCell(items[index], cellSize, options),
   })))
-  return { cells }
+  return {
+    cells: renderedCells.map(({ index, rendered }) => ({ index, canvas: rendered.canvas })),
+    metrics: {
+      cells: renderedCells.length,
+      renderMs: now() - startedAt,
+      applyMs: 0,
+      imageLoadMs: renderedCells.reduce((sum, { rendered }) => sum + rendered.imageLoadMs, 0),
+      imageRequests: renderedCells.reduce((sum, { rendered }) => sum + rendered.imageRequests, 0),
+      imageFailures: renderedCells.reduce((sum, { rendered }) => sum + rendered.imageFailures, 0),
+    },
+  }
 }
 
-export function applyTextureAtlasPatch(atlas: TextureAtlasResult, patch: TextureAtlasPatch): void {
+export function applyTextureAtlasPatch(atlas: TextureAtlasResult, patch: TextureAtlasPatch): number {
+  const startedAt = now()
   const context = atlas.canvas.getContext('2d')
   if (!context) throw new Error('Canvas 2D context is unavailable')
   patch.cells.forEach(({ index, canvas }) => {
@@ -105,13 +155,14 @@ export function applyTextureAtlasPatch(atlas: TextureAtlasResult, patch: Texture
     context.drawImage(canvas, x, y)
   })
   atlas.texture.needsUpdate = true
+  return now() - startedAt
 }
 
 async function renderCell(
   item: MotionItem,
   cellSize: number,
   options: TextureAtlasOptions,
-): Promise<HTMLCanvasElement> {
+): Promise<RenderedCell> {
   const canvas = document.createElement('canvas')
   canvas.width = cellSize
   canvas.height = cellSize
@@ -122,7 +173,10 @@ async function renderCell(
   const imageTimeout = Number.isFinite(options.imageTimeout) && (options.imageTimeout ?? 0) > 0
     ? Math.min(60_000, Math.max(100, options.imageTimeout as number))
     : 10_000
-  const image = !options.drawCard && item.image ? await loadImage(item.image, imageTimeout) : null
+  const imageResult = !options.drawCard && item.image
+    ? await loadImage(item.image, imageTimeout)
+    : null
+  const image = imageResult?.image ?? null
 
   context.save()
   createCardPath(context, bounds, style)
@@ -149,7 +203,12 @@ async function renderCell(
     context.stroke()
     context.restore()
   }
-  return canvas
+  return {
+    canvas,
+    imageLoadMs: imageResult?.durationMs ?? 0,
+    imageRequests: imageResult ? 1 : 0,
+    imageFailures: imageResult?.failed ? 1 : 0,
+  }
 }
 
 export function resolveAtlasMetrics(
@@ -250,4 +309,8 @@ function hash(value: string): number {
     result = (result << 5) - result + value.charCodeAt(index)
   }
   return result
+}
+
+function now(): number {
+  return globalThis.performance?.now() ?? Date.now()
 }

@@ -12,6 +12,13 @@ export interface AdaptivePerformanceOptions {
 export interface PerformanceStats {
   fps: number
   averageFrameMs: number
+  frameTimeP50: number
+  frameTimeP95: number
+  frameTimeP99: number
+  longFramesOver24Ms: number
+  longFramesOver33Ms: number
+  longFramesOver50Ms: number
+  ignoredFrames: number
   quality: QualityLevel
   sampleCount: number
 }
@@ -24,6 +31,10 @@ export class AdaptivePerformanceManager {
   private windowStartedAt = 0
   private stableSince = 0
   private lastChangedAt = -Infinity
+  private longFramesOver24Ms = 0
+  private longFramesOver33Ms = 0
+  private longFramesOver50Ms = 0
+  private ignoredFrames = 0
   private stats: PerformanceStats
 
   constructor(private quality: QualityLevel, options: AdaptivePerformanceOptions = {}) {
@@ -34,19 +45,50 @@ export class AdaptivePerformanceManager {
       degradeThreshold: options.degradeThreshold ?? 0.78,
       recoveryThreshold: options.recoveryThreshold ?? 0.9,
     }
-    this.stats = { fps: 0, averageFrameMs: 0, quality, sampleCount: 0 }
+    this.stats = {
+      fps: 0,
+      averageFrameMs: 0,
+      frameTimeP50: 0,
+      frameTimeP95: 0,
+      frameTimeP99: 0,
+      longFramesOver24Ms: 0,
+      longFramesOver33Ms: 0,
+      longFramesOver50Ms: 0,
+      ignoredFrames: 0,
+      quality,
+      sampleCount: 0,
+    }
   }
 
   recordFrame(frameMs: number, now: number, allowQualityChange = true): QualityLevel | null {
     // Ignore tab suspension, debugger pauses and invalid measurements.
-    if (frameMs < 4 || frameMs > 100) return null
+    if (frameMs < 4 || frameMs > 100) {
+      this.ignoredFrames += 1
+      return null
+    }
+    if (frameMs > 24) this.longFramesOver24Ms += 1
+    if (frameMs > 33) this.longFramesOver33Ms += 1
+    if (frameMs > 50) this.longFramesOver50Ms += 1
     if (!this.windowStartedAt) this.windowStartedAt = now
     this.samples.push(frameMs)
     if (now - this.windowStartedAt < this.options.sampleWindowMs) return null
 
     const averageFrameMs = this.samples.reduce((sum, value) => sum + value, 0) / this.samples.length
     const fps = 1000 / averageFrameMs
-    this.stats = { fps, averageFrameMs, quality: this.quality, sampleCount: this.samples.length }
+    const orderedSamples = [...this.samples].sort((a, b) => a - b)
+    this.stats = {
+      fps,
+      averageFrameMs,
+      frameTimeP50: percentile(orderedSamples, 0.5),
+      frameTimeP95: percentile(orderedSamples, 0.95),
+      frameTimeP99: percentile(orderedSamples, 0.99),
+      longFramesOver24Ms: this.longFramesOver24Ms,
+      longFramesOver33Ms: this.longFramesOver33Ms,
+      longFramesOver50Ms: this.longFramesOver50Ms,
+      ignoredFrames: this.ignoredFrames,
+      quality: this.quality,
+      sampleCount: this.samples.length,
+    }
     this.samples = []
     this.windowStartedAt = now
 
@@ -83,6 +125,22 @@ export class AdaptivePerformanceManager {
   }
 
   getStats(): PerformanceStats {
-    return { ...this.stats, quality: this.quality }
+    return {
+      ...this.stats,
+      quality: this.quality,
+      longFramesOver24Ms: this.longFramesOver24Ms,
+      longFramesOver33Ms: this.longFramesOver33Ms,
+      longFramesOver50Ms: this.longFramesOver50Ms,
+      ignoredFrames: this.ignoredFrames,
+    }
   }
+}
+
+function percentile(orderedValues: number[], fraction: number): number {
+  if (!orderedValues.length) return 0
+  const position = Math.min(1, Math.max(0, fraction)) * (orderedValues.length - 1)
+  const lowerIndex = Math.floor(position)
+  const upperIndex = Math.ceil(position)
+  const weight = position - lowerIndex
+  return orderedValues[lowerIndex] * (1 - weight) + orderedValues[upperIndex] * weight
 }

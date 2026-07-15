@@ -23,6 +23,18 @@ import {
 export interface CardRendererStats {
   instanceCount: number
   textureBytes: number
+  atlasBuilds: number
+  atlasPatches: number
+  atlasDiscardedBuilds: number
+  atlasDiscardedPatches: number
+  atlasCellsUpdated: number
+  atlasBuildMs: number
+  atlasPatchMs: number
+  atlasDrawMs: number
+  imageLoadMs: number
+  imageRequests: number
+  imageFailures: number
+  estimatedTextureUploadBytes: number
 }
 
 interface CardRendererOptions extends TextureAtlasOptions {
@@ -36,6 +48,18 @@ export class InstancedCardRenderer {
   private itemsFingerprint = ''
   private textureBytes = 0
   private atlas: TextureAtlasResult | null = null
+  private atlasBuilds = 0
+  private atlasPatches = 0
+  private atlasDiscardedBuilds = 0
+  private atlasDiscardedPatches = 0
+  private atlasCellsUpdated = 0
+  private atlasBuildMs = 0
+  private atlasPatchMs = 0
+  private atlasDrawMs = 0
+  private imageLoadMs = 0
+  private imageRequests = 0
+  private imageFailures = 0
+  private estimatedTextureUploadBytes = 0
   private readonly euler = new Euler()
   private readonly quaternion = new Quaternion()
 
@@ -47,6 +71,7 @@ export class InstancedCardRenderer {
     const generation = ++this.generation
     const atlas = await createTextureAtlas(items, this.atlasOptions.cellSize ?? 64, this.atlasOptions)
     if (generation !== this.generation) {
+      this.atlasDiscardedBuilds += 1
       atlas.texture.dispose()
       return false
     }
@@ -260,6 +285,14 @@ export class InstancedCardRenderer {
     this.scene.add(this.mesh)
     this.itemsFingerprint = fingerprint
     this.textureBytes = Math.ceil(atlas.width * atlas.height * 4 * 4 / 3)
+    this.atlasBuilds += 1
+    this.atlasCellsUpdated += atlas.metrics.cells
+    this.atlasBuildMs += atlas.metrics.renderMs
+    this.atlasDrawMs += atlas.metrics.applyMs
+    this.imageLoadMs += atlas.metrics.imageLoadMs
+    this.imageRequests += atlas.metrics.imageRequests
+    this.imageFailures += atlas.metrics.imageFailures
+    this.estimatedTextureUploadBytes += this.textureBytes
     this.atlas = atlas
     return true
   }
@@ -272,8 +305,19 @@ export class InstancedCardRenderer {
     if (fingerprint === this.itemsFingerprint) return true
     const generation = ++this.generation
     const patch = await createTextureAtlasPatch(items, changedIndices, this.atlas.cellSize, this.atlasOptions)
-    if (generation !== this.generation || !this.atlas) return false
-    applyTextureAtlasPatch(this.atlas, patch)
+    if (generation !== this.generation || !this.atlas) {
+      this.atlasDiscardedPatches += 1
+      return false
+    }
+    const applyMs = applyTextureAtlasPatch(this.atlas, patch)
+    this.atlasPatches += 1
+    this.atlasCellsUpdated += patch.metrics.cells
+    this.atlasPatchMs += patch.metrics.renderMs + applyMs
+    this.atlasDrawMs += applyMs
+    this.imageLoadMs += patch.metrics.imageLoadMs
+    this.imageRequests += patch.metrics.imageRequests
+    this.imageFailures += patch.metrics.imageFailures
+    this.estimatedTextureUploadBytes += this.textureBytes
     this.itemsFingerprint = fingerprint
     return true
   }
@@ -380,13 +424,28 @@ export class InstancedCardRenderer {
   }
 
   refreshTexture(): void {
-    if (this.atlas) this.atlas.texture.needsUpdate = true
+    if (this.atlas) {
+      this.atlas.texture.needsUpdate = true
+      this.estimatedTextureUploadBytes += this.textureBytes
+    }
   }
 
   getStats(): CardRendererStats {
     return {
       instanceCount: this.mesh?.geometry.instanceCount ?? 0,
       textureBytes: this.textureBytes,
+      atlasBuilds: this.atlasBuilds,
+      atlasPatches: this.atlasPatches,
+      atlasDiscardedBuilds: this.atlasDiscardedBuilds,
+      atlasDiscardedPatches: this.atlasDiscardedPatches,
+      atlasCellsUpdated: this.atlasCellsUpdated,
+      atlasBuildMs: this.atlasBuildMs,
+      atlasPatchMs: this.atlasPatchMs,
+      atlasDrawMs: this.atlasDrawMs,
+      imageLoadMs: this.imageLoadMs,
+      imageRequests: this.imageRequests,
+      imageFailures: this.imageFailures,
+      estimatedTextureUploadBytes: this.estimatedTextureUploadBytes,
     }
   }
 

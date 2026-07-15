@@ -9,6 +9,7 @@ export type {
   PickResult,
   QualityMode,
   StagePerformanceStats,
+  StagePerformanceEnvironment,
   UpdateItemsOptions,
 } from './core/MotionStage.js'
 export { Timeline } from './core/Timeline.js'
