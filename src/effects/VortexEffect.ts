@@ -3,6 +3,7 @@ import {
   createEffectParameters,
   effectEdgeFade,
   effectTravel,
+  stableEffectPhase,
   type StreamingEffect,
   type StreamingEffectGpuData,
 } from './types.js'
@@ -60,7 +61,7 @@ export class VortexEffect implements StreamingEffect {
       const angle = random(index * 3 + 1, this.options.seed) * Math.PI * 2
       const radius = this.options.outerRadius * (0.82 + random(index * 3 + 2, this.options.seed) * 0.18)
       const offset = index < activeCount
-        ? (index / Math.max(1, activeCount) + random(index * 3 + 3, this.options.seed) / Math.max(1, activeCount)) % 1
+        ? stableEffectPhase(index, this.options.seed)
         : 0
       this.paths.set([angle, radius, offset, 0], index * 4)
       this.speedFactors[index] = index < activeCount

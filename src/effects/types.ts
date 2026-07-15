@@ -84,12 +84,26 @@ export function effectEdgeFade(progress: number, fadeIn: number, fadeOut: number
     * (1 - smoothstep(1 - fadeOut, 1, progress))
 }
 
+/**
+ * Low-discrepancy phase independent of the current active limit. Quality changes
+ * can therefore reveal or hide a prefix without moving the instances that stay active.
+ */
+export function stableEffectPhase(index: number, seed: number): number {
+  const goldenRatioConjugate = 0.6180339887498949
+  const seedRotation = fract(Math.sin(seed * 78.233) * 43758.5453)
+  return fract((index + 0.5) * goldenRatioConjugate + seedRotation)
+}
+
 function positive(value: number | undefined, fallback: number): number {
   return Number.isFinite(value) && (value ?? 0) > 0 ? value as number : fallback
 }
 
 function modulo(value: number, divisor: number): number {
   return ((value % divisor) + divisor) % divisor
+}
+
+function fract(value: number): number {
+  return value - Math.floor(value)
 }
 
 function smoothstep(min: number, max: number, value: number): number {

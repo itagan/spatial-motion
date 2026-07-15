@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import { linearShooter } from './LinearShooterEffect'
+import { radialBurst } from './RadialBurstEffect'
+import { tunnel } from './TunnelEffect'
+import { vortex } from './VortexEffect'
 import {
   effectEdgeFade,
   effectTravel,
   emissionEnvelope,
   resolveEmissionOptions,
+  stableEffectPhase,
 } from './types'
 
 describe('shared effect motion curves', () => {
@@ -33,5 +38,29 @@ describe('shared effect motion curves', () => {
     expect(emissionEnvelope(emission, 0.25)).toBe(1)
     expect(emissionEnvelope(emission, 1.999)).toBe(0)
     expect(emissionEnvelope(emission, 2)).toBe(0)
+  })
+
+  it('uses a stable low-discrepancy phase for active-pool prefixes', () => {
+    const phases = Array.from({ length: 200 }, (_, index) => stableEffectPhase(index, 42))
+    expect(phases).toEqual(Array.from({ length: 200 }, (_, index) => stableEffectPhase(index, 42)))
+    expect(new Set(phases.map((phase) => phase.toFixed(8))).size).toBe(200)
+    const buckets = Array.from({ length: 10 }, (_, bucket) =>
+      phases.filter((phase) => phase >= bucket / 10 && phase < (bucket + 1) / 10).length,
+    )
+    expect(Math.max(...buckets) - Math.min(...buckets)).toBeLessThanOrEqual(4)
+  })
+
+  it.each([
+    tunnel({ seed: 12, maxActiveItems: 100 }),
+    linearShooter({ seed: 12, maxActiveItems: 100 }),
+    vortex({ seed: 12, maxActiveItems: 100 }),
+    radialBurst({ seed: 12, maxActiveItems: 100 }),
+  ])('$name preserves active trajectories when the quality cap changes', (effect) => {
+    effect.prepare(100, 30)
+    const paths = Array.from(effect.getGpuData().paths.slice(0, 30 * 4))
+    const speeds = Array.from(effect.getGpuData().speedFactors.slice(0, 30))
+    effect.prepare(100, 60)
+    expect(Array.from(effect.getGpuData().paths.slice(0, 30 * 4))).toEqual(paths)
+    expect(Array.from(effect.getGpuData().speedFactors.slice(0, 30))).toEqual(speeds)
   })
 })

@@ -2,6 +2,15 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)。日期使用 `YYYY-MM-DD`。
 
+## 1.5.0 - 2026-07-15
+
+现有流式特效的密度与质量切换连续性优化。
+
+### Changed
+
+- Tunnel、Linear Shooter、Vortex 与 Radial Burst 使用固定 seed 的低差异相位序列，活动前缀在周期内保持均匀分布。
+- 质量档位改变活动上限时，保留实例不再重算相位或轨迹，只增减固定实例池的活动前缀。
+
 ## 1.4.0 - 2026-07-15
 
 现有布局的密度、奇点和接缝视觉精修。

@@ -3,6 +3,7 @@ import {
   createEffectParameters,
   effectEdgeFade,
   effectTravel,
+  stableEffectPhase,
   type StreamingEffect,
   type StreamingEffectGpuData,
 } from './types.js'
@@ -59,7 +60,7 @@ export class RadialBurstEffect implements StreamingEffect {
       const elevation = Math.asin(random(index * 4 + 2, this.options.seed) * 2 - 1)
       const radius = this.options.outerRadius * (0.82 + random(index * 4 + 3, this.options.seed) * 0.18)
       const offset = index < activeCount
-        ? (index / Math.max(1, activeCount) + random(index * 4 + 4, this.options.seed) / Math.max(1, activeCount)) % 1
+        ? stableEffectPhase(index, this.options.seed)
         : 0
       this.paths.set([azimuth, elevation, radius, offset], index * 4)
       this.speedFactors[index] = index < activeCount
