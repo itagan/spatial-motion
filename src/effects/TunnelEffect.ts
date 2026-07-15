@@ -6,6 +6,7 @@ import {
   emissionEnvelope,
   emissionModeCode,
   resolveEmissionOptions,
+  stableEffectPhase,
   type EmissionOptions,
   type ResolvedEmissionOptions,
   type StreamingEffect,
@@ -68,12 +69,11 @@ export class TunnelEffect implements StreamingEffect {
       const lane = index % this.options.directionCount
       const randomAngle = random(index * 3 + 1, this.options.seed)
       const randomRadius = random(index * 3 + 2, this.options.seed)
-      const randomOffset = random(index * 3 + 3, this.options.seed)
       const angle = (lane / this.options.directionCount) * Math.PI * 2
         + (randomAngle - 0.5) * (Math.PI * 2 / this.options.directionCount) * 0.7
       const radius = this.options.outerRadius * (0.62 + randomRadius * 0.38)
       const offset = index < activeCount
-        ? (index / activeCount + randomOffset / activeCount) % 1
+        ? stableEffectPhase(index, this.options.seed)
         : 0
       this.paths.set([angle, radius, offset, this.options.crossSection === 'square' ? 1 : 0], index * 4)
       this.speedFactors[index] = index < activeCount

@@ -6,6 +6,7 @@ import {
   emissionEnvelope,
   emissionModeCode,
   resolveEmissionOptions,
+  stableEffectPhase,
   type EmissionOptions,
   type ResolvedEmissionOptions,
   type StreamingEffect,
@@ -60,11 +61,8 @@ export class LinearShooterEffect implements StreamingEffect {
     this.preparedActiveCount = activeCount
     this.paths = new Float32Array(count * 4)
     this.speedFactors = new Float32Array(count)
-    const activeRows = Math.max(1, Math.ceil(activeCount / this.options.directionCount))
-
     for (let index = 0; index < count; index += 1) {
       const direction = index % this.options.directionCount
-      const sequence = Math.floor(index / this.options.directionCount)
       const laneAngle = (direction / this.options.directionCount) * Math.PI * 2
       const laneWidth = (Math.PI * 2) / this.options.directionCount
       const jitter = (random(index * 2 + 1, this.options.seed) - 0.5)
@@ -72,7 +70,7 @@ export class LinearShooterEffect implements StreamingEffect {
         * this.options.directionJitter
       const radius = this.options.outerRadius * (0.88 + random(index * 2 + 2, this.options.seed) * 0.18)
       const offset = index < activeCount
-        ? (sequence / activeRows + direction / (activeRows * this.options.directionCount)) % 1
+        ? stableEffectPhase(index, this.options.seed)
         : 0
       this.paths.set([laneAngle + jitter, radius, offset, 0], index * 4)
       this.speedFactors[index] = index < activeCount
