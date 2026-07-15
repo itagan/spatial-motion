@@ -30,8 +30,9 @@
 - 统一的平滑特效运动曲线、mipmap 图集采样和 GPU 纹理尺寸保护
 - WebGL context loss 暂停/恢复、图片超时回退和长时间压力基准
 - P50/P95/P99、长帧、Stage/图集分阶段成本和可导入对比的性能基准
+- 八种布局的版本化 JSON 配置、严格解析与可折叠参数实验室
 
-源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.6.0 优化阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.7.0 参数化阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
 
 ## 项目文档
 
@@ -115,6 +116,35 @@ import { BenchmarkSession, compareBenchmarkResults } from '@itagan/spatial-motio
 ```
 
 仅主入口、`layouts`、`effects`、`performance` 和 `package.json` 是稳定导出路径。`renderers` 等内部目录受 `exports` 限制，不属于公共 API。
+
+可序列化布局配置：
+
+```ts
+import {
+  createLayout,
+  parseLayoutConfig,
+  type LayoutConfig,
+} from '@itagan/spatial-motion'
+
+const config = parseLayoutConfig({
+  version: 1,
+  type: 'sphere',
+  options: {
+    radius: 5.2,
+    rings: 18,
+    stagger: true,
+    density: 0.82,
+    orientation: 'upright-surface',
+  },
+}) satisfies LayoutConfig
+
+await stage.to(createLayout(config), { duration: 800 })
+localStorage.setItem('layout', JSON.stringify(config))
+```
+
+`parseLayoutConfig()` 也接受 JSON 字符串。它严格拒绝未知版本、布局、字段、枚举和非法数值，并在错误消息中给出 `options.rings` 一类字段路径。省略 `rings`、`columns`、`turns` 等字段会继续使用布局按实例数自动计算的行为，不会在解析时固化默认值。
+
+主 Demo 的“布局参数”面板覆盖 Sphere、Box、Cylinder、Grid、Ring、Helix、Cone 和 Scatter，可实时调整参数、切换预设、复制 JSON/TypeScript 并通过 URL 恢复当前配置。
 
 运行时状态：
 
@@ -286,8 +316,8 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 30.9 KB |
-| npm tarball | ≤ 150 KB | 125.2 KB |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 32.3 KB |
+| npm tarball | ≤ 150 KB | 132.5 KB |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 2.2 KB |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

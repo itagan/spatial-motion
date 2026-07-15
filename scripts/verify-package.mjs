@@ -84,6 +84,10 @@ try {
     assert.equal(typeof layouts.sphere, 'function')
     assert.equal(typeof layouts.box, 'function')
     assert.equal(typeof layouts.scatter, 'function')
+    assert.equal(typeof layouts.createLayout, 'function')
+    assert.equal(typeof layouts.parseLayoutConfig, 'function')
+    const configured = layouts.parseLayoutConfig('{"version":1,"type":"sphere","options":{"rings":8}}')
+    assert.equal(layouts.createLayout(configured).calculate(12, { width: 1, height: 1 }).length, 12)
     assert.equal(typeof effects.vortex, 'function')
     assert.equal(typeof performance.BenchmarkSession, 'function')
     assert.equal(typeof performance.compareBenchmarkResults, 'function')
@@ -106,9 +110,12 @@ try {
       type MotionStage,
       type MotionStageOptions,
       type StagePerformanceEnvironment,
+      createLayout,
+      parseLayoutConfig,
+      type LayoutConfig,
       sphere,
     } from '${packageName}'
-    import { box, ring, scatter } from '${packageName}/layouts'
+    import { box, createLayout as createLayoutFromSubpath, parseLayoutConfig as parseLayoutConfigFromSubpath, ring, scatter, type LayoutConfig as SubpathLayoutConfig } from '${packageName}/layouts'
     import { vortex, type EmissionOptions } from '${packageName}/effects'
     import { BenchmarkSession, compareBenchmarkResults, type BenchmarkResult } from '${packageName}/performance'
     const items: MotionItem[] = [{ id: 'one' }]
@@ -126,9 +133,12 @@ try {
     declare const benchmark: BenchmarkResult
     const environment: StagePerformanceEnvironment | undefined = stage?.getPerformanceEnvironment()
     const comparison = compareBenchmarkResults(benchmark, benchmark)
+    const layoutConfig = parseLayoutConfig({ version: 1, type: 'sphere', options: { rings: 8 } }) satisfies LayoutConfig
+    const subpathConfig = parseLayoutConfigFromSubpath(JSON.stringify(layoutConfig)) satisfies SubpathLayoutConfig
+    const configuredLayouts = [createLayout(layoutConfig), createLayoutFromSubpath(subpathConfig)]
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
-    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), vortex(), BenchmarkSession, comparison, environment, emission, motion, cardStyle, stageOptions]
+    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, vortex(), BenchmarkSession, comparison, environment, emission, motion, cardStyle, stageOptions]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {

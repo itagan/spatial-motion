@@ -2,6 +2,22 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)。日期使用 `YYYY-MM-DD`。
 
+## 1.7.0 - 2026-07-16
+
+布局参数化与可序列化配置实验室。
+
+### Added
+
+- 版本化 `LayoutConfig` 联合类型，以及 `parseLayoutConfig()`、`createLayout()` 公共 API。
+- 对八种布局配置进行字段白名单、枚举、有限数值和语义范围的严格运行时验证。
+- Demo 右侧/移动端底部参数实验室，支持全部布局、自动字段、会话记忆、预设和防抖实时预览。
+- JSON 导入导出、TypeScript 代码复制和 URL 配置恢复。
+
+### Compatibility
+
+- 直接使用 `sphere()`、`box()` 等布局函数的默认值与兼容行为不变。
+- v1.7 不增加新的几何分布模式，也不包含流式特效参数面板。
+
 ## 1.6.0 - 2026-07-15
 
 动画中断朝向与自适应质量迟滞优化。
