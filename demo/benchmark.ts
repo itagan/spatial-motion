@@ -1,5 +1,6 @@
 import {
   BenchmarkSession,
+  compareBenchmarkResults,
   MotionStage,
   box,
   cone,
@@ -60,10 +61,12 @@ let itemCount = 500
 let qualityMode: QualityMode = 'auto'
 let layoutName = 'sphere'
 let lastResult: BenchmarkResult | null = null
+let baselineResult: BenchmarkResult | null = null
 let runTimer = 0
 let sampleTimer = 0
 let stressTimer = 0
 let stressOperations = 0
+let runGeneration = 0
 const stressSequence = [
   'sphere',
   'box',
@@ -115,9 +118,10 @@ document.querySelectorAll<HTMLButtonElement>('[data-benchmark-effect]').forEach(
   })
 })
 
-document.querySelector('#run-benchmark')?.addEventListener('click', () => runBenchmark(false))
-document.querySelector('#run-stress')?.addEventListener('click', () => runBenchmark(true))
+document.querySelector('#run-benchmark')?.addEventListener('click', () => void runBenchmark())
+document.querySelector('#run-stress')?.addEventListener('click', () => void runBenchmark('transition-stress'))
 document.querySelector('#export-result')?.addEventListener('click', exportResult)
+document.querySelector<HTMLInputElement>('#import-baseline')?.addEventListener('change', importBaseline)
 
 const metricsTimer = window.setInterval(updateMetrics, 500)
 updateMetrics()
@@ -140,23 +144,34 @@ async function applyConfiguration(): Promise<void> {
   updateMetrics()
 }
 
-function runBenchmark(stressMode: boolean): void {
+type BenchmarkScenario = 'steady' | 'cold-start' | 'atlas-update' | 'transition-stress'
+
+async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
   cancelRun()
+  const generation = runGeneration
   const durationSeconds = Number((document.querySelector<HTMLSelectElement>('#duration'))?.value ?? 10)
+  const scenario = forcedScenario
+    ?? (document.querySelector<HTMLSelectElement>('#scenario')?.value ?? 'steady') as BenchmarkScenario
+  const stressMode = scenario === 'transition-stress'
   const session = new BenchmarkSession({
     itemCount,
     qualityMode,
-    layout: stressMode ? 'transition-stress' : layoutName,
+    layout: layoutName,
+    scenario,
+    environment: stage.getPerformanceEnvironment(),
   })
   stressOperations = 0
   setRunButtonsDisabled(true)
-  setStatus(stressMode
-    ? `正在运行 ${durationSeconds} 秒切换/更新压力测试…`
-    : `正在采样 ${durationSeconds} 秒…`)
+  setStatus(`正在运行 ${durationSeconds} 秒${scenarioLabel(scenario)}…`)
   sampleTimer = window.setInterval(() => session.record(stage.getPerformanceStats()), 500)
   if (stressMode) {
     void runStressOperation()
     stressTimer = window.setInterval(() => void runStressOperation(), 900)
+  } else if (scenario === 'atlas-update') {
+    void runAtlasUpdateOperation()
+    stressTimer = window.setInterval(() => void runAtlasUpdateOperation(), 180)
+  } else if (scenario === 'cold-start') {
+    void runColdStart(generation)
   }
   session.record(stage.getPerformanceStats())
   runTimer = window.setTimeout(() => {
@@ -167,12 +182,31 @@ function runBenchmark(stressMode: boolean): void {
     runTimer = 0
     session.record(stage.getPerformanceStats())
     lastResult = session.finish()
-    renderResult(lastResult, stressMode)
+    renderResult(lastResult)
     setRunButtonsDisabled(false)
     const exportButton = document.querySelector<HTMLButtonElement>('#export-result')
     if (exportButton) exportButton.disabled = false
-    setStatus(`采样完成：平均 ${lastResult.averageFps.toFixed(1)} FPS，最低 ${lastResult.minimumFps.toFixed(1)} FPS${stressMode ? `，完成 ${stressOperations} 次压力操作` : ''}`)
+    setStatus(`采样完成：平均 ${lastResult.averageFps.toFixed(1)} FPS，P95 ${lastResult.maximumFrameTimeP95.toFixed(2)} ms${stressOperations ? `，完成 ${stressOperations} 次操作` : ''}`)
   }, durationSeconds * 1000)
+}
+
+async function runColdStart(generation: number): Promise<void> {
+  await stage.updateItems([], { duration: 0 })
+  if (generation !== runGeneration) return
+  const effect = effects[layoutName]
+  await stage.updateItems(createItems(itemCount), {
+    layout: effect ? layouts.sphere : layouts[layoutName],
+    duration: 0,
+  })
+  if (generation !== runGeneration || !effect) return
+  await stage.enterEffect(effect, { duration: 0 })
+}
+
+async function runAtlasUpdateOperation(): Promise<void> {
+  const operation = stressOperations
+  stressOperations += 1
+  const itemId = `benchmark-${operation % Math.max(1, itemCount) + 1}`
+  await stage.updateItem(itemId, { title: operationTitle(operation) })
 }
 
 async function runStressOperation(): Promise<void> {
@@ -180,13 +214,14 @@ async function runStressOperation(): Promise<void> {
   const operation = stressOperations
   stressOperations += 1
   const itemId = `benchmark-${operation % Math.max(1, itemCount) + 1}`
-  await stage.updateItem(itemId, { title: String(operation).padStart(4, '0') })
+  await stage.updateItem(itemId, { title: operationTitle(operation) })
   const effect = effects[target]
   if (effect) await stage.enterEffect(effect, { duration: 700 })
   else await stage.to(layouts[target], { duration: 700 })
 }
 
 function cancelRun(message?: string): void {
+  runGeneration += 1
   if (runTimer) window.clearTimeout(runTimer)
   if (sampleTimer) window.clearInterval(sampleTimer)
   if (stressTimer) window.clearInterval(stressTimer)
@@ -201,17 +236,22 @@ function updateMetrics(): void {
   const stats = stage.getPerformanceStats()
   setText('#metric-fps', stats.fps ? stats.fps.toFixed(1) : 'WARMUP')
   setText('#metric-frame', stats.averageFrameMs ? `${stats.averageFrameMs.toFixed(2)} ms` : '-- ms')
+  setText('#metric-percentiles', stats.frameTimeP95
+    ? `${stats.frameTimeP95.toFixed(1)} / ${stats.frameTimeP99.toFixed(1)} ms`
+    : '--')
+  setText('#metric-cpu', `${stats.frameCpuMs.toFixed(2)} / ${stats.renderSubmitMs.toFixed(2)} ms`)
   setText('#metric-items', `${stats.renderedItems} / ${stats.inputItems}`)
   setText('#metric-visible', String(stats.visibleItems))
   setText('#metric-effect', stats.effect ? `${stats.effect} / ${stats.activeEffectItems}` : 'layout / 0')
   setText('#metric-calls', String(stats.drawCalls))
   setText('#metric-triangles', stats.triangles.toLocaleString())
   setText('#metric-texture', formatBytes(stats.textureBytes))
+  setText('#metric-atlas-updates', `${stats.atlasBuilds} / ${stats.atlasPatches}`)
   setText('#metric-quality', `${stats.quality.toUpperCase()} / ${stats.qualityMode.toUpperCase()}`)
   setText('#metric-context', stats.contextLost ? 'LOST' : 'READY')
 }
 
-function renderResult(result: BenchmarkResult, stressMode: boolean): void {
+function renderResult(result: BenchmarkResult): void {
   const summary = {
     configuration: result.configuration,
     durationMs: Math.round(result.durationMs),
@@ -220,15 +260,72 @@ function renderResult(result: BenchmarkResult, stressMode: boolean): void {
     minimumFps: Number(result.minimumFps.toFixed(2)),
     averageFrameMs: Number(result.averageFrameMs.toFixed(2)),
     maximumFrameMs: Number(result.maximumFrameMs.toFixed(2)),
+    averageFrameTimeP50: Number(result.averageFrameTimeP50.toFixed(2)),
+    maximumFrameTimeP95: Number(result.maximumFrameTimeP95.toFixed(2)),
+    maximumFrameTimeP99: Number(result.maximumFrameTimeP99.toFixed(2)),
+    longFrames: {
+      over24Ms: result.longFramesOver24Ms,
+      over33Ms: result.longFramesOver33Ms,
+      over50Ms: result.longFramesOver50Ms,
+    },
+    averageFrameCpuMs: Number(result.averageFrameCpuMs.toFixed(3)),
+    averageRenderSubmitMs: Number(result.averageRenderSubmitMs.toFixed(3)),
     maximumDrawCalls: result.maximumDrawCalls,
     maximumTriangles: result.maximumTriangles,
     maximumTextureBytes: result.maximumTextureBytes,
     renderedItems: result.renderedItems,
     visibleItems: result.visibleItems,
     contextLost: result.samples.some(({ stats }) => stats.contextLost),
-    stressOperations: stressMode ? stressOperations : 0,
+    atlas: {
+      builds: result.atlasBuilds,
+      patches: result.atlasPatches,
+      cellsUpdated: result.atlasCellsUpdated,
+      buildMs: Number(result.atlasBuildMs.toFixed(2)),
+      patchMs: Number(result.atlasPatchMs.toFixed(2)),
+      imageLoadMs: Number(result.imageLoadMs.toFixed(2)),
+      imageRequests: result.imageRequests,
+      imageFailures: result.imageFailures,
+      estimatedUploadBytes: result.estimatedTextureUploadBytes,
+    },
+    operations: stressOperations,
   }
   setText('#benchmark-result', JSON.stringify(summary, null, 2))
+  renderComparison()
+}
+
+async function importBaseline(event: Event): Promise<void> {
+  const input = event.currentTarget as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    const parsed = JSON.parse(await file.text()) as BenchmarkResult
+    if (!parsed.configuration || !Array.isArray(parsed.samples)
+      || !Number.isFinite(parsed.averageFps)
+      || !Number.isFinite(parsed.maximumFrameTimeP95)) {
+      throw new Error('Unsupported benchmark result')
+    }
+    baselineResult = parsed
+    setStatus(`已导入基线：${parsed.configuration.itemCount} items / ${parsed.configuration.qualityMode} / ${parsed.configuration.scenario ?? parsed.configuration.layout}`)
+    renderComparison()
+  } catch {
+    baselineResult = null
+    setText('#benchmark-comparison', '无法读取该基准 JSON；请使用当前版本导出的完整结果。')
+  } finally {
+    input.value = ''
+  }
+}
+
+function renderComparison(): void {
+  if (!baselineResult || !lastResult) return
+  const comparison = compareBenchmarkResults(baselineResult, lastResult)
+  const metrics = Object.fromEntries(Object.entries(comparison.metrics).map(([name, metric]) => [name, {
+    baseline: Number(metric.baseline.toFixed(3)),
+    current: Number(metric.current.toFixed(3)),
+    delta: Number(metric.delta.toFixed(3)),
+    deltaPercent: metric.deltaPercent === null ? null : Number(metric.deltaPercent.toFixed(2)),
+    lowerIsBetter: metric.lowerIsBetter,
+  }]))
+  setText('#benchmark-comparison', JSON.stringify({ compatible: comparison.compatible, metrics }, null, 2))
 }
 
 function setRunButtonsDisabled(disabled: boolean): void {
@@ -265,6 +362,19 @@ function setText(selector: string, value: string): void {
 function formatBytes(bytes: number): string {
   if (!bytes) return '0 MB'
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+}
+
+function scenarioLabel(scenario: BenchmarkScenario): string {
+  switch (scenario) {
+    case 'steady': return '稳定运行采样'
+    case 'cold-start': return '冷启动与完整图集采样'
+    case 'atlas-update': return '连续局部更新采样'
+    case 'transition-stress': return '切换/更新压力测试'
+  }
+}
+
+function operationTitle(operation: number): string {
+  return `${runGeneration.toString(36)}-${operation.toString(36)}`
 }
 
 function createAvatar(index: number): string {

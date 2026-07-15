@@ -28,7 +28,22 @@ vi.mock('../renderers/InstancedCardRenderer', () => ({
     setVisibleRatio = vi.fn()
     setHoverIndex = vi.fn()
     refreshTexture = vi.fn()
-    getStats = vi.fn(() => ({ instanceCount: 0, textureBytes: 0 }))
+    getStats = vi.fn(() => ({
+      instanceCount: 0,
+      textureBytes: 0,
+      atlasBuilds: 0,
+      atlasPatches: 0,
+      atlasDiscardedBuilds: 0,
+      atlasDiscardedPatches: 0,
+      atlasCellsUpdated: 0,
+      atlasBuildMs: 0,
+      atlasPatchMs: 0,
+      atlasDrawMs: 0,
+      imageLoadMs: 0,
+      imageRequests: 0,
+      imageFailures: 0,
+      estimatedTextureUploadBytes: 0,
+    }))
     dispose = vi.fn()
 
     constructor() {
@@ -46,6 +61,19 @@ vi.mock('three', async (importOriginal) => {
     render = vi.fn()
     dispose = vi.fn()
     getPixelRatio = vi.fn(() => 1.5)
+    getContext = vi.fn(() => ({
+      VERSION: 7938,
+      getExtension: vi.fn(() => ({
+        UNMASKED_VENDOR_WEBGL: 37445,
+        UNMASKED_RENDERER_WEBGL: 37446,
+      })),
+      getParameter: vi.fn((parameter: number) => {
+        if (parameter === 7938) return 'WebGL 2.0 Test'
+        if (parameter === 37445) return 'Test Vendor'
+        if (parameter === 37446) return 'Test Renderer'
+        return null
+      }),
+    }))
     info = { render: { calls: 1, triangles: 2 } }
     capabilities = { maxTextureSize: 4096, getMaxAnisotropy: vi.fn(() => 8) }
 
@@ -156,7 +184,11 @@ describe('MotionStage', () => {
   it('reports render metrics and supports manual quality locking', async () => {
     const stage = createStage({ quality: 'low' })
     const cards = currentCards()
-    cards.getStats.mockReturnValue({ instanceCount: 500, textureBytes: 1_048_576 })
+    cards.getStats.mockReturnValue({
+      ...cards.getStats(),
+      instanceCount: 500,
+      textureBytes: 1_048_576,
+    })
     await stage.setItems(Array.from({ length: 520 }, (_, index) => ({ id: `item-${index}` })))
 
     expect(stage.getQualityMode()).toBe('low')
@@ -170,6 +202,19 @@ describe('MotionStage', () => {
       textureBytes: 1_048_576,
       pixelRatio: 1.5,
       paused: false,
+      frameTimeP95: 0,
+      atlasBuilds: 0,
+      atlasPatches: 0,
+    })
+
+    expect(stage.getPerformanceEnvironment()).toMatchObject({
+      viewportWidth: 100,
+      viewportHeight: 100,
+      pixelRatio: 1.5,
+      maxTextureSize: 4096,
+      webglVersion: 'WebGL 2.0 Test',
+      gpuVendor: 'Test Vendor',
+      gpuRenderer: 'Test Renderer',
     })
 
     stage.setQuality('high')

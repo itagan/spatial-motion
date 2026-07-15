@@ -29,8 +29,9 @@
 - 按稳定 `id` 局部重绘单张或多张图集卡片
 - 统一的平滑特效运动曲线、mipmap 图集采样和 GPU 纹理尺寸保护
 - WebGL context loss 暂停/恢复、图片超时回退和长时间压力基准
+- P50/P95/P99、长帧、Stage/图集分阶段成本和可导入对比的性能基准
 
-源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.1.0，目前可从 GitHub 安装，npm Registry 发布仍以正式 release 公告为准。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.2.0 优化阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
 
 ## 项目文档
 
@@ -39,6 +40,7 @@
 - [公共 API 与兼容策略](./docs/PUBLIC_API.md)：稳定入口、SemVer 承诺和迁移边界。
 - [浏览器支持与限制](./docs/COMPATIBILITY.md)：运行环境、图片 CORS 和已知限制。
 - [视觉验收矩阵](./docs/VISUAL_QA.md)：布局、特效、图集和长时间压力测试标准。
+- [性能与效果优化记录](./docs/OPTIMIZATION.md)：可复现基线、测量口径和下一项优化假设。
 - [发布清单](./docs/RELEASE.md)：版本验证、发布及发布后空项目安装步骤。
 - [变更记录](./CHANGELOG.md)：各阶段功能与兼容说明。
 - [开发代理指南](./AGENTS.md)：Codex、Claude Code 等自动化开发代理的项目边界与完成标准。
@@ -109,7 +111,7 @@ await stage.to(cylinder({ radius: 5 }), { duration: 1400 })
 ```ts
 import { sphere, cylinder } from '@itagan/spatial-motion/layouts'
 import { tunnel, vortex } from '@itagan/spatial-motion/effects'
-import { BenchmarkSession } from '@itagan/spatial-motion/performance'
+import { BenchmarkSession, compareBenchmarkResults } from '@itagan/spatial-motion/performance'
 ```
 
 仅主入口、`layouts`、`effects`、`performance` 和 `package.json` 是稳定导出路径。`renderers` 等内部目录受 `exports` 限制，不属于公共 API。
@@ -119,7 +121,8 @@ import { BenchmarkSession } from '@itagan/spatial-motion/performance'
 ```ts
 stage.getQuality()          // 'high' | 'medium' | 'low'
 stage.getQualityMode()      // 'auto' | 'high' | 'medium' | 'low'
-stage.getPerformanceStats() // fps、帧时间、实例、Draw Call、三角形、纹理内存等
+stage.getPerformanceStats() // FPS、P50/P95/P99、长帧、CPU/提交、图集、实例和 Draw Call 等
+stage.getPerformanceEnvironment() // 浏览器、GPU、视口、DPR、MAX_TEXTURE_SIZE
 ```
 
 质量与暂停控制：
@@ -268,6 +271,10 @@ http://localhost:5173/benchmark.html
 - 球体、立方体/长方体、圆柱体、平面、同心圆环、螺旋和圆锥布局
 - 时空隧道、漩涡和径向爆发特效及实际活跃实例统计
 - FPS、平均帧时间、渲染/可见实例、Draw Call、三角形和纹理图集内存
+- P50/P95/P99、24/33/50ms 长帧、Stage CPU 与 WebGL 提交耗时
+- 图集构建/patch、图片加载失败和估算纹理上传字节
+- steady、cold-start、atlas-update、transition-stress 四类可复现场景
+- 导入基线 JSON，并通过 `compareBenchmarkResults()` 输出同配置前后差异
 - 3 秒至 30 分钟采样、持续布局/特效中断与局部图集更新压力模式
 
 重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。
@@ -279,8 +286,8 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 27.5 KB |
-| npm tarball | ≤ 150 KB | 107.3 KB |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 29.7 KB |
+| npm tarball | ≤ 150 KB | 118.1 KB |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 2.1 KB |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

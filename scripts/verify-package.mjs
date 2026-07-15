@@ -86,6 +86,7 @@ try {
     assert.equal(typeof layouts.scatter, 'function')
     assert.equal(typeof effects.vortex, 'function')
     assert.equal(typeof performance.BenchmarkSession, 'function')
+    assert.equal(typeof performance.compareBenchmarkResults, 'function')
     assert.equal(typeof main.MotionStage.prototype.updateItem, 'function')
     assert.equal(typeof main.MotionStage.prototype.updateItemsById, 'function')
     assert.equal(typeof main.easing.sineInOut, 'function')
@@ -104,11 +105,12 @@ try {
       type MotionPreference,
       type MotionStage,
       type MotionStageOptions,
+      type StagePerformanceEnvironment,
       sphere,
     } from '${packageName}'
     import { box, ring, scatter } from '${packageName}/layouts'
     import { vortex, type EmissionOptions } from '${packageName}/effects'
-    import { BenchmarkSession } from '${packageName}/performance'
+    import { BenchmarkSession, compareBenchmarkResults, type BenchmarkResult } from '${packageName}/performance'
     const items: MotionItem[] = [{ id: 'one' }]
     declare const stage: MotionStage | undefined
     const emission: EmissionOptions = { mode: 'wave' }
@@ -121,9 +123,12 @@ try {
       onContextChange: (state) => void state,
     }
     const updates: MotionItemUpdate[] = [{ id: 'one', patch: { title: 'updated' } }]
+    declare const benchmark: BenchmarkResult
+    const environment: StagePerformanceEnvironment | undefined = stage?.getPerformanceEnvironment()
+    const comparison = compareBenchmarkResults(benchmark, benchmark)
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
-    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), vortex(), BenchmarkSession, emission, motion, cardStyle, stageOptions]
+    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), vortex(), BenchmarkSession, comparison, environment, emission, motion, cardStyle, stageOptions]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
@@ -178,8 +183,9 @@ try {
     await stage.updateItem('0', { title: 'updated' })
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
     const stats = stage.getPerformanceStats()
+    const environment = stage.getPerformanceEnvironment()
     stage.destroy()
-    const smoke = { ready: true, renderedItems: stats.renderedItems, drawCalls: stats.drawCalls, contextLost: stats.contextLost, destroyed: !container.querySelector('canvas') }
+    const smoke = { ready: true, renderedItems: stats.renderedItems, drawCalls: stats.drawCalls, contextLost: stats.contextLost, p95: stats.frameTimeP95, maxTextureSize: environment.maxTextureSize, destroyed: !container.querySelector('canvas') }
     document.documentElement.dataset.packageSmoke = smoke.destroyed ? 'passed' : 'failed'
     result.textContent = JSON.stringify(smoke)
   `)

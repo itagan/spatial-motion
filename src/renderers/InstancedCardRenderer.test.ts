@@ -40,6 +40,14 @@ function atlas(count: number) {
       cellSize: 64,
       padding: 2,
       stride: 68,
+      metrics: {
+        cells: count,
+        renderMs: 4,
+        applyMs: 1,
+        imageLoadMs: 2,
+        imageRequests: count,
+        imageFailures: 0,
+      },
     },
     dispose,
     texture,
@@ -51,6 +59,7 @@ describe('InstancedCardRenderer item loading', () => {
     atlasMock.create.mockReset()
     atlasMock.createPatch.mockReset()
     atlasMock.applyPatch.mockReset()
+    atlasMock.applyPatch.mockReturnValue(1)
   })
 
   it('keeps only the newest asynchronous atlas result', async () => {
@@ -102,7 +111,15 @@ describe('InstancedCardRenderer item loading', () => {
     expect(await renderer.setItems(items.map((item) => ({ ...item })))).toBe(true)
 
     expect(atlasMock.create).toHaveBeenCalledOnce()
-    expect(renderer.getStats()).toEqual({ instanceCount: 1, textureBytes: 87_382 })
+    expect(renderer.getStats()).toMatchObject({
+      instanceCount: 1,
+      textureBytes: 87_382,
+      atlasBuilds: 1,
+      atlasPatches: 0,
+      atlasCellsUpdated: 1,
+      imageRequests: 1,
+      estimatedTextureUploadBytes: 87_382,
+    })
     renderer.refreshTexture()
     expect(currentAtlas.texture.needsUpdate).toBe(true)
     renderer.dispose()
@@ -182,12 +199,28 @@ describe('InstancedCardRenderer item loading', () => {
 
     const firstUpdate = renderer.updateItems([{ id: 'a', title: 'old' }, { id: 'b' }], [0])
     const secondUpdate = renderer.updateItems([{ id: 'a', title: 'new' }, { id: 'b' }], [0])
-    first.resolve({ cells: [] })
+    const emptyPatch = {
+      cells: [],
+      metrics: {
+        cells: 0,
+        renderMs: 2,
+        applyMs: 0,
+        imageLoadMs: 0,
+        imageRequests: 0,
+        imageFailures: 0,
+      },
+    }
+    first.resolve(emptyPatch)
     expect(await firstUpdate).toBe(false)
-    second.resolve({ cells: [] })
+    second.resolve(emptyPatch)
     expect(await secondUpdate).toBe(true)
 
     expect(atlasMock.applyPatch).toHaveBeenCalledOnce()
+    expect(renderer.getStats()).toMatchObject({
+      atlasBuilds: 1,
+      atlasPatches: 1,
+      atlasDiscardedPatches: 1,
+    })
     expect(scene.children[0]).toBe(mesh)
     renderer.dispose()
   })

@@ -4,8 +4,10 @@ export type {
   AdaptivePerformanceOptions,
   PerformanceStats,
 } from './AdaptivePerformanceManager.js'
-export { BenchmarkSession } from './BenchmarkSession.js'
+export { BenchmarkSession, compareBenchmarkResults } from './BenchmarkSession.js'
 export type {
+  BenchmarkComparison,
+  BenchmarkComparisonMetric,
   BenchmarkConfiguration,
   BenchmarkResult,
   BenchmarkSample,

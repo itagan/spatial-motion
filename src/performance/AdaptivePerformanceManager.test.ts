@@ -38,6 +38,29 @@ describe('AdaptivePerformanceManager', () => {
     const manager = new AdaptivePerformanceManager('high', { sampleWindowMs: 100 })
     expect(manager.recordFrame(800, 800)).toBeNull()
     expect(manager.getStats().sampleCount).toBe(0)
+    expect(manager.getStats().ignoredFrames).toBe(1)
+  })
+
+  it('records frame percentiles and cumulative long-frame counters', () => {
+    const manager = new AdaptivePerformanceManager('high', {
+      sampleWindowMs: 100,
+      cooldownMs: 0,
+    })
+    let now = 0
+    for (const frameMs of [10, 16, 25, 34, 51]) {
+      now += frameMs
+      manager.recordFrame(frameMs, now, false)
+    }
+
+    const stats = manager.getStats()
+    expect(stats.frameTimeP50).toBe(25)
+    expect(stats.frameTimeP95).toBeCloseTo(47.6)
+    expect(stats.frameTimeP99).toBeCloseTo(50.32)
+    expect(stats).toMatchObject({
+      longFramesOver24Ms: 3,
+      longFramesOver33Ms: 2,
+      longFramesOver50Ms: 1,
+    })
   })
 
   it('records locked-quality metrics without changing the quality level', () => {

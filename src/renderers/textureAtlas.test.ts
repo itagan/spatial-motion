@@ -95,6 +95,11 @@ describe('texture atlas card rendering', () => {
     const patch = await pending
     const context = contexts.get(patch.cells[0].canvas)!
     expect(context.fillText).toHaveBeenCalledWith('Sl', 16, 16)
+    expect(patch.metrics).toMatchObject({
+      cells: 1,
+      imageRequests: 1,
+      imageFailures: 1,
+    })
   })
 
   it('isolates a custom async draw callback inside the configured card shape', async () => {
@@ -140,6 +145,7 @@ describe('texture atlas card rendering', () => {
       16,
     )
     expect(patch.cells.map(({ index }) => index)).toEqual([2])
+    expect(patch.metrics.cells).toBe(1)
 
     const canvas = document.createElement('canvas')
     const texture = { needsUpdate: false }
@@ -151,12 +157,13 @@ describe('texture atlas card rendering', () => {
       stride: 20,
       texture,
     } as unknown as TextureAtlasResult
-    applyTextureAtlasPatch(atlas, patch)
+    const applyMs = applyTextureAtlasPatch(atlas, patch)
 
     const context = contexts.get(canvas)!
     expect(context.clearRect).toHaveBeenCalledWith(2, 22, 16, 16)
     expect(context.drawImage).toHaveBeenCalledWith(patch.cells[0].canvas, 2, 22)
     expect(texture.needsUpdate).toBe(true)
+    expect(applyMs).toBeGreaterThanOrEqual(0)
   })
 
   it('falls back to the built-in card when custom drawing fails', async () => {

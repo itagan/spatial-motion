@@ -2,6 +2,22 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)。日期使用 `YYYY-MM-DD`。
 
+## 1.2.0 - 2026-07-15
+
+性能可观测性与可复现优化基线。
+
+### Added
+
+- 实时帧时间 P50/P95/P99、24/33/50ms 长帧计数与异常帧计数。
+- Stage CPU、渲染提交、布局计算、拾取、图集构建/patch、图片加载和估算纹理上传统计。
+- `getPerformanceEnvironment()`，记录浏览器、GPU、视口、DPR 和最大纹理尺寸。
+- steady、cold-start、atlas-update 与 transition-stress 四类 benchmark 场景。
+- 完整 Benchmark JSON 环境元数据、结果导入和 `compareBenchmarkResults()` 前后对比。
+
+### Fixed
+
+- 压力测试操作使用跨运行唯一标题，避免连续场景之间因数据相同而漏记图集 patch。
+
 ## 1.1.0 - 2026-07-15
 
 视觉打磨与运行时加固版本。

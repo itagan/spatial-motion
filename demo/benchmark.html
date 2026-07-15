@@ -58,12 +58,15 @@
       <section class="metrics" aria-label="Live performance metrics">
         <article><span>FPS</span><strong id="metric-fps">--</strong></article>
         <article><span>FRAME</span><strong id="metric-frame">-- ms</strong></article>
+        <article><span>P95 / P99</span><strong id="metric-percentiles">--</strong></article>
+        <article><span>CPU / SUBMIT</span><strong id="metric-cpu">--</strong></article>
         <article><span>ITEMS</span><strong id="metric-items">--</strong></article>
         <article><span>VISIBLE</span><strong id="metric-visible">--</strong></article>
         <article><span>EFFECT / ACTIVE</span><strong id="metric-effect">layout / 0</strong></article>
         <article><span>CALLS</span><strong id="metric-calls">--</strong></article>
         <article><span>TRIANGLES</span><strong id="metric-triangles">--</strong></article>
         <article><span>ATLAS</span><strong id="metric-texture">--</strong></article>
+        <article><span>ATLAS UPDATES</span><strong id="metric-atlas-updates">--</strong></article>
         <article><span>QUALITY</span><strong id="metric-quality">--</strong></article>
         <article><span>WEBGL</span><strong id="metric-context">READY</strong></article>
       </section>
@@ -82,14 +85,27 @@
               <option value="1800">30 分钟</option>
             </select>
           </label>
+          <label>采样场景
+            <select id="scenario">
+              <option value="steady" selected>稳定运行</option>
+              <option value="cold-start">冷启动/完整图集</option>
+              <option value="atlas-update">连续局部更新</option>
+            </select>
+          </label>
           <button id="run-benchmark" class="primary">运行性能采样</button>
           <button id="run-stress">运行切换压力测试</button>
           <button id="export-result" disabled>导出 JSON</button>
+          <label class="file-button">导入基线 JSON
+            <input id="import-baseline" type="file" accept="application/json,.json">
+          </label>
         </div>
         <p id="benchmark-status" aria-live="polite">选择配置后运行采样</p>
       </footer>
       <section class="result-panel" aria-label="Benchmark result">
         <pre id="benchmark-result">尚无采样结果</pre>
+      </section>
+      <section class="result-panel" aria-label="Benchmark comparison">
+        <pre id="benchmark-comparison">尚未导入基线结果</pre>
       </section>
     </main>
     <script type="module" src="/benchmark.ts"></script>

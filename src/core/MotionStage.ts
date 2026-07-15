@@ -90,6 +90,39 @@ export interface StagePerformanceStats extends PerformanceStats {
   effect: string | null
   activeEffectItems: number
   contextLost: boolean
+  frameCpuMs: number
+  renderSubmitMs: number
+  transformCalculationMs: number
+  transformCalculations: number
+  pickingMs: number
+  pickOperations: number
+  atlasBuilds: number
+  atlasPatches: number
+  atlasDiscardedBuilds: number
+  atlasDiscardedPatches: number
+  atlasCellsUpdated: number
+  atlasBuildMs: number
+  atlasPatchMs: number
+  atlasDrawMs: number
+  imageLoadMs: number
+  imageRequests: number
+  imageFailures: number
+  estimatedTextureUploadBytes: number
+}
+
+export interface StagePerformanceEnvironment {
+  userAgent: string
+  platform: string
+  logicalCores: number | null
+  deviceMemoryGb: number | null
+  viewportWidth: number
+  viewportHeight: number
+  devicePixelRatio: number
+  pixelRatio: number
+  maxTextureSize: number
+  webglVersion: string
+  gpuVendor: string | null
+  gpuRenderer: string | null
 }
 
 export class MotionStage {
@@ -144,6 +177,12 @@ export class MotionStage {
   private reducedMotion = false
   private hoveredIndex: number | null = null
   private readonly hoverEnabled: boolean
+  private frameCpuMs = 0
+  private renderSubmitMs = 0
+  private transformCalculationMs = 0
+  private transformCalculations = 0
+  private pickingMs = 0
+  private pickOperations = 0
 
   constructor(private readonly options: MotionStageOptions) {
     this.motionPreference = options.motionPreference ?? 'auto'
@@ -238,7 +277,10 @@ export class MotionStage {
     }
     const token = ++this.transitionToken
     const from = this.transforms
+    const calculationStartedAt = performance.now()
     const target = layout.calculate(this.items.length, this.context())
+    this.transformCalculationMs += performance.now() - calculationStartedAt
+    this.transformCalculations += 1
     const targetOrientation = layout.orientation ?? 'surface'
     const targetHideBackHemisphere = layout.hideBackHemisphere ?? false
     const targetBillboard = targetOrientation === 'camera' ? 1 : 0
@@ -477,6 +519,16 @@ export class MotionStage {
 
   pick(clientX: number, clientY: number, options: number | PickOptions = {}): PickResult | null {
     this.assertActive()
+    const startedAt = performance.now()
+    try {
+      return this.pickInternal(clientX, clientY, options)
+    } finally {
+      this.pickingMs += performance.now() - startedAt
+      this.pickOperations += 1
+    }
+  }
+
+  private pickInternal(clientX: number, clientY: number, options: number | PickOptions): PickResult | null {
     const rect = this.renderer.domElement.getBoundingClientRect()
     if (!rect.width || !rect.height) return null
     const transforms = this.resolveCurrentTransforms(performance.now())
@@ -643,6 +695,54 @@ export class MotionStage {
         ? countActiveEffectItems(this.activeEffect.gpuData.speedFactors)
         : 0,
       contextLost: this.pausedByContext,
+      frameCpuMs: this.frameCpuMs,
+      renderSubmitMs: this.renderSubmitMs,
+      transformCalculationMs: this.transformCalculationMs,
+      transformCalculations: this.transformCalculations,
+      pickingMs: this.pickingMs,
+      pickOperations: this.pickOperations,
+      atlasBuilds: cardStats.atlasBuilds,
+      atlasPatches: cardStats.atlasPatches,
+      atlasDiscardedBuilds: cardStats.atlasDiscardedBuilds,
+      atlasDiscardedPatches: cardStats.atlasDiscardedPatches,
+      atlasCellsUpdated: cardStats.atlasCellsUpdated,
+      atlasBuildMs: cardStats.atlasBuildMs,
+      atlasPatchMs: cardStats.atlasPatchMs,
+      atlasDrawMs: cardStats.atlasDrawMs,
+      imageLoadMs: cardStats.imageLoadMs,
+      imageRequests: cardStats.imageRequests,
+      imageFailures: cardStats.imageFailures,
+      estimatedTextureUploadBytes: cardStats.estimatedTextureUploadBytes,
+    }
+  }
+
+  getPerformanceEnvironment(): StagePerformanceEnvironment {
+    this.assertActive()
+    const context = this.renderer.getContext()
+    const debugInfo = context.getExtension('WEBGL_debug_renderer_info') as {
+      UNMASKED_VENDOR_WEBGL: number
+      UNMASKED_RENDERER_WEBGL: number
+    } | null
+    const browserNavigator = typeof navigator === 'undefined'
+      ? null
+      : navigator as Navigator & { deviceMemory?: number }
+    return {
+      userAgent: browserNavigator?.userAgent ?? '',
+      platform: browserNavigator?.platform ?? '',
+      logicalCores: Number.isFinite(browserNavigator?.hardwareConcurrency)
+        ? browserNavigator?.hardwareConcurrency ?? null
+        : null,
+      deviceMemoryGb: Number.isFinite(browserNavigator?.deviceMemory)
+        ? browserNavigator?.deviceMemory ?? null
+        : null,
+      viewportWidth: this.options.container.clientWidth,
+      viewportHeight: this.options.container.clientHeight,
+      devicePixelRatio: typeof devicePixelRatio === 'number' ? devicePixelRatio : 1,
+      pixelRatio: this.renderer.getPixelRatio(),
+      maxTextureSize: this.renderer.capabilities.maxTextureSize,
+      webglVersion: String(context.getParameter(context.VERSION) ?? ''),
+      gpuVendor: debugInfo ? String(context.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) ?? '') : null,
+      gpuRenderer: debugInfo ? String(context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) ?? '') : null,
     }
   }
 
@@ -693,6 +793,7 @@ export class MotionStage {
   }
 
   private readonly render = (now: number) => {
+    const frameCpuStartedAt = performance.now()
     const rawFrameMs = now - this.lastFrame || 0
     const delta = Math.min(0.05, rawFrameMs / 1000)
     this.lastFrame = now
@@ -708,7 +809,10 @@ export class MotionStage {
     if (this.activeEffect) {
       this.cards.setEffectTime(Math.max(0, (now - this.activeEffect.startedAt) / 1000))
     }
+    this.frameCpuMs = performance.now() - frameCpuStartedAt
+    const renderStartedAt = performance.now()
     this.renderer.render(this.scene, this.camera)
+    this.renderSubmitMs = performance.now() - renderStartedAt
     if (!this.isPaused()) this.frameId = requestAnimationFrame(this.render)
   }
 

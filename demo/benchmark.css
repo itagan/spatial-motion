@@ -15,9 +15,11 @@ button:disabled { cursor: wait; opacity: .55; }
 .benchmark-footer { gap: 18px; }
 .benchmark-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
 .benchmark-actions label { color: #68809d; font-size: 11px; }
+.file-button { cursor: pointer; border: 1px solid rgba(142, 187, 255, .2); border-radius: 999px; padding: 7px 12px; }
+.file-button input { display: none; }
 select { margin-left: 8px; border: 1px solid rgba(142, 187, 255, .2); border-radius: 999px; background: #121e34; color: #b9cbe7; padding: 7px 10px; }
 .result-panel { padding: 0 30px 24px; }
-.result-panel pre { margin: 0; max-height: 260px; overflow: auto; border: 1px solid rgba(142, 187, 255, .14); background: rgba(4, 9, 17, .86); color: #8fc9df; padding: 16px; font-size: 11px; }
+.result-panel pre { margin: 0; max-height: 320px; overflow: auto; border: 1px solid rgba(142, 187, 255, .14); background: rgba(4, 9, 17, .86); color: #8fc9df; padding: 16px; font-size: 11px; }
 
 @media (max-width: 960px) {
   .metrics { grid-template-columns: repeat(4, 1fr); padding-inline: 14px; }
