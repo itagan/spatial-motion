@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@itagan/spatial-motion": ["./src/index.ts"]
+    }
+  },
+  "include": ["examples", "vite.examples.config.ts"]
+}

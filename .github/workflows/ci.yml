@@ -38,5 +38,8 @@ jobs:
       - name: Build demo
         run: npm run build:demo
 
+      - name: Build examples
+        run: npm run build:examples
+
       - name: Verify package
         run: npm run pack:check

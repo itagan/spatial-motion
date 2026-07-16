@@ -35,6 +35,7 @@ src/
 ├── renderers/     WebGL 实例渲染、Shader 和纹理图集
 └── performance/   质量档位、自适应性能和基准采样
 demo/              使用源码的演示页和性能基准页
+examples/          从正式包名导入的单场景集成示例
 scripts/           包发布形态与消费者验证脚本
 ```
 
@@ -86,6 +87,7 @@ npm run typecheck
 npm test
 npm run build:lib
 npm run build:demo
+npm run build:examples
 npm run pack:check
 ```
 

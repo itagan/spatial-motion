@@ -38,8 +38,9 @@
 - [x] **v1.7 布局参数化与效果实验室**：版本化布局配置、严格解析、八布局参数面板、预设与 URL/JSON 交换。
 - [x] **v1.8 高级布局生成**：Sphere 等面积/球带、Cylinder 圆弧、Ring 分配方向、Box 选面权重和 Cone 圆台。
 - [x] **v1.9 外部 3D 内容与动画扩展**：受控 Group 挂载、Stage 时钟更新、resize/pause/resume/dispose、错误隔离及 GSAP 示例。
+- [x] **v1.10 集成示例与仓库边界**：Vanilla、Three.js extension、GSAP 单场景示例及独立类型/构建验证。
 
-以上状态以当前源码、测试、构建脚本和浏览器验收为依据。`package.json` 已推进到 `1.9.0`，但当前阶段不执行 npm publish、tag 或 GitHub Release。
+以上状态以当前源码、测试、构建脚本和浏览器验收为依据。`package.json` 已推进到 `1.10.0`，但当前阶段不执行 npm publish、tag 或 GitHub Release。
 
 ## 当前优化阶段
 
@@ -52,16 +53,17 @@
 - [x] **v1.7 布局参数化与效果实验室**：把既有生成参数开放为稳定 JSON 配置和交互式 Demo。
 - [x] **v1.8 高级布局生成**：深化五类生成算法，并将全部新增参数接入严格配置和实验室。
 - [x] **v1.9 外部 3D 内容与动画扩展**：在不开放 Renderer/卡片 Mesh 的前提下提供通用扩展生命周期。
+- [x] **v1.10 集成示例与仓库边界**：先建设独立 examples，不为目录拆分提前引入 monorepo 成本。
 
 本阶段明确暂停 npm 发布、Tag、GitHub Release、CSS3D 和框架适配器，把工程投入集中在可量化性能和现有效果质量。
 
-## 最近完成：v1.9 外部 3D 内容与动画扩展
+## 最近完成：v1.10 集成示例与仓库边界
 
-- [x] `StageExtension` 提供隔离 Group、只读相机、取消信号和完整生命周期。
-- [x] 所有扩展由 Stage 的单一 RAF 驱动，并跟随用户暂停、页面隐藏、context loss 和 resize。
-- [x] 生命周期错误通过 `onExtensionError` 隔离，移除与销毁均幂等释放扩展。
-- [x] 原生 Three.js 与 GSAP 示例共用通用接口；GSAP 不成为核心依赖。
-- [x] benchmark 暴露扩展数量和 update 成本，并提供 NONE/NATIVE/GSAP/BOTH 对比。
+- [x] 建立 Vanilla、原生 Three.js extension 和 GSAP extension 三个可单独阅读/运行的示例。
+- [x] 示例从正式包名导入，并纳入严格类型检查、生产构建和 CI。
+- [x] `demo/` 继续承担综合联调，`examples/` 只承担单场景集成说明。
+- [x] 不引入 workspace；核心包、稳定入口、发布流程和 tarball 内容保持不变。
+- [x] 等出现首个独立适配器或扩展包时，再评估 npm workspaces monorepo。
 
 ## 后续候选方向
 

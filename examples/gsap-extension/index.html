@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spatial Motion · GSAP extension</title>
+  </head>
+  <body>
+    <main id="app" class="example">
+      <header>
+        <div><h1>GSAP extension</h1><p>GSAP timeline 保持 paused，由 Stage elapsed 精确推进。</p></div>
+        <span id="status" class="status">starting</span>
+      </header>
+      <section id="stage" class="stage" aria-label="GSAP extension stage"></section>
+      <footer>
+        <div class="controls">
+          <button id="pause">暂停 Stage</button>
+          <button id="resume">恢复 Stage</button>
+          <button id="remove">移除 GSAP</button>
+        </div>
+        <p>GSAP 是示例依赖，不进入核心包。</p>
+      </footer>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
