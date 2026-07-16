@@ -9,9 +9,11 @@ import {
   type LayoutConfig,
   type LayoutConfigType,
   type MotionItem,
+  type StageExtensionHandle,
   type Timeline,
 } from '@spatial-motion'
 import { createLayoutLab } from './layoutLab'
+import { createGsapExtension, createNativeThreeExtension } from './extensions'
 import './style.css'
 
 const avatarPool = Array.from({ length: 24 }, (_, index) => createAvatar(index))
@@ -70,9 +72,17 @@ const stage = new MotionStage({
     borderColor: 'rgba(245, 215, 122, .9)',
     backgroundColor: '#111827',
   },
+  onExtensionError(error, extension) {
+    console.error(`Stage extension failed: ${extension.name ?? 'anonymous'}`, error)
+  },
 })
 await stage.setItems(items)
 let activeTimeline: Timeline | null = null
+let nativeExtension: StageExtensionHandle | null = null
+let gsapExtension: StageExtensionHandle | null = null
+let nativeExtensionPending = false
+let gsapExtensionPending = false
+let extensionGeneration = 0
 
 const applyLayoutConfig = async (config: LayoutConfig, duration: number) => {
   activeTimeline?.cancel()
@@ -263,6 +273,43 @@ document.querySelector('#recipe-grid')?.addEventListener('click', () => playReci
   .add(() => stage.to(scatterLayouts.random, { duration: 900 }))
   .add(() => stage.to(layoutLab.getLayout('grid'), { duration: 1200 }))))
 
+document.querySelector('#extension-native')?.addEventListener('click', () => {
+  if (nativeExtension?.active || nativeExtensionPending) return
+  nativeExtensionPending = true
+  const generation = extensionGeneration
+  void stage.addExtension(createNativeThreeExtension())
+    .then((handle) => {
+      if (generation !== extensionGeneration) handle.remove()
+      else nativeExtension = handle
+    })
+    .catch(() => undefined)
+    .finally(() => { nativeExtensionPending = false })
+})
+
+document.querySelector('#extension-gsap')?.addEventListener('click', () => {
+  if (gsapExtension?.active || gsapExtensionPending) return
+  gsapExtensionPending = true
+  const generation = extensionGeneration
+  void stage.addExtension(createGsapExtension())
+    .then((handle) => {
+      if (generation !== extensionGeneration) handle.remove()
+      else gsapExtension = handle
+    })
+    .catch(() => undefined)
+    .finally(() => { gsapExtensionPending = false })
+})
+
+document.querySelector('#extension-clear')?.addEventListener('click', () => {
+  extensionGeneration += 1
+  nativeExtension?.remove()
+  gsapExtension?.remove()
+  nativeExtension = null
+  gsapExtension = null
+})
+
+document.querySelector('#stage-pause')?.addEventListener('click', () => stage.pause())
+document.querySelector('#stage-resume')?.addEventListener('click', () => stage.resume())
+
 document.querySelector('#quality')!.textContent = `${stage.getQuality().toUpperCase()} QUALITY`
 const updateItemCount = () => {
   document.querySelector('#count')!.textContent = `${items.length} ITEMS`
@@ -284,6 +331,7 @@ const updateFps = (now: number) => {
     document.querySelector('#fps')!.textContent = `${Math.round((frames * 1000) / (now - measuredAt))} FPS`
     const stats = stage.getPerformanceStats()
     document.querySelector('#render-stats')!.textContent = `${stats.drawCalls} CALL · ${stats.atlasBuilds} ATLAS`
+    document.querySelector('#extensions')!.textContent = `${stats.extensions} EXT · ${stats.extensionUpdateMs.toFixed(2)} MS`
     document.querySelector('#effect')!.textContent = stats.effect
       ? `${stats.effect.toUpperCase()} · ${stats.activeEffectItems} ACTIVE`
       : 'LAYOUT MODE'

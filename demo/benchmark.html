@@ -53,6 +53,15 @@
             <button data-benchmark-effect="burst">爆发</button>
           </div>
         </div>
+        <div class="control-group">
+          <strong>外部扩展</strong>
+          <div class="controls" id="benchmark-extensions">
+            <button data-benchmark-extension="none" class="active">NONE</button>
+            <button data-benchmark-extension="native">NATIVE</button>
+            <button data-benchmark-extension="gsap">GSAP</button>
+            <button data-benchmark-extension="both">BOTH</button>
+          </div>
+        </div>
       </section>
 
       <section class="metrics" aria-label="Live performance metrics">
@@ -60,6 +69,7 @@
         <article><span>FRAME</span><strong id="metric-frame">-- ms</strong></article>
         <article><span>P95 / P99</span><strong id="metric-percentiles">--</strong></article>
         <article><span>CPU / SUBMIT</span><strong id="metric-cpu">--</strong></article>
+        <article><span>EXT / UPDATE</span><strong id="metric-extensions">0 / --</strong></article>
         <article><span>ITEMS</span><strong id="metric-items">--</strong></article>
         <article><span>SUBMITTED</span><strong id="metric-submitted">--</strong></article>
         <article><span>VISIBLE</span><strong id="metric-visible">--</strong></article>

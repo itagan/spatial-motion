@@ -1,5 +1,5 @@
 import type { Layout } from '../core/types.js'
-import { box, type BoxOptions } from './box.js'
+import { box, boxFaces, type BoxFace, type BoxOptions } from './box.js'
 import { cone, type ConeOptions } from './cone.js'
 import { cylinder, type CylinderOptions } from './cylinder.js'
 import { grid, type GridOptions } from './grid.js'
@@ -56,9 +56,43 @@ const opacity: Validator = (value, path) => {
   if ((value as number) < 0 || (value as number) > 1) fail(path, 'must be between 0 and 1')
 }
 
+const latitude: Validator = (value, path) => {
+  finite(value, path)
+  if ((value as number) < -Math.PI / 2 || (value as number) > Math.PI / 2) {
+    fail(path, 'must be between -π/2 and π/2')
+  }
+}
+
+const arcAngle: Validator = (value, path) => {
+  positive(value, path)
+  if ((value as number) > Math.PI * 2) fail(path, 'must be less than or equal to 2π')
+}
+
+const boxFaceList: Validator = (value, path) => {
+  if (!Array.isArray(value) || value.length === 0) fail(path, 'must be a non-empty array')
+  const seen = new Set<string>()
+  value.forEach((face, index) => {
+    if (typeof face !== 'string' || !boxFaces.includes(face as BoxFace)) {
+      fail(`${path}.${index}`, `must be one of ${boxFaces.join(', ')}`)
+    }
+    if (seen.has(face)) fail(`${path}.${index}`, 'must not be duplicated')
+    seen.add(face)
+  })
+}
+
+const boxFaceWeights: Validator = (value, path) => {
+  if (!isRecord(value)) fail(path, 'must be an object')
+  rejectUnknownKeys(value, [...boxFaces], path)
+  Object.entries(value).forEach(([face, weight]) => nonNegative(weight, `${path}.${face}`))
+}
+
 const schemas: Record<LayoutConfigType, Record<string, Validator>> = {
   sphere: {
     radius: positive,
+    distribution: enumOf(['latitude', 'fibonacci']),
+    minLatitude: latitude,
+    maxLatitude: latitude,
+    poleMode: enumOf(['include', 'exclude']),
     rings: positiveInteger,
     stagger: boolean,
     density: nonNegative,
@@ -70,11 +104,19 @@ const schemas: Record<LayoutConfigType, Record<string, Validator>> = {
     depth: positive,
     density: nonNegative,
     orientation: enumOf(['camera', 'surface']),
+    faces: boxFaceList,
+    edgePadding: nonNegative,
+    faceWeights: boxFaceWeights,
   },
   cylinder: {
     radius: positive,
     spacing: positive,
     columns: positiveInteger,
+    rows: positiveInteger,
+    startAngle: finite,
+    arcAngle,
+    density: nonNegative,
+    orientation: enumOf(['camera', 'surface']),
   },
   grid: {
     columns: positiveInteger,
@@ -88,6 +130,9 @@ const schemas: Record<LayoutConfigType, Record<string, Validator>> = {
     startAngle: finite,
     orientation: enumOf(['camera', 'tangent']),
     density: nonNegative,
+    distribution: enumOf(['area', 'equal']),
+    stagger: boolean,
+    clockwise: boolean,
   },
   helix: {
     radius: nonNegative,
@@ -100,6 +145,7 @@ const schemas: Record<LayoutConfigType, Record<string, Validator>> = {
   },
   cone: {
     radius: positive,
+    topRadius: nonNegative,
     height: positive,
     rings: positiveInteger,
     startAngle: finite,
@@ -149,6 +195,7 @@ export function parseLayoutConfig(value: unknown): LayoutConfig {
     schema[key](optionValue, `options.${key}`)
     options[key] = optionValue
   })
+  validateOptionRelationships(type, options)
   return { version: 1, type, options } as LayoutConfig
 }
 
@@ -177,4 +224,39 @@ function rejectUnknownKeys(value: Record<string, unknown>, allowed: string[], pa
 
 function fail(path: string, reason: string): never {
   throw new TypeError(`Invalid LayoutConfig at ${path}: ${reason}`)
+}
+
+function validateOptionRelationships(type: LayoutConfigType, options: Record<string, unknown>): void {
+  if (type === 'sphere') {
+    const minimum = (options.minLatitude as number | undefined) ?? -Math.PI / 2
+    const maximum = (options.maxLatitude as number | undefined) ?? Math.PI / 2
+    if (minimum >= maximum) {
+      fail('options.minLatitude', 'must be less than options.maxLatitude')
+    }
+    if (options.distribution === 'fibonacci') {
+      for (const key of ['rings', 'stagger', 'poleMode']) {
+        if (options[key] !== undefined) fail(`options.${key}`, 'is only supported by latitude distribution')
+      }
+    }
+  }
+
+  if (type === 'cylinder' && options.rows !== undefined && options.columns !== undefined) {
+    fail('options.rows', 'cannot be combined with options.columns')
+  }
+
+  if (type === 'box') {
+    const faces = (options.faces as BoxFace[] | undefined) ?? [...boxFaces]
+    const weights = options.faceWeights as Partial<Record<BoxFace, number>> | undefined
+    if (weights && faces.every((face) => (weights[face] ?? 1) === 0)) {
+      fail('options.faceWeights', 'must leave at least one selected face with a positive weight')
+    }
+  }
+
+  if (type === 'cone') {
+    const radius = (options.radius as number | undefined) ?? 5
+    const topRadius = options.topRadius as number | undefined
+    if (topRadius !== undefined && topRadius > radius) {
+      fail('options.topRadius', 'must be less than or equal to options.radius')
+    }
+  }
 }

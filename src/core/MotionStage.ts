@@ -1,4 +1,4 @@
-import { Euler, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three'
+import { Euler, Group, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three'
 import type {
   CardStyle,
   DrawCard,
@@ -16,6 +16,12 @@ import {
   type PerformanceStats,
 } from '../performance/AdaptivePerformanceManager.js'
 import { Timeline } from './Timeline.js'
+import type {
+  StageExtension,
+  StageExtensionContext,
+  StageExtensionHandle,
+  StageViewport,
+} from './extensions.js'
 import { TunnelEffect } from '../effects/TunnelEffect.js'
 import { LinearShooterEffect } from '../effects/LinearShooterEffect.js'
 import type { StreamingEffect, StreamingEffectGpuData } from '../effects/types.js'
@@ -40,6 +46,7 @@ export interface MotionStageOptions {
   /** Defaults used when an individual transition omits duration or easing. */
   transition?: TransitionOptions
   onContextChange?: (state: 'lost' | 'restored') => void
+  onExtensionError?: (error: unknown, extension: StageExtension) => void
 }
 
 export interface UpdateItemsOptions extends TransitionOptions {
@@ -109,6 +116,8 @@ export interface StagePerformanceStats extends PerformanceStats {
   imageRequests: number
   imageFailures: number
   estimatedTextureUploadBytes: number
+  extensions: number
+  extensionUpdateMs: number
 }
 
 export interface StagePerformanceEnvironment {
@@ -124,6 +133,18 @@ export interface StagePerformanceEnvironment {
   webglVersion: string
   gpuVendor: string | null
   gpuRenderer: string | null
+}
+
+interface StageExtensionRecord {
+  extension: StageExtension
+  root: Group
+  abortController: AbortController
+  active: boolean
+  mounted: boolean
+  disposed: boolean
+  paused: boolean
+  hasUpdated: boolean
+  elapsed: number
 }
 
 export class MotionStage {
@@ -190,6 +211,8 @@ export class MotionStage {
     reject: Array<(reason: unknown) => void>
   } | null = null
   private itemUpdateChain: Promise<unknown> = Promise.resolve()
+  private readonly extensions = new Set<StageExtensionRecord>()
+  private extensionUpdateMs = 0
 
   constructor(private readonly options: MotionStageOptions) {
     this.motionPreference = options.motionPreference ?? 'auto'
@@ -702,6 +725,61 @@ export class MotionStage {
     return new Timeline()
   }
 
+  async addExtension(extension: StageExtension): Promise<StageExtensionHandle> {
+    this.assertActive()
+    if (!extension || typeof extension.mount !== 'function') {
+      throw new TypeError('Stage extension must provide a mount(context) function')
+    }
+
+    const root = new Group()
+    root.name = `SpatialMotionExtension:${extension.name ?? 'anonymous'}`
+    const record: StageExtensionRecord = {
+      extension,
+      root,
+      abortController: new AbortController(),
+      active: true,
+      mounted: false,
+      disposed: false,
+      paused: false,
+      hasUpdated: false,
+      elapsed: 0,
+    }
+    this.extensions.add(record)
+    this.scene.add(root)
+
+    const context: StageExtensionContext = {
+      root,
+      camera: this.camera,
+      signal: record.abortController.signal,
+    }
+
+    try {
+      await extension.mount(context)
+      record.mounted = true
+      if (!record.active || this.destroyed) {
+        this.disposeExtensionRecord(record)
+        throw new Error('MotionStage was destroyed or the extension was removed during mount')
+      }
+      extension.resize?.(this.extensionViewport())
+      if (this.isPaused()) {
+        record.paused = true
+        extension.pause?.()
+      }
+    } catch (error) {
+      const cancelled = !record.active || this.destroyed
+      record.mounted = true
+      if (record.active) this.removeExtensionRecord(record)
+      else this.disposeExtensionRecord(record)
+      if (!cancelled) this.reportExtensionError(error, extension)
+      throw error
+    }
+
+    return {
+      get active() { return record.active },
+      remove: () => this.removeExtensionRecord(record),
+    }
+  }
+
   resize(): void {
     this.assertActive()
     this.resizeInternal()
@@ -713,6 +791,15 @@ export class MotionStage {
     this.camera.aspect = width / height
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(width, height, false)
+    const viewport = this.extensionViewport()
+    for (const record of [...this.extensions]) {
+      if (!record.active || !record.mounted || !record.extension.resize) continue
+      try {
+        record.extension.resize(viewport)
+      } catch (error) {
+        this.failExtension(record, error)
+      }
+    }
   }
 
   destroy(): void {
@@ -730,6 +817,7 @@ export class MotionStage {
     this.renderer.domElement.removeEventListener('pointerleave', this.handlePointerLeave)
     this.motionQuery?.removeEventListener('change', this.handleMotionPreferenceChange)
     document.removeEventListener('visibilitychange', this.handleVisibilityChange)
+    for (const extension of [...this.extensions]) this.removeExtensionRecord(extension)
     this.cards.dispose()
     this.renderer.dispose()
     this.renderer.domElement.remove()
@@ -781,6 +869,8 @@ export class MotionStage {
       imageRequests: cardStats.imageRequests,
       imageFailures: cardStats.imageFailures,
       estimatedTextureUploadBytes: cardStats.estimatedTextureUploadBytes,
+      extensions: this.extensions.size,
+      extensionUpdateMs: this.extensionUpdateMs,
     }
   }
 
@@ -877,6 +967,7 @@ export class MotionStage {
     if (this.activeEffect) {
       this.cards.setEffectTime(Math.max(0, (now - this.activeEffect.startedAt) / 1000))
     }
+    this.updateExtensions(delta)
     this.frameCpuMs = performance.now() - frameCpuStartedAt
     const renderStartedAt = performance.now()
     this.renderer.render(this.scene, this.camera)
@@ -910,11 +1001,13 @@ export class MotionStage {
 
   private startRenderLoop(): void {
     if (this.destroyed || this.isPaused() || this.frameId) return
+    this.setExtensionsPaused(false)
     this.lastFrame = performance.now()
     this.frameId = requestAnimationFrame(this.render)
   }
 
   private stopRenderLoop(): void {
+    this.setExtensionsPaused(true)
     if (!this.frameId) return
     cancelAnimationFrame(this.frameId)
     this.frameId = 0
@@ -922,6 +1015,79 @@ export class MotionStage {
 
   private isPaused(): boolean {
     return this.pausedByUser || this.pausedByVisibility || this.pausedByContext
+  }
+
+  private extensionViewport(): StageViewport {
+    return {
+      width: this.options.container.clientWidth,
+      height: this.options.container.clientHeight,
+      pixelRatio: this.renderer.getPixelRatio(),
+    }
+  }
+
+  private updateExtensions(delta: number): void {
+    const startedAt = performance.now()
+    for (const record of [...this.extensions]) {
+      if (!record.active || !record.mounted || !record.extension.update) continue
+      const extensionDelta = record.hasUpdated ? delta : 0
+      record.hasUpdated = true
+      record.elapsed += extensionDelta
+      try {
+        record.extension.update({ elapsed: record.elapsed, delta: extensionDelta })
+      } catch (error) {
+        this.failExtension(record, error)
+      }
+    }
+    this.extensionUpdateMs = performance.now() - startedAt
+  }
+
+  private setExtensionsPaused(paused: boolean): void {
+    for (const record of [...this.extensions]) {
+      if (!record.active || !record.mounted) continue
+      if (record.paused === paused) continue
+      record.paused = paused
+      const callback = paused ? record.extension.pause : record.extension.resume
+      if (!callback) continue
+      try {
+        callback.call(record.extension)
+      } catch (error) {
+        this.failExtension(record, error)
+      }
+    }
+  }
+
+  private failExtension(record: StageExtensionRecord, error: unknown): void {
+    this.removeExtensionRecord(record)
+    this.reportExtensionError(error, record.extension)
+  }
+
+  private removeExtensionRecord(record: StageExtensionRecord): void {
+    if (!record.active) return
+    record.active = false
+    record.abortController.abort()
+    this.extensions.delete(record)
+    record.root.removeFromParent()
+    if (record.mounted) this.disposeExtensionRecord(record)
+  }
+
+  private disposeExtensionRecord(record: StageExtensionRecord): void {
+    if (record.disposed) return
+    record.disposed = true
+    try {
+      record.extension.dispose?.()
+    } catch (error) {
+      this.reportExtensionError(error, record.extension)
+    } finally {
+      record.root.clear()
+    }
+  }
+
+  private reportExtensionError(error: unknown, extension: StageExtension): void {
+    try {
+      this.options.onExtensionError?.(error, extension)
+    } catch {
+      // An error observer must not break the Stage render or cleanup path.
+    }
   }
 
   private readonly handleContextLost = (event: Event) => {

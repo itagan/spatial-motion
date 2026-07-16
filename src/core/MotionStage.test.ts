@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Object3D } from 'three'
 import type { Layout, LayoutContext, MotionItem, Transform } from './types'
+import type { StageExtensionContext } from './extensions'
 import { MotionStage } from './MotionStage'
 import { TunnelEffect } from '../effects/TunnelEffect'
 import { radialBurst } from '../effects/RadialBurstEffect'
@@ -144,6 +146,12 @@ function currentCards() {
   return cards
 }
 
+function currentRenderer() {
+  const renderer = stageMocks.webglRenderers.at(-1)
+  if (!renderer) throw new Error('WebGL renderer mock was not created')
+  return renderer as { render: ReturnType<typeof vi.fn> }
+}
+
 describe('MotionStage', () => {
   beforeEach(() => {
     stageMocks.cards.length = 0
@@ -253,9 +261,213 @@ describe('MotionStage', () => {
     visibilitySpy.mockRestore()
   })
 
-  it('pauses on WebGL context loss and refreshes the atlas after restoration', () => {
+  it('mounts extensions on isolated roots and updates them in the Stage frame loop', async () => {
+    let frame: FrameRequestCallback | null = null
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
+    const mount = vi.fn((context: StageExtensionContext) => {
+      context.root.add(new Object3D())
+    })
+    const update = vi.fn()
+    const resize = vi.fn()
+    const dispose = vi.fn()
+    const stage = createStage()
+    const handle = await stage.addExtension({ name: 'test', mount, update, resize, dispose })
+    const context = mount.mock.calls[0][0]
+
+    expect(context.root.name).toBe('SpatialMotionExtension:test')
+    expect(context.root.parent).not.toBeNull()
+    expect(context.signal.aborted).toBe(false)
+    expect(resize).toHaveBeenCalledWith({ width: 100, height: 100, pixelRatio: 1.5 })
+    stage.resize()
+    expect(resize).toHaveBeenCalledTimes(2)
+    expect(handle.active).toBe(true)
+
+    const firstFrame = frame as FrameRequestCallback | null
+    expect(firstFrame).not.toBeNull()
+    firstFrame!(1000)
+    const secondFrame = frame as FrameRequestCallback | null
+    secondFrame!(1016)
+    expect(update).toHaveBeenLastCalledWith({ elapsed: 0.016, delta: 0.016 })
+    expect(stage.getPerformanceStats()).toMatchObject({ extensions: 1 })
+
+    handle.remove()
+    handle.remove()
+    expect(handle.active).toBe(false)
+    expect(context.signal.aborted).toBe(true)
+    expect(context.root.parent).toBeNull()
+    expect(dispose).toHaveBeenCalledOnce()
+    stage.destroy()
+  })
+
+  it('drives five extensions from the single Stage animation frame', async () => {
+    let frame: FrameRequestCallback | null = null
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    })
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    const updates = Array.from({ length: 5 }, () => vi.fn())
+    const stage = createStage()
+
+    await Promise.all(updates.map((update, index) => stage.addExtension({
+      name: `extension-${index}`,
+      mount: vi.fn(),
+      update,
+    })))
+
+    expect(requestFrame).toHaveBeenCalledOnce()
+    const renderFrame = frame as FrameRequestCallback | null
+    renderFrame!(1000)
+    expect(updates.every((update) => update.mock.calls.length === 1)).toBe(true)
+    expect(requestFrame).toHaveBeenCalledTimes(2)
+    expect(stage.getPerformanceStats().extensions).toBe(5)
+    stage.destroy()
+  })
+
+  it('forwards effective pause and resume transitions exactly once', async () => {
+    let visibility: DocumentVisibilityState = 'visible'
+    const visibilitySpy = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
+    const pause = vi.fn()
+    const resume = vi.fn()
+    const stage = createStage()
+    await stage.addExtension({ mount: vi.fn(), pause, resume })
+
+    stage.pause()
+    stage.pause()
+    expect(pause).toHaveBeenCalledOnce()
+    stage.resume()
+    expect(resume).toHaveBeenCalledOnce()
+
+    visibility = 'hidden'
+    document.dispatchEvent(new Event('visibilitychange'))
+    stage.pause()
+    expect(pause).toHaveBeenCalledTimes(2)
+    visibility = 'visible'
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(resume).toHaveBeenCalledOnce()
+    stage.resume()
+    expect(resume).toHaveBeenCalledTimes(2)
+
+    stage.destroy()
+    visibilitySpy.mockRestore()
+  })
+
+  it('isolates extension update errors and keeps rendering the Stage', async () => {
+    let frame: FrameRequestCallback | null = null
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
+    const failure = new Error('extension update failed')
+    const dispose = vi.fn()
+    const onExtensionError = vi.fn()
+    const extension = { mount: vi.fn(), update: vi.fn(() => { throw failure }), dispose }
+    const stage = createStage({ onExtensionError })
+    const renderer = currentRenderer()
+    const handle = await stage.addExtension(extension)
+
+    const renderFrame = frame as FrameRequestCallback | null
+    renderFrame!(1000)
+    expect(onExtensionError).toHaveBeenCalledWith(failure, extension)
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(handle.active).toBe(false)
+    expect(stage.getPerformanceStats().extensions).toBe(0)
+    expect(renderer.render).toHaveBeenCalledOnce()
+    stage.destroy()
+  })
+
+  it('isolates resize, pause, resume, and dispose callback errors', async () => {
+    const onExtensionError = vi.fn()
+    const stage = createStage({ onExtensionError })
+    const failures = {
+      resize: new Error('resize failed'),
+      pause: new Error('pause failed'),
+      resume: new Error('resume failed'),
+      dispose: new Error('dispose failed'),
+    }
+
+    let resizeCalls = 0
+    const resizeExtension = {
+      mount: vi.fn(),
+      resize: vi.fn(() => {
+        resizeCalls += 1
+        if (resizeCalls > 1) throw failures.resize
+      }),
+    }
+    const resizeHandle = await stage.addExtension(resizeExtension)
+    stage.resize()
+    expect(resizeHandle.active).toBe(false)
+
+    const pauseExtension = { mount: vi.fn(), pause: vi.fn(() => { throw failures.pause }) }
+    const pauseHandle = await stage.addExtension(pauseExtension)
+    stage.pause()
+    expect(pauseHandle.active).toBe(false)
+    stage.resume()
+
+    const resumeExtension = { mount: vi.fn(), resume: vi.fn(() => { throw failures.resume }) }
+    const resumeHandle = await stage.addExtension(resumeExtension)
+    stage.pause()
+    stage.resume()
+    expect(resumeHandle.active).toBe(false)
+
+    const disposeExtension = { mount: vi.fn(), dispose: vi.fn(() => { throw failures.dispose }) }
+    const disposeHandle = await stage.addExtension(disposeExtension)
+    disposeHandle.remove()
+    expect(disposeHandle.active).toBe(false)
+
+    expect(onExtensionError.mock.calls).toEqual([
+      [failures.resize, resizeExtension],
+      [failures.pause, pauseExtension],
+      [failures.resume, resumeExtension],
+      [failures.dispose, disposeExtension],
+    ])
+    expect(stage.getPerformanceStats().extensions).toBe(0)
+    stage.destroy()
+  })
+
+  it('aborts and disposes an asynchronous mount when the Stage is destroyed', async () => {
+    const mounted = deferred<void>()
+    const dispose = vi.fn()
+    let context: StageExtensionContext | null = null
+    const stage = createStage()
+    const adding = stage.addExtension({
+      mount(value) {
+        context = value
+        return mounted.promise
+      },
+      dispose,
+    })
+
+    stage.destroy()
+    expect((context as StageExtensionContext | null)?.signal.aborted).toBe(true)
+    mounted.resolve()
+    await expect(adding).rejects.toThrow('destroyed or the extension was removed during mount')
+    expect(dispose).toHaveBeenCalledOnce()
+  })
+
+  it('cleans up and reports a failed extension mount', async () => {
+    const failure = new Error('mount failed')
+    const dispose = vi.fn()
+    const onExtensionError = vi.fn()
+    const extension = { mount: vi.fn(async () => { throw failure }), dispose }
+    const stage = createStage({ onExtensionError })
+
+    await expect(stage.addExtension(extension)).rejects.toThrow('mount failed')
+    expect(onExtensionError).toHaveBeenCalledWith(failure, extension)
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(stage.getPerformanceStats().extensions).toBe(0)
+    stage.destroy()
+  })
+
+  it('pauses on WebGL context loss and refreshes the atlas after restoration', async () => {
     const contextChanges = vi.fn()
     const stage = createStage({ onContextChange: contextChanges })
+    const extensionPause = vi.fn()
+    const extensionResume = vi.fn()
+    await stage.addExtension({ mount: vi.fn(), pause: extensionPause, resume: extensionResume })
     const cards = currentCards()
     const canvas = document.querySelector('canvas')!
     const lost = new Event('webglcontextlost', { cancelable: true })
@@ -264,17 +476,21 @@ describe('MotionStage', () => {
     expect(lost.defaultPrevented).toBe(true)
     expect(stage.getPerformanceStats()).toMatchObject({ paused: true, contextLost: true })
     expect(contextChanges).toHaveBeenCalledWith('lost')
+    expect(extensionPause).toHaveBeenCalledOnce()
 
     canvas.dispatchEvent(new Event('webglcontextrestored'))
     expect(cards.refreshTexture).toHaveBeenCalledOnce()
     expect(stage.getPerformanceStats()).toMatchObject({ paused: false, contextLost: false })
     expect(contextChanges).toHaveBeenLastCalledWith('restored')
+    expect(extensionResume).toHaveBeenCalledOnce()
 
     stage.pause()
     canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
     canvas.dispatchEvent(new Event('webglcontextrestored'))
     expect(stage.getPerformanceStats()).toMatchObject({ paused: true, contextLost: false })
     stage.resume()
+    expect(extensionPause).toHaveBeenCalledTimes(2)
+    expect(extensionResume).toHaveBeenCalledTimes(2)
 
     stage.destroy()
     canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))

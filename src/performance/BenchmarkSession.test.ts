@@ -46,6 +46,8 @@ function stats(overrides: Partial<StagePerformanceStats> = {}): StagePerformance
     imageRequests: 0,
     imageFailures: 0,
     estimatedTextureUploadBytes: 2_000_000,
+    extensions: 0,
+    extensionUpdateMs: 0,
     ...overrides,
   }
 }
@@ -64,6 +66,8 @@ describe('BenchmarkSession', () => {
       longFramesOver50Ms: 1,
       frameCpuMs: 0.8,
       renderSubmitMs: 1.2,
+      extensions: 2,
+      extensionUpdateMs: 0.3,
       transformCalculationMs: 4,
       transformCalculations: 2,
       atlasPatches: 1,
@@ -89,6 +93,9 @@ describe('BenchmarkSession', () => {
       averageFrameCpuMs: 0.5,
       maximumFrameCpuMs: 0.8,
       averageRenderSubmitMs: 0.8,
+      averageExtensionUpdateMs: 0.15,
+      maximumExtensionUpdateMs: 0.3,
+      maximumExtensions: 2,
       transformCalculationMs: 4,
       transformCalculations: 2,
       atlasPatches: 1,

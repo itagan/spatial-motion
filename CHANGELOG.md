@@ -2,6 +2,41 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)。日期使用 `YYYY-MM-DD`。
 
+## 1.9.0 - 2026-07-16
+
+受控的外部 3D 内容与动画扩展。
+
+### Added
+
+- 新增 `StageExtension`、`StageExtensionContext`、`StageFrameContext`、`StageViewport` 与 `StageExtensionHandle` 公共类型。
+- `MotionStage.addExtension()` 为每个扩展提供隔离 `Group`、只读相机、`AbortSignal` 和 mount/update/resize/pause/resume/dispose 生命周期。
+- 新增 `onExtensionError` 错误边界，以及扩展数量和逐帧 update 耗时统计。
+- Demo 增加原生 Three.js 与 GSAP 扩展示例；benchmark 可比较 NONE/NATIVE/GSAP/BOTH。
+
+### Compatibility
+
+- Stage 继续独占渲染循环，不开放内部卡片 Mesh 或 WebGLRenderer；主体卡片的单 Draw Call 保证不变。
+- GSAP 仅为 Demo 开发依赖，不进入核心运行时依赖或发布产物。
+- 未使用扩展的现有调用保持 v1.8 行为。
+
+## 1.8.0 - 2026-07-16
+
+高级布局生成与参数实验室扩展。
+
+### Added
+
+- Sphere 增加 latitude/Fibonacci 等面积分布、球冠/球带范围和极点包含策略。
+- Cylinder 增加起始角、部分圆弧、显式行数、密度和 camera/surface 朝向。
+- Ring 增加按面积/等量分配、交错开关和顺逆时针排序。
+- Box 增加稳定的 `BoxFace` 类型、面选择、世界单位边缘留白和逐面权重。
+- Cone 增加 `topRadius`，统一支持尖锥、圆台和等半径柱面。
+- 参数实验室增加全部高级字段、互斥控制和对应预设。
+
+### Compatibility
+
+- 所有字段均为 `LayoutConfig v1` 可选字段；旧 JSON 和无参数布局保持可读取及默认视觉兼容。
+- 严格配置拒绝 Fibonacci 与纬度圆环字段混用、Cylinder 行列同时指定、重复/空 Box 面和无效圆台半径。
+
 ## 1.7.0 - 2026-07-16
 
 布局参数化与可序列化配置实验室。

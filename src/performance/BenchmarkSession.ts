@@ -36,6 +36,9 @@ export interface BenchmarkResult {
   maximumFrameCpuMs: number
   averageRenderSubmitMs: number
   maximumRenderSubmitMs: number
+  averageExtensionUpdateMs: number
+  maximumExtensionUpdateMs: number
+  maximumExtensions: number
   transformCalculationMs: number
   transformCalculations: number
   pickingMs: number
@@ -128,6 +131,9 @@ export class BenchmarkSession {
       maximumFrameCpuMs: maximum(this.samples.map(({ stats }) => stats.frameCpuMs)),
       averageRenderSubmitMs: average(this.samples.map(({ stats }) => stats.renderSubmitMs).filter(nonNegative)),
       maximumRenderSubmitMs: maximum(this.samples.map(({ stats }) => stats.renderSubmitMs)),
+      averageExtensionUpdateMs: average(this.samples.map(({ stats }) => stats.extensionUpdateMs).filter(nonNegative)),
+      maximumExtensionUpdateMs: maximum(this.samples.map(({ stats }) => stats.extensionUpdateMs)),
+      maximumExtensions: maximum(this.samples.map(({ stats }) => stats.extensions)),
       transformCalculationMs: counterDelta(first, latest, 'transformCalculationMs'),
       transformCalculations: counterDelta(first, latest, 'transformCalculations'),
       pickingMs: counterDelta(first, latest, 'pickingMs'),

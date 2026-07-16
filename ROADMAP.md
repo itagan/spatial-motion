@@ -36,8 +36,10 @@
 - [x] **v1.5 特效视觉精修**：四类流式特效的低差异密度与质量切换轨迹连续性。
 - [x] **v1.6 动画与自适应质量**：中断最短角路径和基于 P95/长帧比例的升降级迟滞。
 - [x] **v1.7 布局参数化与效果实验室**：版本化布局配置、严格解析、八布局参数面板、预设与 URL/JSON 交换。
+- [x] **v1.8 高级布局生成**：Sphere 等面积/球带、Cylinder 圆弧、Ring 分配方向、Box 选面权重和 Cone 圆台。
+- [x] **v1.9 外部 3D 内容与动画扩展**：受控 Group 挂载、Stage 时钟更新、resize/pause/resume/dispose、错误隔离及 GSAP 示例。
 
-以上状态以当前源码、测试、构建脚本和提交历史为依据。`package.json` 已推进到 `1.7.0`，但当前阶段不执行 npm publish、tag 或 GitHub Release。
+以上状态以当前源码、测试、构建脚本和浏览器验收为依据。`package.json` 已推进到 `1.9.0`，但当前阶段不执行 npm publish、tag 或 GitHub Release。
 
 ## 当前优化阶段
 
@@ -48,16 +50,18 @@
 - [x] **v1.5 特效视觉精修**：Tunnel、Shooter、Vortex、Radial Burst 的速度、密度、淡出和周期边界。
 - [x] **v1.6 动画与自适应质量**：当前帧连续中断、旋转最短路径和基于 P95/长帧的质量迟滞。
 - [x] **v1.7 布局参数化与效果实验室**：把既有生成参数开放为稳定 JSON 配置和交互式 Demo。
+- [x] **v1.8 高级布局生成**：深化五类生成算法，并将全部新增参数接入严格配置和实验室。
+- [x] **v1.9 外部 3D 内容与动画扩展**：在不开放 Renderer/卡片 Mesh 的前提下提供通用扩展生命周期。
 
 本阶段明确暂停 npm 发布、Tag、GitHub Release、CSS3D 和框架适配器，把工程投入集中在可量化性能和现有效果质量。
 
-## 下一阶段：v1.8 高级布局生成
+## 最近完成：v1.9 外部 3D 内容与动画扩展
 
-- [ ] Sphere 增加 latitude/fibonacci 分布、球冠/球带范围和极点模式。
-- [ ] Cylinder 增加起始角度、部分圆弧、行数、密度与朝向控制。
-- [ ] Ring 增加等量/按面积分配、交错和旋转方向。
-- [ ] Box 增加面选择、边缘留白和可选面权重；Cone 支持圆台顶部半径。
-- [ ] 新参数继续进入 `LayoutConfig` v1 的可选字段，并保持旧配置可读取。
+- [x] `StageExtension` 提供隔离 Group、只读相机、取消信号和完整生命周期。
+- [x] 所有扩展由 Stage 的单一 RAF 驱动，并跟随用户暂停、页面隐藏、context loss 和 resize。
+- [x] 生命周期错误通过 `onExtensionError` 隔离，移除与销毁均幂等释放扩展。
+- [x] 原生 Three.js 与 GSAP 示例共用通用接口；GSAP 不成为核心依赖。
+- [x] benchmark 暴露扩展数量和 update 成本，并提供 NONE/NATIVE/GSAP/BOTH 对比。
 
 ## 后续候选方向
 
