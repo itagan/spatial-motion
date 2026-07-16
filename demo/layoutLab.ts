@@ -22,6 +22,8 @@ type Control =
   | { key: string; label: string; kind: 'number'; min: number; max: number; step: number; auto?: boolean }
   | { key: string; label: string; kind: 'boolean' }
   | { key: string; label: string; kind: 'select'; values: Array<{ value: string; label: string }> }
+  | { key: string; label: string; kind: 'multi'; values: Array<{ value: string; label: string }> }
+  | { key: string; label: string; kind: 'weights'; values: Array<{ value: string; label: string }> }
 
 interface Definition {
   label: string
@@ -41,22 +43,31 @@ const initialConfigs: Record<LayoutConfigType, LayoutConfig> = {
 }
 
 const resolvedDefaults: Record<LayoutConfigType, Record<string, unknown>> = {
-  sphere: { radius: 5, rings: 2, stagger: false, density: 0.86, orientation: 'upright-surface' },
-  box: { width: 8, height: 8, depth: 8, density: 0.82, orientation: 'surface' },
-  cylinder: { radius: 5, spacing: 0.1, columns: 3 },
+  sphere: { radius: 5, distribution: 'latitude', minLatitude: -Math.PI / 2, maxLatitude: Math.PI / 2, poleMode: 'include', rings: 2, stagger: false, density: 0.86, orientation: 'upright-surface' },
+  box: { width: 8, height: 8, depth: 8, density: 0.82, orientation: 'surface', faces: ['front', 'back', 'right', 'left', 'top', 'bottom'], edgePadding: 0, faceWeights: {} },
+  cylinder: { radius: 5, spacing: 0.1, columns: 3, rows: 2, startAngle: 0, arcAngle: Math.PI * 2, density: 0.78, orientation: 'surface' },
   grid: { columns: 1, gap: 1.3, fit: 'fixed' },
-  ring: { innerRadius: 0.8, spacing: 0.42, rings: 1, startAngle: -Math.PI / 2, orientation: 'camera', density: 0.78 },
+  ring: { innerRadius: 0.8, spacing: 0.42, rings: 1, startAngle: -Math.PI / 2, orientation: 'camera', density: 0.78, distribution: 'area', stagger: true, clockwise: false },
   helix: { radius: 4.6, height: 9, turns: 2, startAngle: 0, clockwise: false, orientation: 'surface', density: 0.8 },
-  cone: { radius: 5, height: 9, rings: 2, startAngle: 0, stagger: false, orientation: 'upright-surface', density: 0.82 },
+  cone: { radius: 5, topRadius: 0, height: 9, rings: 2, startAngle: 0, stagger: false, orientation: 'upright-surface', density: 0.82 },
   scatter: { direction: 'random', distance: 10, depth: 6, spin: Math.PI * 2, spinMode: 'random', layers: 4, scale: 0.25, opacity: 0, seed: 2030 },
 }
 
-const angle = { min: -Math.PI, max: Math.PI, step: 0.05 }
+const angleStep = Math.PI / 64
+const angle = { min: -Math.PI, max: Math.PI, step: angleStep }
 const density = { min: 0.2, max: 1.2, step: 0.01 }
 const orientation3d = [
   { value: 'camera', label: '始终朝向相机' },
   { value: 'surface', label: '贴合曲面' },
   { value: 'upright-surface', label: '曲面直立' },
+]
+const boxFaceOptions = [
+  { value: 'front', label: '前' },
+  { value: 'back', label: '后' },
+  { value: 'right', label: '右' },
+  { value: 'left', label: '左' },
+  { value: 'top', label: '上' },
+  { value: 'bottom', label: '下' },
 ]
 
 const definitions: Record<LayoutConfigType, Definition> = {
@@ -64,6 +75,16 @@ const definitions: Record<LayoutConfigType, Definition> = {
     label: '球体',
     controls: [
       { key: 'radius', label: '半径', kind: 'number', min: 0.5, max: 12, step: 0.1 },
+      { key: 'distribution', label: '分布模式', kind: 'select', values: [
+        { value: 'latitude', label: '纬度圆环' },
+        { value: 'fibonacci', label: 'Fibonacci 等面积' },
+      ] },
+      { key: 'minLatitude', label: '最低纬度', kind: 'number', min: -Math.PI / 2, max: Math.PI / 2 - angleStep, step: angleStep },
+      { key: 'maxLatitude', label: '最高纬度', kind: 'number', min: -Math.PI / 2 + angleStep, max: Math.PI / 2, step: angleStep },
+      { key: 'poleMode', label: '极点模式', kind: 'select', values: [
+        { value: 'include', label: '包含极点' },
+        { value: 'exclude', label: '避开极点' },
+      ] },
       { key: 'rings', label: '纬度圆环数', kind: 'number', min: 2, max: 64, step: 1, auto: true },
       { key: 'density', label: '卡片密度', kind: 'number', ...density },
       { key: 'stagger', label: '交错排列', kind: 'boolean' },
@@ -73,6 +94,8 @@ const definitions: Record<LayoutConfigType, Definition> = {
       { label: '经典球体', config: initialConfigs.sphere },
       { label: '密集交错', config: { version: 1, type: 'sphere', options: { radius: 5.5, rings: 22, density: 0.76, stagger: true, orientation: 'upright-surface' } } },
       { label: '相机朝向', config: { version: 1, type: 'sphere', options: { radius: 5.2, rings: 16, density: 0.82, orientation: 'camera' } } },
+      { label: 'Fibonacci 球体', config: { version: 1, type: 'sphere', options: { radius: 5.2, distribution: 'fibonacci', density: 0.82, orientation: 'surface' } } },
+      { label: '北半球冠', config: { version: 1, type: 'sphere', options: { radius: 5.5, minLatitude: 0.2, maxLatitude: Math.PI / 2, poleMode: 'exclude', rings: 14, orientation: 'upright-surface' } } },
     ],
   },
   box: {
@@ -81,12 +104,16 @@ const definitions: Record<LayoutConfigType, Definition> = {
       { key: 'width', label: '宽度', kind: 'number', min: 0.5, max: 16, step: 0.1 },
       { key: 'height', label: '高度', kind: 'number', min: 0.5, max: 16, step: 0.1 },
       { key: 'depth', label: '深度', kind: 'number', min: 0.5, max: 16, step: 0.1 },
+      { key: 'faces', label: '显示面', kind: 'multi', values: boxFaceOptions },
+      { key: 'edgePadding', label: '边缘留白', kind: 'number', min: 0, max: 4, step: 0.05 },
+      { key: 'faceWeights', label: '面权重', kind: 'weights', values: boxFaceOptions },
       { key: 'density', label: '卡片密度', kind: 'number', ...density },
       { key: 'orientation', label: '朝向', kind: 'select', values: orientation3d.slice(0, 2) },
     ],
     presets: [
       { label: '标准立方体', config: initialConfigs.box },
       { label: '宽屏长方体', config: { version: 1, type: 'box', options: { width: 12, height: 7, depth: 4, density: 0.78, orientation: 'surface' } } },
+      { label: '前右双面', config: { version: 1, type: 'box', options: { width: 10, height: 7, depth: 5, faces: ['front', 'right'], edgePadding: 0.4, faceWeights: { front: 2, right: 1 } } } },
     ],
   },
   cylinder: {
@@ -95,10 +122,16 @@ const definitions: Record<LayoutConfigType, Definition> = {
       { key: 'radius', label: '半径', kind: 'number', min: 0.5, max: 12, step: 0.1 },
       { key: 'spacing', label: '垂直间距', kind: 'number', min: 0.1, max: 3, step: 0.05, auto: true },
       { key: 'columns', label: '每圈列数', kind: 'number', min: 3, max: 128, step: 1, auto: true },
+      { key: 'rows', label: '显式行数', kind: 'number', min: 1, max: 64, step: 1, auto: true },
+      { key: 'startAngle', label: '起始角度', kind: 'number', ...angle },
+      { key: 'arcAngle', label: '圆弧角度', kind: 'number', min: angleStep, max: Math.PI * 2, step: angleStep },
+      { key: 'density', label: '卡片密度', kind: 'number', ...density },
+      { key: 'orientation', label: '朝向', kind: 'select', values: orientation3d.slice(0, 2) },
     ],
     presets: [
       { label: '自适应圆柱', config: initialConfigs.cylinder },
       { label: '宽间距圆柱', config: { version: 1, type: 'cylinder', options: { radius: 5.5, spacing: 0.85, columns: 32 } } },
+      { label: '半圆展墙', config: { version: 1, type: 'cylinder', options: { radius: 5.5, rows: 8, startAngle: -Math.PI / 2, arcAngle: Math.PI, density: 0.72, orientation: 'camera' } } },
     ],
   },
   grid: {
@@ -126,6 +159,12 @@ const definitions: Record<LayoutConfigType, Definition> = {
       { key: 'rings', label: '圆环数', kind: 'number', min: 1, max: 40, step: 1, auto: true },
       { key: 'startAngle', label: '起始角度', kind: 'number', ...angle },
       { key: 'density', label: '卡片密度', kind: 'number', ...density },
+      { key: 'distribution', label: '分配方式', kind: 'select', values: [
+        { value: 'area', label: '按面积' },
+        { value: 'equal', label: '每环等量' },
+      ] },
+      { key: 'stagger', label: '交错排列', kind: 'boolean' },
+      { key: 'clockwise', label: '顺时针', kind: 'boolean' },
       { key: 'orientation', label: '朝向', kind: 'select', values: [
         { value: 'camera', label: '朝向相机' },
         { value: 'tangent', label: '沿圆环切线' },
@@ -134,6 +173,7 @@ const definitions: Record<LayoutConfigType, Definition> = {
     presets: [
       { label: '轨道圆环', config: initialConfigs.ring },
       { label: '切线圆环', config: { version: 1, type: 'ring', options: { innerRadius: 1, spacing: 0.5, rings: 12, orientation: 'tangent', density: 0.76 } } },
+      { label: '等量顺时针', config: { version: 1, type: 'ring', options: { innerRadius: 1, spacing: 0.5, rings: 10, distribution: 'equal', stagger: false, clockwise: true } } },
     ],
   },
   helix: {
@@ -156,6 +196,7 @@ const definitions: Record<LayoutConfigType, Definition> = {
     label: '圆锥',
     controls: [
       { key: 'radius', label: '底部半径', kind: 'number', min: 0.5, max: 12, step: 0.1 },
+      { key: 'topRadius', label: '顶部半径', kind: 'number', min: 0, max: 12, step: 0.1 },
       { key: 'height', label: '高度', kind: 'number', min: 0.5, max: 20, step: 0.1 },
       { key: 'rings', label: '水平圆环数', kind: 'number', min: 2, max: 64, step: 1, auto: true },
       { key: 'startAngle', label: '起始角度', kind: 'number', ...angle },
@@ -166,6 +207,7 @@ const definitions: Record<LayoutConfigType, Definition> = {
     presets: [
       { label: '交错圆锥', config: initialConfigs.cone },
       { label: '密集圆锥', config: { version: 1, type: 'cone', options: { radius: 5.5, height: 10, rings: 18, density: 0.78, stagger: true } } },
+      { label: '圆台', config: { version: 1, type: 'cone', options: { radius: 5.5, topRadius: 2.2, height: 9, rings: 16, density: 0.78, stagger: true } } },
     ],
   },
   scatter: {
@@ -249,10 +291,21 @@ export function createLayoutLab({ root, onApply }: LayoutLabOptions): LayoutLab 
     const options = { ...(config.options as Record<string, unknown> | undefined) }
     if (value === undefined) delete options[key]
     else options[key] = value
-    const parsed = parseLayoutConfig({ ...config, options })
-    configs.set(currentType, parsed)
-    presetSelect.value = ''
-    scheduleApply()
+    normalizeDependentOptions(currentType, key, options)
+    try {
+      const parsed = parseLayoutConfig({ ...config, options })
+      configs.set(currentType, parsed)
+      presetSelect.value = ''
+      setStatus('配置已更新')
+      if (key === 'distribution' || key === 'rows' || key === 'columns' || key === 'faces'
+        || (currentType === 'cone' && key === 'radius')) {
+        renderControls()
+      }
+      scheduleApply()
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '配置无效', true)
+      renderControls()
+    }
   }
 
   const renderControls = () => {
@@ -269,6 +322,7 @@ export function createLayoutLab({ root, onApply }: LayoutLabOptions): LayoutLab 
     controlsRoot.replaceChildren()
 
     definition.controls.forEach((control) => {
+      if (controlHidden(currentType, control.key, options)) return
       const row = document.createElement('div')
       row.className = 'layout-field'
       const label = document.createElement('label')
@@ -290,19 +344,78 @@ export function createLayoutLab({ root, onApply }: LayoutLabOptions): LayoutLab 
         select.value = String(options[control.key] ?? resolvedDefaults[currentType][control.key] ?? control.values[0].value)
         select.addEventListener('change', () => updateOption(control.key, select.value))
         row.append(select)
+      } else if (control.kind === 'multi') {
+        const selected = new Set(Array.isArray(options[control.key])
+          ? options[control.key] as string[]
+          : resolvedDefaults[currentType][control.key] as string[])
+        const group = document.createElement('div')
+        group.className = 'layout-options'
+        control.values.forEach(({ value, label: optionLabel }) => {
+          const item = document.createElement('label')
+          const input = document.createElement('input')
+          input.type = 'checkbox'
+          input.checked = selected.has(value)
+          input.addEventListener('change', () => {
+            const next = new Set(selected)
+            if (input.checked) next.add(value)
+            else next.delete(value)
+            if (next.size === 0) {
+              setStatus('至少保留一个面', true)
+              input.checked = true
+              return
+            }
+            updateOption(control.key, control.values.map(({ value: candidate }) => candidate)
+              .filter((candidate) => next.has(candidate)))
+          })
+          item.append(input, document.createTextNode(optionLabel))
+          group.append(item)
+        })
+        row.append(group)
+      } else if (control.kind === 'weights') {
+        const weightValue = options[control.key]
+        const weights: Record<string, unknown> = isRecord(weightValue) ? weightValue : {}
+        const selectedFaces = new Set(Array.isArray(options.faces)
+          ? options.faces as string[]
+          : resolvedDefaults.box.faces as string[])
+        const group = document.createElement('div')
+        group.className = 'layout-weights'
+        control.values.forEach(({ value, label: optionLabel }) => {
+          const item = document.createElement('label')
+          item.textContent = optionLabel
+          const input = document.createElement('input')
+          input.type = 'number'
+          input.min = '0'
+          input.max = '10'
+          input.step = '0.1'
+          input.value = String(typeof weights[value] === 'number' ? weights[value] : 1)
+          input.disabled = !selectedFaces.has(value)
+          input.addEventListener('change', () => {
+            const numeric = Number(input.value)
+            if (!Number.isFinite(numeric) || numeric < 0) return
+            updateOption(control.key, { ...weights, [value]: numeric })
+          })
+          item.append(input)
+          group.append(item)
+        })
+        row.append(group)
       } else {
         const editor = document.createElement('div')
         editor.className = 'layout-number'
         const range = document.createElement('input')
         range.type = 'range'
         range.min = String(control.min)
-        range.max = String(control.max)
-        range.step = String(control.step)
+        const controlMaximum = currentType === 'cone' && control.key === 'topRadius'
+          ? typeof options.radius === 'number' ? options.radius : 5
+          : control.max
+        range.max = String(controlMaximum)
+        range.step = ['startAngle', 'arcAngle', 'minLatitude', 'maxLatitude'].includes(control.key)
+          ? 'any'
+          : String(control.step)
         const number = document.createElement('input')
         number.type = 'number'
         number.min = range.min
         number.max = range.max
-        number.step = range.step
+        number.step = String(control.step)
         const fallback = defaultControlValue(currentType, control.key, control.min)
         const value = typeof options[control.key] === 'number' ? options[control.key] as number : fallback
         range.value = String(value)
@@ -433,6 +546,38 @@ function defaultControlValue(type: LayoutConfigType, key: string, fallback: numb
   return typeof value === 'number'
     ? value
     : typeof defaultValue === 'number' ? defaultValue : fallback
+}
+
+function normalizeDependentOptions(
+  type: LayoutConfigType,
+  changedKey: string,
+  options: Record<string, unknown>,
+): void {
+  if (type === 'sphere' && changedKey === 'distribution' && options.distribution === 'fibonacci') {
+    delete options.rings
+    delete options.stagger
+    delete options.poleMode
+  }
+  if (type === 'cylinder' && changedKey === 'rows' && options.rows !== undefined) delete options.columns
+  if (type === 'cylinder' && changedKey === 'columns' && options.columns !== undefined) delete options.rows
+  if (type === 'cone') {
+    const radius = typeof options.radius === 'number' ? options.radius : 5
+    if (typeof options.topRadius === 'number' && options.topRadius > radius) options.topRadius = radius
+  }
+}
+
+function controlHidden(
+  type: LayoutConfigType,
+  key: string,
+  options: Record<string, unknown>,
+): boolean {
+  return type === 'sphere'
+    && options.distribution === 'fibonacci'
+    && ['rings', 'stagger', 'poleMode'].includes(key)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function cloneConfig(config: LayoutConfig): LayoutConfig {

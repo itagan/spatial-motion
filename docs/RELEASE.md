@@ -9,6 +9,7 @@
 - [ ] 更新 `CHANGELOG.md`、README、ROADMAP 和必要的兼容/迁移说明。
 - [ ] 检查稳定入口仍只有主入口、`layouts`、`effects`、`performance` 和 `package.json`。
 - [ ] 确认 Three.js 仍为 peer dependency，且没有引入框架运行时。
+- [ ] 外部动画库只保留为 Demo 开发依赖，不进入核心运行时依赖。
 
 ## 2. 完整验证
 
@@ -24,6 +25,7 @@ npm run verify
 - [ ] gzip ≤ 40 KB、tarball ≤ 150 KB、layout-only ≤ 8 KB。
 - [ ] 在目标 Chrome、Firefox、Safari/Edge 至少完成一轮真实图片、CORS 失败、悬停、动态更新、页面隐藏、销毁和 benchmark 冒烟。
 - [ ] benchmark 主体 Draw Call 为 1，并记录设备、浏览器、实例数、质量档位与采样时长。
+- [ ] extension mount/update/resize/pause/resume/remove/destroy 与故障隔离通过；额外 Draw Call 和 update 耗时单独记录。
 
 ## 3. 发布
 
@@ -80,3 +82,15 @@ npm install @itagan/spatial-motion three typescript vite
 - 30 分钟压力采样完成 2001 次布局/特效中断与局部图集更新，共 3602 个样本：平均 60.00 FPS、最低 56.65 FPS、平均帧时 16.67ms、最大帧时 17.65ms、最大 1 Draw Call、最大 4,000 triangles、纹理内存稳定为 55,987,200 bytes，2000 items 全部保持可渲染，WebGL 未发生 context loss 且无页面 error 日志。
 
 仍需在发布候选阶段执行 Firefox、Safari、Edge 和目标低配硬件的人工画面与性能检查；本地 Chromium 长测不替代这些设备结果。
+
+## v1.9.0 开发验证记录
+
+2026-07-16 本地验证：
+
+- `npm run verify` 通过：169 项 Vitest、library/demo build、tgz Node ESM、严格 TypeScript、子路径边界、浏览器消费者构建和 Tree Shaking。
+- 包指标：Library JavaScript gzip 36,306 bytes；tarball 150,429 bytes；layout-only 消费者 3,572 bytes。
+- 原生 Three.js 与 GSAP 扩展同时运行时，500 steady / 3 秒为 60.00 FPS、P95 18.50ms；2000 transition-stress / 3 秒为 60.05 FPS、P95 17.50ms；扩展 update 均为平均 0.05ms、最大 0.10ms，0 长帧。
+- BOTH 的 4 Draw Calls 包含主体卡片 1、原生 Torus/Points 2 和 GSAP TorusKnot 1；移除扩展后恢复 1 Draw Call。
+- 浏览器验证 mount、Stage pause/resume、remove 和无 error 日志；resize/context loss/destroy/生命周期故障隔离由自动化测试覆盖。
+
+本阶段不执行 npm publish、Git tag 或 GitHub Release；Firefox、Safari、Edge 和目标低配硬件仍留待正式发布候选矩阵。

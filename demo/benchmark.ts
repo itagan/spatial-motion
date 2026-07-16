@@ -18,7 +18,9 @@ import {
   type MotionItem,
   type QualityMode,
   type StreamingEffect,
+  type StageExtensionHandle,
 } from '@spatial-motion'
+import { createGsapExtension, createNativeThreeExtension } from './extensions'
 import './style.css'
 import './benchmark.css'
 
@@ -67,6 +69,9 @@ let sampleTimer = 0
 let stressTimer = 0
 let stressOperations = 0
 let runGeneration = 0
+type ExtensionMode = 'none' | 'native' | 'gsap' | 'both'
+let extensionMode: ExtensionMode = 'none'
+let extensionHandles: StageExtensionHandle[] = []
 const stressSequence = [
   'sphere',
   'box',
@@ -118,6 +123,14 @@ document.querySelectorAll<HTMLButtonElement>('[data-benchmark-effect]').forEach(
   })
 })
 
+document.querySelectorAll<HTMLButtonElement>('[data-benchmark-extension]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    extensionMode = (button.dataset.benchmarkExtension ?? 'none') as ExtensionMode
+    setActive('[data-benchmark-extension]', button)
+    await applyExtensions()
+  })
+})
+
 document.querySelector('#run-benchmark')?.addEventListener('click', () => void runBenchmark())
 document.querySelector('#run-stress')?.addEventListener('click', () => void runBenchmark('transition-stress'))
 document.querySelector('#export-result')?.addEventListener('click', exportResult)
@@ -144,6 +157,26 @@ async function applyConfiguration(): Promise<void> {
   updateMetrics()
 }
 
+async function applyExtensions(): Promise<void> {
+  cancelRun('扩展配置已更新，可以重新运行采样')
+  extensionHandles.forEach((handle) => handle.remove())
+  extensionHandles = []
+  try {
+    if (extensionMode === 'native' || extensionMode === 'both') {
+      extensionHandles.push(await stage.addExtension(createNativeThreeExtension()))
+    }
+    if (extensionMode === 'gsap' || extensionMode === 'both') {
+      extensionHandles.push(await stage.addExtension(createGsapExtension()))
+    }
+  } catch (error) {
+    extensionHandles.forEach((handle) => handle.remove())
+    extensionHandles = []
+    extensionMode = 'none'
+    setStatus(error instanceof Error ? error.message : '无法加载外部扩展')
+  }
+  updateMetrics()
+}
+
 type BenchmarkScenario = 'steady' | 'cold-start' | 'atlas-update' | 'transition-stress'
 
 async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
@@ -156,7 +189,7 @@ async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
   const session = new BenchmarkSession({
     itemCount,
     qualityMode,
-    layout: layoutName,
+    layout: extensionMode === 'none' ? layoutName : `${layoutName}+${extensionMode}`,
     scenario,
     environment: stage.getPerformanceEnvironment(),
   })
@@ -240,6 +273,7 @@ function updateMetrics(): void {
     ? `${stats.frameTimeP95.toFixed(1)} / ${stats.frameTimeP99.toFixed(1)} ms`
     : '--')
   setText('#metric-cpu', `${stats.frameCpuMs.toFixed(2)} / ${stats.renderSubmitMs.toFixed(2)} ms`)
+  setText('#metric-extensions', `${stats.extensions} / ${stats.extensionUpdateMs.toFixed(3)} ms`)
   setText('#metric-items', `${stats.renderedItems} / ${stats.inputItems}`)
   setText('#metric-submitted', String(stats.submittedItems))
   setText('#metric-visible', String(stats.visibleItems))
@@ -271,6 +305,9 @@ function renderResult(result: BenchmarkResult): void {
     },
     averageFrameCpuMs: Number(result.averageFrameCpuMs.toFixed(3)),
     averageRenderSubmitMs: Number(result.averageRenderSubmitMs.toFixed(3)),
+    averageExtensionUpdateMs: Number(result.averageExtensionUpdateMs.toFixed(3)),
+    maximumExtensionUpdateMs: Number(result.maximumExtensionUpdateMs.toFixed(3)),
+    maximumExtensions: result.maximumExtensions,
     maximumDrawCalls: result.maximumDrawCalls,
     maximumTriangles: result.maximumTriangles,
     maximumTextureBytes: result.maximumTextureBytes,
@@ -343,7 +380,7 @@ function exportResult(): void {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `spatial-motion-${itemCount}-${qualityMode}-${layoutName}.json`
+  link.download = `spatial-motion-${itemCount}-${qualityMode}-${layoutName}-${extensionMode}.json`
   link.click()
   URL.revokeObjectURL(url)
 }

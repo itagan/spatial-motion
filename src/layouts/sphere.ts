@@ -2,6 +2,14 @@ import type { Layout, Transform } from '../core/types.js'
 
 export interface SphereOptions {
   radius?: number
+  /** Ring-based latitude rows, or an equal-area Fibonacci distribution. */
+  distribution?: 'latitude' | 'fibonacci'
+  /** Lower latitude boundary in radians. */
+  minLatitude?: number
+  /** Upper latitude boundary in radians. */
+  maxLatitude?: number
+  /** Include exact poles when a latitude boundary reaches them. */
+  poleMode?: 'include' | 'exclude'
   /** Number of latitude rings including the two poles. Auto-calculated by default. */
   rings?: number
   /** Offset alternating rings by half a card. Disabled to preserve clear meridians by default. */
@@ -17,33 +25,63 @@ export interface SphereOptions {
 }
 
 export function sphere(options: SphereOptions = {}): Layout {
-  const radius = options.radius ?? 5
+  const radius = positive(options.radius, 5)
   const orientation = options.orientation ?? 'upright-surface'
+  const distributionMode = options.distribution ?? 'latitude'
+  const [minLatitude, maxLatitude] = latitudeRange(options.minLatitude, options.maxLatitude)
+  const poleMode = options.poleMode ?? 'include'
+  const legacyLatitudeRange = options.minLatitude === undefined
+    && options.maxLatitude === undefined
+    && poleMode === 'include'
   return {
     name: 'sphere',
     orientation: orientation === 'camera' ? 'camera' : 'surface',
     hideBackHemisphere: orientation === 'camera',
     calculate(count): Transform[] {
       if (count <= 0) return []
-      if (count === 1) return [createTransform(0, 1, 0, radius, options.density ?? 0.86, orientation)]
+      if (distributionMode === 'fibonacci') {
+        return calculateFibonacciSphere(count, radius, minLatitude, maxLatitude, options.density, orientation)
+      }
+      if (count === 1) {
+        const latitude = poleMode === 'include' ? maxLatitude : (minLatitude + maxLatitude) / 2
+        if (approximately(latitude, Math.PI / 2)) {
+          return [createTransform(0, 1, 0, radius, Math.max(0, finite(options.density, 0.86)), orientation)]
+        }
+        return [createLatitudeTransform(latitude, 0, radius, options.density ?? 0.86, orientation)]
+      }
 
-      const rings = Math.max(2, Math.min(count, options.rings ?? calculateRingCount(count)))
+      const rings = Math.max(2, Math.min(count, positiveInteger(options.rings) ?? calculateRingCount(count)))
       const distribution = calculateRingDistribution(count, rings)
-      const angularStep = Math.PI / Math.max(1, rings - 1)
-      const density = Math.max(0, options.density ?? 0.86)
+      const latitudeSpan = maxLatitude - minLatitude
+      const excludesNorth = poleMode === 'exclude' && approximately(maxLatitude, Math.PI / 2)
+      const excludesSouth = poleMode === 'exclude' && approximately(minLatitude, -Math.PI / 2)
+      const northInset = excludesNorth ? latitudeSpan / (2 * rings) : 0
+      const southInset = excludesSouth ? latitudeSpan / (2 * rings) : 0
+      const upperLatitude = maxLatitude - northInset
+      const lowerLatitude = minLatitude + southInset
+      const angularStep = (upperLatitude - lowerLatitude) / Math.max(1, rings - 1)
+      const density = Math.max(0, finite(options.density, 0.86))
       const transforms: Transform[] = []
 
       for (let ring = 0; ring < rings; ring += 1) {
-        const phi = (Math.PI * ring) / (rings - 1)
-        const y = Math.cos(phi)
-        const ringRadius = Math.sin(phi)
+        const phi = legacyLatitudeRange ? (Math.PI * ring) / (rings - 1) : null
+        const latitude = phi === null ? upperLatitude - angularStep * ring : Math.PI / 2 - phi
+        const exactPole = phi === null
+          ? approximately(Math.abs(latitude), Math.PI / 2)
+          : ring === 0 || ring === rings - 1
+        const y = phi === null
+          ? exactPole ? Math.sign(latitude) : Math.sin(latitude)
+          : Math.cos(phi)
+        const ringRadius = phi === null
+          ? exactPole ? 0 : Math.cos(latitude)
+          : Math.sin(phi)
         const itemsInRing = distribution[ring]
         const offset = options.stagger && ring % 2 === 1 ? Math.PI / itemsInRing : 0
         const meridianSpacing = radius * angularStep
         const circumferenceSpacing = itemsInRing > 1
           ? (2 * Math.PI * radius * ringRadius) / itemsInRing
           : meridianSpacing
-        const polarBreathingRoom = ring === 0 || ring === rings - 1 ? 0.72 : 1
+        const polarBreathingRoom = exactPole ? 0.72 : 1
         const itemScale = Math.min(1, meridianSpacing, circumferenceSpacing)
           * density
           * polarBreathingRoom
@@ -59,6 +97,57 @@ export function sphere(options: SphereOptions = {}): Layout {
       return transforms
     },
   }
+}
+
+function calculateFibonacciSphere(
+  count: number,
+  radius: number,
+  minLatitude: number,
+  maxLatitude: number,
+  densityOption: number | undefined,
+  orientation: NonNullable<SphereOptions['orientation']>,
+): Transform[] {
+  if (count <= 0) return []
+  const density = Math.max(0, finite(densityOption, 0.86))
+  const minY = Math.sin(minLatitude)
+  const maxY = Math.sin(maxLatitude)
+  const surfaceArea = 2 * Math.PI * radius * radius * Math.max(0, maxY - minY)
+  const itemScale = Math.min(1, Math.sqrt(surfaceArea / Math.max(1, count))) * density
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5))
+
+  return Array.from({ length: count }, (_, index) => {
+    const progress = (index + 0.5) / count
+    const y = maxY + (minY - maxY) * progress
+    const ringRadius = Math.sqrt(Math.max(0, 1 - y * y))
+    const theta = index * goldenAngle
+    return createTransform(
+      ringRadius * Math.cos(theta),
+      y,
+      ringRadius * Math.sin(theta),
+      radius,
+      itemScale,
+      orientation,
+    )
+  })
+}
+
+function createLatitudeTransform(
+  latitude: number,
+  theta: number,
+  radius: number,
+  scale: number,
+  orientation: NonNullable<SphereOptions['orientation']>,
+): Transform {
+  const y = Math.sin(latitude)
+  const ringRadius = Math.cos(latitude)
+  return createTransform(
+    ringRadius * Math.cos(theta),
+    y,
+    ringRadius * Math.sin(theta),
+    radius,
+    Math.max(0, finite(scale, 0.86)),
+    orientation,
+  )
 }
 
 /**
@@ -119,4 +208,30 @@ function createTransform(
     rotationZ: 0,
     opacity: 1,
   }
+}
+
+function latitudeRange(minimum: number | undefined, maximum: number | undefined): [number, number] {
+  const lower = clamp(finite(minimum, -Math.PI / 2), -Math.PI / 2, Math.PI / 2)
+  const upper = clamp(finite(maximum, Math.PI / 2), -Math.PI / 2, Math.PI / 2)
+  return lower < upper ? [lower, upper] : [-Math.PI / 2, Math.PI / 2]
+}
+
+function positive(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) && (value ?? 0) > 0 ? value as number : fallback
+}
+
+function positiveInteger(value: number | undefined): number | undefined {
+  return Number.isInteger(value) && (value ?? 0) > 0 ? value : undefined
+}
+
+function finite(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) ? value as number : fallback
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value))
+}
+
+function approximately(left: number, right: number): boolean {
+  return Math.abs(left - right) < 1e-8
 }

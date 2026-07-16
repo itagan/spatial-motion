@@ -93,6 +93,7 @@ try {
     assert.equal(typeof performance.compareBenchmarkResults, 'function')
     assert.equal(typeof main.MotionStage.prototype.updateItem, 'function')
     assert.equal(typeof main.MotionStage.prototype.updateItemsById, 'function')
+    assert.equal(typeof main.MotionStage.prototype.addExtension, 'function')
     assert.equal(typeof main.easing.sineInOut, 'function')
     await assert.rejects(
       import('${packageName}/renderers/InstancedCardRenderer'),
@@ -110,9 +111,13 @@ try {
       type MotionStage,
       type MotionStageOptions,
       type StagePerformanceEnvironment,
+      type StageExtension,
+      type StageExtensionContext,
+      type StageExtensionHandle,
       createLayout,
       parseLayoutConfig,
       type LayoutConfig,
+      type BoxFace,
       sphere,
     } from '${packageName}'
     import { box, createLayout as createLayoutFromSubpath, parseLayoutConfig as parseLayoutConfigFromSubpath, ring, scatter, type LayoutConfig as SubpathLayoutConfig } from '${packageName}/layouts'
@@ -134,11 +139,26 @@ try {
     const environment: StagePerformanceEnvironment | undefined = stage?.getPerformanceEnvironment()
     const comparison = compareBenchmarkResults(benchmark, benchmark)
     const layoutConfig = parseLayoutConfig({ version: 1, type: 'sphere', options: { rings: 8 } }) satisfies LayoutConfig
+    const face: BoxFace = 'front'
+    const advancedLayouts: LayoutConfig[] = [
+      { version: 1, type: 'sphere', options: { distribution: 'fibonacci', minLatitude: 0 } },
+      { version: 1, type: 'box', options: { faces: [face], edgePadding: 0.2, faceWeights: { front: 2 } } },
+      { version: 1, type: 'cylinder', options: { rows: 4, arcAngle: Math.PI } },
+      { version: 1, type: 'ring', options: { distribution: 'equal', clockwise: true } },
+      { version: 1, type: 'cone', options: { radius: 4, topRadius: 2 } },
+    ]
+    const extension: StageExtension = {
+      mount({ root, camera, signal }: StageExtensionContext) { void [root, camera, signal] },
+      update({ elapsed, delta }) { void [elapsed, delta] },
+      resize({ width, height, pixelRatio }) { void [width, height, pixelRatio] },
+      dispose() {},
+    }
+    const extensionHandle: Promise<StageExtensionHandle> | undefined = stage?.addExtension(extension)
     const subpathConfig = parseLayoutConfigFromSubpath(JSON.stringify(layoutConfig)) satisfies SubpathLayoutConfig
     const configuredLayouts = [createLayout(layoutConfig), createLayoutFromSubpath(subpathConfig)]
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
-    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, vortex(), BenchmarkSession, comparison, environment, emission, motion, cardStyle, stageOptions]
+    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, vortex(), BenchmarkSession, comparison, environment, emission, motion, cardStyle, stageOptions]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
@@ -175,7 +195,8 @@ try {
     <pre id="result">starting</pre><div id="stage"></div><script type="module" src="/stage.ts"></script>
   `)
   await writeFile(join(consumer, 'stage.ts'), `
-    import { MotionStage, sphere, type MotionItem } from '${packageName}'
+    import { MotionStage, sphere, type MotionItem, type StageExtension } from '${packageName}'
+    import { Object3D } from 'three'
     const container = document.querySelector<HTMLElement>('#stage')!
     const result = document.querySelector<HTMLElement>('#result')!
     const items: MotionItem[] = Array.from({ length: 12 }, (_, index) => ({ id: String(index), title: String(index) }))
@@ -189,13 +210,18 @@ try {
       transition: { duration: 0 },
     })
     await stage.setItems(items)
+    const extension: StageExtension = {
+      mount({ root }) { root.add(new Object3D()) },
+      update() {},
+    }
+    await stage.addExtension(extension)
     await stage.to(sphere({ radius: 3 }), { duration: 0 })
     await stage.updateItem('0', { title: 'updated' })
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
     const stats = stage.getPerformanceStats()
     const environment = stage.getPerformanceEnvironment()
     stage.destroy()
-    const smoke = { ready: true, renderedItems: stats.renderedItems, submittedItems: stats.submittedItems, drawCalls: stats.drawCalls, contextLost: stats.contextLost, p95: stats.frameTimeP95, maxTextureSize: environment.maxTextureSize, destroyed: !container.querySelector('canvas') }
+    const smoke = { ready: true, renderedItems: stats.renderedItems, submittedItems: stats.submittedItems, extensions: stats.extensions, drawCalls: stats.drawCalls, contextLost: stats.contextLost, p95: stats.frameTimeP95, maxTextureSize: environment.maxTextureSize, destroyed: !container.querySelector('canvas') }
     document.documentElement.dataset.packageSmoke = smoke.destroyed ? 'passed' : 'failed'
     result.textContent = JSON.stringify(smoke)
   `)

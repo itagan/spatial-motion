@@ -6,12 +6,19 @@ export interface BoxOptions {
   depth?: number
   density?: number
   orientation?: 'camera' | 'surface'
+  faces?: BoxFace[]
+  /** Empty space from every selected face edge, in world units. */
+  edgePadding?: number
+  /** Multiplier applied to each selected face area during item allocation. */
+  faceWeights?: Partial<Record<BoxFace, number>>
 }
 
-type FaceName = 'front' | 'back' | 'right' | 'left' | 'top' | 'bottom'
+export type BoxFace = 'front' | 'back' | 'right' | 'left' | 'top' | 'bottom'
+
+export const boxFaces: readonly BoxFace[] = ['front', 'back', 'right', 'left', 'top', 'bottom']
 
 interface FaceDefinition {
-  name: FaceName
+  name: BoxFace
   width: number
   height: number
   position(u: number, v: number): Pick<Transform, 'x' | 'y' | 'z'>
@@ -22,8 +29,11 @@ export function box(options: BoxOptions = {}): Layout {
   const width = positive(options.width, 8)
   const height = positive(options.height, 8)
   const depth = positive(options.depth, 8)
-  const density = Math.max(0, options.density ?? 0.82)
+  const density = Math.max(0, finite(options.density, 0.82))
   const orientation = options.orientation ?? 'surface'
+  const selectedFaces = normalizeFaces(options.faces)
+  const weights = normalizeFaceWeights(options.faceWeights, selectedFaces)
+  const edgePadding = Math.max(0, finite(options.edgePadding, 0))
   const faces = createFaces(width, height, depth)
 
   return {
@@ -31,8 +41,15 @@ export function box(options: BoxOptions = {}): Layout {
     orientation,
     calculate(count): Transform[] {
       if (count <= 0) return []
-      const distribution = calculateBoxFaceDistribution(count, width, height, depth)
-      const plans = faces.map((face, index) => createFacePlan(face, distribution[index]))
+      const distribution = calculateBoxFaceDistribution(
+        count,
+        width,
+        height,
+        depth,
+        selectedFaces,
+        weights,
+      )
+      const plans = faces.map((face, index) => createFacePlan(face, distribution[index], edgePadding))
       const occupiedPlans = plans.filter(({ count }) => count > 0)
       const sharedScale = Math.min(
         1,
@@ -48,12 +65,14 @@ export function calculateBoxFaceDistribution(
   width: number,
   height: number,
   depth: number,
+  selectedFaces: readonly BoxFace[] = boxFaces,
+  faceWeights: Partial<Record<BoxFace, number>> = {},
 ): number[] {
   if (count <= 0) return [0, 0, 0, 0, 0, 0]
   const safeWidth = positive(width, 1)
   const safeHeight = positive(height, 1)
   const safeDepth = positive(depth, 1)
-  const weights = [
+  const areas = [
     safeWidth * safeHeight,
     safeWidth * safeHeight,
     safeDepth * safeHeight,
@@ -61,6 +80,12 @@ export function calculateBoxFaceDistribution(
     safeWidth * safeDepth,
     safeWidth * safeDepth,
   ]
+  const selected = new Set(normalizeFaces([...selectedFaces]))
+  const normalizedWeights = normalizeFaceWeights(faceWeights, [...selected])
+  const weights = areas.map((area, index) => {
+    const face = boxFaces[index]
+    return selected.has(face) ? area * (normalizedWeights[face] ?? 1) : 0
+  })
   const total = weights.reduce((sum, value) => sum + value, 0)
   let allocated = 0
   const remainders = weights.map((weight, index) => {
@@ -125,9 +150,13 @@ interface FacePlan {
   cellHeight: number
 }
 
-function createFacePlan(face: FaceDefinition, count: number): FacePlan {
+function createFacePlan(face: FaceDefinition, count: number, edgePadding = 0): FacePlan {
+  const maximumPadding = Math.max(0, Math.min(face.width, face.height) / 2 - 1e-6)
+  const padding = Math.min(edgePadding, maximumPadding)
+  const usableWidth = Math.max(1e-6, face.width - padding * 2)
+  const usableHeight = Math.max(1e-6, face.height - padding * 2)
   const columns = count > 0
-    ? Math.max(1, Math.ceil(Math.sqrt(count * face.width / face.height)))
+    ? Math.max(1, Math.ceil(Math.sqrt(count * usableWidth / usableHeight)))
     : 1
   const rows = Math.max(1, Math.ceil(count / columns))
   return {
@@ -135,8 +164,8 @@ function createFacePlan(face: FaceDefinition, count: number): FacePlan {
     count,
     columns,
     rows,
-    cellWidth: face.width / columns,
-    cellHeight: face.height / rows,
+    cellWidth: usableWidth / columns,
+    cellHeight: usableHeight / rows,
   }
 }
 
@@ -167,4 +196,29 @@ function createFaceTransforms(
 
 function positive(value: number | undefined, fallback: number): number {
   return Number.isFinite(value) && (value ?? 0) > 0 ? value as number : fallback
+}
+
+function finite(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) ? value as number : fallback
+}
+
+function normalizeFaces(faces: BoxFace[] | undefined): BoxFace[] {
+  if (!faces?.length) return [...boxFaces]
+  const requested = new Set(faces.filter((face) => boxFaces.includes(face)))
+  return boxFaces.filter((face) => requested.has(face))
+}
+
+function normalizeFaceWeights(
+  weights: Partial<Record<BoxFace, number>> | undefined,
+  selectedFaces: readonly BoxFace[],
+): Partial<Record<BoxFace, number>> {
+  const normalized: Partial<Record<BoxFace, number>> = {}
+  selectedFaces.forEach((face) => {
+    const value = weights?.[face]
+    normalized[face] = Number.isFinite(value) && (value ?? -1) >= 0 ? value : 1
+  })
+  if (selectedFaces.every((face) => normalized[face] === 0)) {
+    selectedFaces.forEach((face) => { normalized[face] = 1 })
+  }
+  return normalized
 }

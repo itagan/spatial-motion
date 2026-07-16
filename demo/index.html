@@ -12,7 +12,7 @@
           <p class="eyebrow">SPATIAL MOTION / PERFORMANCE DEMO</p>
           <h1>可编排的 3D 卡片动效引擎</h1>
         </div>
-        <div class="stats"><span id="quality">--</span><span id="fps">-- FPS</span><span id="count">-- ITEMS</span><span id="render-stats">-- CALLS</span><span id="effect">LAYOUT MODE</span><span id="selection">0 SELECTED</span></div>
+        <div class="stats"><span id="quality">--</span><span id="fps">-- FPS</span><span id="count">-- ITEMS</span><span id="render-stats">-- CALLS</span><span id="extensions">0 EXT</span><span id="effect">LAYOUT MODE</span><span id="selection">0 SELECTED</span></div>
       </header>
       <section id="stage" aria-label="3D motion stage"><div id="pick-debug" hidden></div></section>
       <button id="layout-lab-toggle" class="lab-toggle" aria-controls="layout-lab" aria-expanded="false">布局参数</button>
@@ -62,6 +62,11 @@
           <button id="recipe-box">立方爆炸</button>
           <button id="recipe-cylinder">圆柱右散</button>
           <button id="recipe-grid">平面解散</button>
+          <button id="extension-native">原生 3D 扩展</button>
+          <button id="extension-gsap">GSAP 扩展</button>
+          <button id="stage-pause">暂停舞台</button>
+          <button id="stage-resume">恢复舞台</button>
+          <button id="extension-clear">移除扩展</button>
         </div>
         <p>Instanced Geometry · Adaptive Quality · Fixed Pool · 单 Draw Call</p>
         <a class="nav-link" href="/benchmark.html">性能基准</a>

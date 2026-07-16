@@ -14,6 +14,13 @@ export type {
 } from './core/MotionStage.js'
 export { Timeline } from './core/Timeline.js'
 export type { TimelineStep } from './core/Timeline.js'
+export type {
+  StageExtension,
+  StageExtensionContext,
+  StageExtensionHandle,
+  StageFrameContext,
+  StageViewport,
+} from './core/extensions.js'
 export { easing, identityTransform, interpolateTransform } from './core/math.js'
 export type {
   CardDrawBounds,

@@ -117,6 +117,12 @@ body:has(.layout-lab[data-open="true"]) .lab-toggle { right: 358px; }
 .layout-number input[type="number"] { padding: 6px; }
 .layout-auto { grid-column: 1 / -1; display: flex; justify-content: flex-end; align-items: center; gap: 5px; color: #6f87a7; font-size: 10px; }
 .layout-auto input { accent-color: #65d6ff; }
+.layout-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.layout-options label { display: flex; align-items: center; gap: 4px; color: #b4c7df; font-size: 10px; }
+.layout-options input { accent-color: #65d6ff; }
+.layout-weights { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.layout-weights label { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: center; gap: 3px; color: #92a9c8; font-size: 10px; }
+.layout-weights input { min-width: 0; width: 100%; padding: 4px; border: 1px solid rgba(101,214,255,.2); border-radius: 4px; background: rgba(3,10,25,.76); color: #e7f5ff; }
 .lab-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
 .lab-actions button { padding: 7px 10px; font-size: 9px; }
 .lab-transfer textarea { resize: vertical; min-height: 92px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 1.45; }

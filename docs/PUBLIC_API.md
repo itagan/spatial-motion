@@ -30,6 +30,9 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 - `createLayout(config)` 在运行时再次验证配置，再委托给对应布局函数；外部 JSON 不能绕过字段检查。
 - 自动计算参数通过省略属性表达。解析与序列化不会根据当前实例数写入 `rings`、`columns` 或 `turns`。
 - 配置 API 的严格验证不改变直接布局函数对已有合法调用和默认值的兼容承诺。
+- v1.8 的高级字段继续使用配置版本 `1`：Sphere 分布/纬度范围、Cylinder 圆弧/行数、Ring 分配方向、Box 面选择/权重及 Cone 顶部半径均为可选字段。
+- `BoxFace` 与 `boxFaces` 从主入口和 `layouts` 入口导出；Box 配置中的面数组采用固定 canonical 顺序生成，确保序列化后的布局顺序稳定。
+- 严格解析会拒绝模式冲突与跨字段非法组合；直接布局函数则安全归一化异常数值，避免生成非有限 Transform。
 
 ## 性能契约
 
@@ -37,6 +40,16 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 - 布局过渡使用 GPU 插值；内置流式特效使用固定实例池，不使用 CPU 定时器生成卡片。
 - 数据量、渲染上限和特效活跃数量受质量档位约束。
 - 40 KB gzip、150 KB tarball 和 8 KB layout-only 是自动化预算，不是运行时网络大小承诺；调整预算需要单独评审。
+
+## Stage extension
+
+- `MotionStage.addExtension(extension)` 异步完成 mount，并返回可幂等 `remove()` 的 `StageExtensionHandle`。
+- 每个扩展仅获得自己的隔离 `Group`、只读 `PerspectiveCamera` 引用和随 remove/destroy 中止的 `AbortSignal`；不公开 Scene、Renderer 或内部卡片实例 Mesh。
+- 可选的 `update({ elapsed, delta })` 与 Stage 同一 RAF 执行。首帧 `delta` 为 0，后续 delta 受 Stage 帧时间保护；`elapsed` 不累计暂停和页面隐藏时间。
+- Stage 尺寸变化时调用 `resize({ width, height, pixelRatio })`；有效暂停状态变化时至多调用一次 `pause()` 或 `resume()`。
+- `remove()`、mount 失败、生命周期回调失败或 Stage 销毁都会从场景移除扩展根节点、触发取消信号并调用一次 `dispose()`。扩展仍负责释放自己创建的 Geometry、Material、Texture 和动画对象。
+- `onExtensionError(error, extension)` 隔离报告 update/resize/pause/resume/dispose 错误；故障扩展不会中断卡片或其他扩展渲染。mount 错误还会从 `addExtension()` 原样拒绝。
+- GSAP、anime.js 等动画库可在应用或 Demo 中实现该通用接口，但不是 Spatial Motion 核心依赖。
 
 ## 生命周期与并发
 
@@ -46,9 +59,9 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 - `transition` 可设置 Stage 默认 duration/easing，单次调用仍可覆盖；数据更新同样透传 easing。
 - `cardResolution` 请求 32–256px 的图集单元，实际值可能为遵守 GPU 最大纹理尺寸而降低。
 - `imageTimeout` 控制单图等待时间；`onContextChange` 与 `getPerformanceStats().contextLost` 暴露 WebGL 上下文状态。
-- `getPerformanceStats()` 额外提供帧分位数、长帧、Stage CPU/提交、布局/拾取、图集更新、图片加载和估算纹理上传统计；`renderedItems` 表示实例池容量，`submittedItems` 表示当前实际提交给 GPU 的实例数，累计字段在 Stage 生命周期内单调递增。
+- `getPerformanceStats()` 额外提供帧分位数、长帧、Stage CPU/提交、布局/拾取、图集更新、图片加载、估算纹理上传、`extensions` 和 `extensionUpdateMs`；`renderedItems` 表示实例池容量，`submittedItems` 表示当前实际提交给 GPU 的实例数，累计字段在 Stage 生命周期内单调递增。
 - `getPerformanceEnvironment()` 返回浏览器、GPU、视口、DPR、实际像素比与最大纹理尺寸，用于保存可复现基准环境。
 - `BenchmarkSession` 汇总采样窗口，`compareBenchmarkResults()` 只在实例数、质量、布局与场景一致时标记结果可直接比较。
 - `scatter()` 的 `layers` 和 `spinMode` 是向后兼容的可选视觉控制；默认 seed 行为仍保持确定性。
 
-CSS3D 渲染器、Vue/React 适配器和业务动画配方不属于 v1.0 稳定核心；未来如加入，会使用独立入口或薄适配层设计。
+外部扩展不包含外部拾取、后处理、多相机或任意 Scene/Renderer 操作。CSS3D 渲染器、Vue/React 适配器和业务动画配方仍不属于稳定核心；未来如加入，会使用独立入口或薄适配层设计。

@@ -63,3 +63,26 @@ v1.2–v1.6 已形成从可观测基线、GPU/纹理、布局、特效到动画/
 验收同时记录 500/2000 实例的快速参数切换、Draw Call、图集构建次数、P95 和长帧。新的 `createLayout()` 聚合入口允许主动引入全部布局，但继续验证只导入 `sphere()` 的 layout-only 消费者不突破既有 8 KB 预算。
 
 2026-07-16 本地 Chromium 验收：500 items 连续写入 5 次 Sphere 半径后保持 60 FPS、1 Draw Call，图集构建数保持 2；2000 items 连续写入 4 次后保持 60 FPS、1 Draw Call，图集构建数保持 17，证明布局参数更新未新增图集构建。独立 2000 items / transition-stress / 3 秒测得平均 59.55 FPS、P95 17.94ms、P99 18.47ms、0 长帧、1 Draw Call。
+
+## v1.8 高级布局验收
+
+高级布局继续在 `Layout.calculate()` 阶段生成目标 Transform，不进入逐帧渲染路径。浏览器依次验证 Fibonacci Sphere、Box 选面/权重、部分圆弧 Cylinder、等量顺时针 Ring 和 Cone 圆台；所有模式保持 60 FPS、1 Draw Call、同一图集，控制台无错误。
+
+2026-07-16 同一 Chromium 150 / Apple M4 / 1265×633 / DPR 2 环境：500 items / auto-high / steady / 3 秒平均 60.00 FPS，P95 18.00ms、P99 18.60ms、0 长帧、1 Draw Call；2000 items / auto-high / transition-stress / 3 秒平均 59.54 FPS，P95 18.30ms、P99 18.70ms、0 长帧、1 Draw Call，完成 4 次中断和 4 次局部图集 patch。相对 v1.7 的 2000-item P95 17.94ms 增加约 2%，低于 10% 回归门槛。
+
+包验证结果：Library JavaScript gzip 35,383 bytes、npm tarball 145,545 bytes、sphere-only 消费者 3,572 bytes，均在既有 40 KB / 150 KB / 8 KB 预算内。高级布局没有增加稳定子路径或把 Three.js 打入产物。
+
+## v1.9 外部扩展验收
+
+Stage extension 与卡片、Timeline 和自适应质量共用同一 RAF；扩展 update 在一次 Stage render 前集中执行，分别记录数量和 CPU 耗时。原生 Three.js 示例增加一个 Torus 和 Points，GSAP 示例增加一个线框 TorusKnot，所以 BOTH 模式总 Draw Call 为 4，其中主体卡片仍为单实例 Mesh、1 Draw Call。GSAP timeline 保持 paused，仅由 Stage 提供的 `elapsed` 推进，不创建第二条渲染循环。
+
+2026-07-16 同一 Chromium 150 / Apple M4 / 1265×633 / DPR 2 环境：
+
+| 场景 | 结果 |
+| --- | --- |
+| 500 items / auto-high / steady / BOTH / 3 秒 | 60.00 FPS，P95 18.50ms，P99 18.65ms，扩展 update 平均 0.05ms/最大 0.10ms，0 长帧，4 Draw Calls |
+| 2000 items / auto-high / transition-stress / BOTH / 3 秒 | 60.05 FPS，P95 17.50ms，P99 17.67ms，扩展 update 平均 0.05ms/最大 0.10ms，0 长帧，4 Draw Calls，4 次中断/patch |
+
+500-item P95 相对 v1.8 的 18.00ms 增加 2.8%；2000-item P95 相对 v1.8 的 18.30ms 降低 4.4%，均满足不回退超过 10% 且不新增 33ms 长帧的门槛。浏览器同时验证两扩展挂载、Stage pause/resume、移除后恢复 0 扩展/1 Draw Call，以及无 error 级控制台日志。1–5 个扩展共享单一 Stage RAF 由自动化测试覆盖。
+
+最终包验证为 Library JavaScript gzip 36,306 bytes、npm tarball 150,429 bytes、sphere-only 3,572 bytes，继续满足 40 KB / 150 KB / 8 KB 预算；GSAP 只存在于 Demo 开发依赖，Three.js 与其声明包保持 peer dependency。

@@ -31,8 +31,10 @@
 - WebGL context loss 暂停/恢复、图片超时回退和长时间压力基准
 - P50/P95/P99、长帧、Stage/图集分阶段成本和可导入对比的性能基准
 - 八种布局的版本化 JSON 配置、严格解析与可折叠参数实验室
+- Sphere 等面积/球带、Cylinder 圆弧、Ring 分配、Box 选面和 Cone 圆台等高级布局参数
+- 受控 Stage extension 生命周期，可安全挂载原生 Three.js 内容并接入 GSAP 等外部动画库
 
-源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.7.0 参数化阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.9.0 外部 3D 内容与动画扩展阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
 
 ## 项目文档
 
@@ -164,6 +166,36 @@ stage.setQuality('auto') // 恢复自动检测和运行时升降级
 stage.pause()
 stage.resume()
 ```
+
+外部 3D 内容与动画扩展：
+
+```ts
+import { MotionStage, type StageExtension } from '@itagan/spatial-motion'
+import { Mesh, MeshBasicMaterial, TorusGeometry } from 'three'
+
+const extension: StageExtension = {
+  name: 'orbit-ring',
+  mount({ root, camera, signal }) {
+    const geometry = new TorusGeometry(6, 0.03, 8, 96)
+    const material = new MeshBasicMaterial({ color: 0x67e8f9 })
+    root.add(new Mesh(geometry, material))
+    signal.addEventListener('abort', () => console.log('extension removed'))
+    void camera.position // 只读使用 Stage 相机
+  },
+  update({ elapsed }) {
+    // elapsed 不包含 Stage 暂停或页面隐藏的时间
+  },
+  resize({ width, height, pixelRatio }) {},
+  pause() {},
+  resume() {},
+  dispose() {}, // 扩展负责释放自己创建的 geometry/material/texture
+}
+
+const handle = await stage.addExtension(extension)
+handle.remove() // 幂等；同时 abort signal、移除隔离 Group 并 dispose
+```
+
+每个扩展只获得独立 `Group`、只读相机引用和取消信号。Stage 继续独占场景渲染循环；扩展不能访问内部卡片 Mesh 或 WebGLRenderer。`onExtensionError` 会收到生命周期错误，故障扩展会被隔离移除，其他扩展与卡片渲染继续运行。GSAP 等库应仅驱动扩展自己的对象，并通过 `update({ elapsed })` 对齐 Stage 时钟；核心包不依赖任何动画库。
 
 响应式平面、低动态偏好与悬停高亮：
 
@@ -302,6 +334,7 @@ http://localhost:5173/benchmark.html
 - 时空隧道、漩涡和径向爆发特效及实际活跃实例统计
 - FPS、平均帧时间、实例池/实际提交/可见实例、Draw Call、三角形和纹理图集内存
 - P50/P95/P99、24/33/50ms 长帧、Stage CPU 与 WebGL 提交耗时
+- 扩展数量与每帧扩展 update 耗时；NONE/NATIVE/GSAP/BOTH 对比
 - 图集构建/patch、图片加载失败和估算纹理上传字节
 - steady、cold-start、atlas-update、transition-stress 四类可复现场景
 - 导入基线 JSON，并通过 `compareBenchmarkResults()` 输出同配置前后差异
@@ -316,9 +349,9 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 32.3 KB |
-| npm tarball | ≤ 150 KB | 132.5 KB |
-| 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 2.2 KB |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 35.5 KB |
+| npm tarball | ≤ 150 KB | 146.9 KB |
+| 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 3.5 KB |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。
 
@@ -406,23 +439,43 @@ await stage.enterEffect(radialBurst({
 sphere({ orientation: 'upright-surface' }) // 默认，像圆柱一样竖直包裹球面
 sphere({ orientation: 'camera' })          // 始终正对相机
 sphere({ orientation: 'surface' })         // 严格贴合球面切线
+
+sphere({
+  distribution: 'fibonacci', // 等面积分布，自动避开精确极点
+  minLatitude: 0,
+  maxLatitude: Math.PI / 2,  // 北半球球冠
+})
 ```
 
 通用布局：
 
 ```ts
-import { box, cone, helix, ring } from '@itagan/spatial-motion'
+import { box, cone, cylinder, helix, ring } from '@itagan/spatial-motion'
 
 await stage.to(box({
   width: 8,
   height: 6,
   depth: 5,
+  faces: ['front', 'right'],
+  edgePadding: 0.35,
+  faceWeights: { front: 2, right: 1 },
   orientation: 'surface',
+}))
+
+await stage.to(cylinder({
+  radius: 5,
+  rows: 8,              // rows 与 columns 二选一
+  startAngle: -Math.PI / 2,
+  arcAngle: Math.PI,    // 半圆展墙
+  orientation: 'camera',
 }))
 
 await stage.to(ring({
   innerRadius: 0.8,
   spacing: 0.42,
+  distribution: 'equal',
+  stagger: false,
+  clockwise: true,
   orientation: 'camera', // 或 tangent，沿圆环切向旋转
 }))
 
@@ -435,13 +488,14 @@ await stage.to(helix({
 
 await stage.to(cone({
   radius: 5,
+  topRadius: 2, // 0 为尖锥，等于 radius 时为等半径柱面
   height: 9,
   stagger: true,
   orientation: 'upright-surface', // surface 可严格贴合锥面
 }))
 ```
 
-这些布局会根据实例数量自动计算面分布、环数、圈数和卡片缩放，也可通过尺寸、`rings`、`turns`、`density` 等参数锁定视觉密度。它们遵循统一 `Layout` 契约，可直接插入 Timeline，并在任意中间帧切换到其他布局或流式特效。
+这些布局会根据实例数量自动计算面分布、环数、圈数和卡片缩放，也可通过尺寸、范围、`rings`、`turns`、`density` 等参数锁定视觉密度。Sphere 的 `rings`/`stagger` 仅用于 latitude 模式；Cylinder 的 `rows`/`columns` 在严格配置中互斥。它们遵循统一 `Layout` 契约，可直接插入 Timeline，并在任意中间帧切换到其他布局或流式特效。
 
 确定性的散开布局可用于爆炸、解散和重新聚合配方：
 
