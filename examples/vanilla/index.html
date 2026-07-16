@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spatial Motion · Vanilla</title>
+  </head>
+  <body>
+    <main id="app" class="example">
+      <header>
+        <div><h1>Vanilla 最小示例</h1><p>一个 Stage、一组数据和两个布局。</p></div>
+        <span id="status" class="status">starting</span>
+      </header>
+      <section id="stage" class="stage" aria-label="Vanilla Spatial Motion stage"></section>
+      <footer>
+        <div class="controls">
+          <button data-layout="sphere">球体</button>
+          <button data-layout="cylinder">圆柱</button>
+          <button id="pause">暂停</button>
+          <button id="resume">恢复</button>
+        </div>
+        <p>核心库不依赖框架。</p>
+      </footer>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

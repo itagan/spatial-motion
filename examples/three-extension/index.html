@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spatial Motion · Three.js extension</title>
+  </head>
+  <body>
+    <main id="app" class="example">
+      <header>
+        <div><h1>原生 Three.js extension</h1><p>外部对象使用隔离 Group，并由扩展释放 GPU 资源。</p></div>
+        <span id="status" class="status">starting</span>
+      </header>
+      <section id="stage" class="stage" aria-label="Three.js extension stage"></section>
+      <footer>
+        <div class="controls">
+          <button id="add">添加轨道</button>
+          <button id="remove">移除轨道</button>
+        </div>
+        <p>Stage 继续拥有 Renderer 和 RAF。</p>
+      </footer>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

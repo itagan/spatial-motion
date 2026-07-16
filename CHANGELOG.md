@@ -2,6 +2,21 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)。日期使用 `YYYY-MM-DD`。
 
+## 1.10.0 - 2026-07-16
+
+单包仓库内的独立集成示例与构建验证。
+
+### Added
+
+- 新增 Vanilla 最小 Stage、原生 Three.js extension 和 GSAP extension 三个单场景示例。
+- 新增 `dev:examples`、`build:examples` 和独立示例 TypeScript 配置。
+- CI 与根级 `verify` 现在同时检查三个示例的类型和生产构建。
+
+### Compatibility
+
+- 继续保持单包仓库，不引入 workspace，也不改变核心源码位置、稳定导出路径或发布方式。
+- `examples/` 不进入 npm tarball；GSAP 仍只属于开发和示例依赖。
+
 ## 1.9.0 - 2026-07-16
 
 受控的外部 3D 内容与动画扩展。

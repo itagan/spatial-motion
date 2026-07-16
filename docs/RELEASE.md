@@ -21,6 +21,7 @@ npm run verify
 - [ ] TypeScript 严格检查通过。
 - [ ] 全部 Vitest 通过，包含零/单/大量数据、竞态、中断、暂停/恢复和销毁。
 - [ ] library 与 demo 构建通过。
+- [ ] Vanilla、Three.js extension 与 GSAP extension 示例构建通过。
 - [ ] `pack:check` 的 Node ESM、严格类型、浏览器 Stage 构建、内部路径拦截和 Tree Shaking 全部通过。
 - [ ] gzip ≤ 40 KB、tarball ≤ 150 KB、layout-only ≤ 8 KB。
 - [ ] 在目标 Chrome、Firefox、Safari/Edge 至少完成一轮真实图片、CORS 失败、悬停、动态更新、页面隐藏、销毁和 benchmark 冒烟。
@@ -94,3 +95,13 @@ npm install @itagan/spatial-motion three typescript vite
 - 浏览器验证 mount、Stage pause/resume、remove 和无 error 日志；resize/context loss/destroy/生命周期故障隔离由自动化测试覆盖。
 
 本阶段不执行 npm publish、Git tag 或 GitHub Release；Firefox、Safari、Edge 和目标低配硬件仍留待正式发布候选矩阵。
+
+## v1.10.0 开发验证记录
+
+2026-07-16 本地验证：
+
+- `npm run verify` 通过：169 项 Vitest、library/demo/examples 构建、tgz 消费者、严格 TypeScript、导出边界和 Tree Shaking。
+- Vanilla、原生 Three.js extension 与 GSAP extension 在 Chromium 中均创建单一 Canvas，布局/暂停/恢复及扩展添加/移除通过，控制台无错误。
+- 包指标保持为 Library JavaScript gzip 36,306 bytes、tarball 约 151.7 KB、layout-only 3,572 bytes；`examples/` 未进入 tarball。
+
+本阶段不引入 workspace，不执行 npm publish、Git tag 或 GitHub Release。

@@ -34,7 +34,7 @@
 - Sphere 等面积/球带、Cylinder 圆弧、Ring 分配、Box 选面和 Cone 圆台等高级布局参数
 - 受控 Stage extension 生命周期，可安全挂载原生 Three.js 内容并接入 GSAP 等外部动画库
 
-源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.9.0 外部 3D 内容与动画扩展阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.10.0 集成示例阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
 
 ## 项目文档
 
@@ -46,6 +46,7 @@
 - [性能与效果优化记录](./docs/OPTIMIZATION.md)：可复现基线、测量口径和下一项优化假设。
 - [发布清单](./docs/RELEASE.md)：版本验证、发布及发布后空项目安装步骤。
 - [变更记录](./CHANGELOG.md)：各阶段功能与兼容说明。
+- [独立示例](./examples/)：Vanilla、原生 Three.js extension 和 GSAP extension。
 - [开发代理指南](./AGENTS.md)：Codex、Claude Code 等自动化开发代理的项目边界与完成标准。
 
 ## 安装
@@ -78,10 +79,25 @@ npm run typecheck
 npm test
 npm run build:lib
 npm run build:demo
+npm run build:examples
 npm run pack:check
 ```
 
-`build:lib` 输出可发布 ESM 和类型声明到 `dist/`；`build:demo` 独立输出演示站点到 `dist-demo/`。
+`build:lib` 输出可发布 ESM 和类型声明到 `dist/`；`build:demo` 输出综合演示站点到 `dist-demo/`；`build:examples` 输出三个单场景示例到 `dist-examples/`。
+
+## 独立集成示例
+
+`examples/` 保持为单包仓库内的轻量项目，不引入 workspace，也不改变 npm 发布边界：
+
+- [`vanilla`](./examples/vanilla/)：最小 Stage、数据、布局和暂停/恢复。
+- [`three-extension`](./examples/three-extension/)：原生 Three.js Object3D 挂载、逐帧更新与资源释放。
+- [`gsap-extension`](./examples/gsap-extension/)：使用 Stage elapsed 推进 paused GSAP timeline。
+
+```bash
+npm run dev:examples
+```
+
+开发服务器分别提供 `/vanilla/`、`/three-extension/` 和 `/gsap-extension/`。示例从正式包名导入并参与严格类型检查和 CI 构建，但不会进入 npm tarball；发布包消费边界仍由 `pack:check` 验证。
 
 ## 基础使用
 
@@ -350,7 +366,7 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
 | Library JavaScript gzip 合计 | ≤ 40 KB | 35.5 KB |
-| npm tarball | ≤ 150 KB | 146.9 KB |
+| npm tarball | ≤ 150 KB | 148.1 KB |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 3.5 KB |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。
@@ -538,6 +554,7 @@ src/
 ├── renderers/     WebGL 实例渲染与纹理图集
 └── performance/   设备质量检测与性能配置
 demo/              性能和连续动画演示
+examples/          Vanilla、Three.js extension 和 GSAP 单场景示例
 ```
 
 ## 兼容性与后续路线

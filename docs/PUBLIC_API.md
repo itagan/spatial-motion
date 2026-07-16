@@ -14,6 +14,8 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 
 `src`、`core`、`renderers` 及 `dist` 中其他文件是内部实现。即使文件存在，也不能通过未声明的深层路径导入；`pack:check` 会验证这条边界。
 
+仓库中的 `demo/` 与 `examples/` 是使用说明和验证资产，不属于 npm 包入口或 v1.x API 承诺；复制示例不等同于增加稳定子路径。
+
 ## v1.x 承诺
 
 - 已公开的函数、类方法、选项和联合类型不会在 minor/patch 版本中无迁移方案地移除或改成不兼容含义。

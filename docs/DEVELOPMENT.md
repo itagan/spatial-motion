@@ -17,21 +17,24 @@ npm run dev
 - `/benchmark.html`：不同实例数量和质量档位的性能基准。
 - `/benchmark.html` 的压力模式：持续中断布局/特效并局部更新图集，可选择最长 30 分钟。
 
+`npm run dev:examples` 独立启动单场景示例站点，提供 `/vanilla/`、`/three-extension/` 和 `/gsap-extension/`。
+
 ## 常用命令
 
 | 命令 | 用途 |
 | --- | --- |
 | `npm run dev` | 启动 Vite 开发服务器 |
-| `npm run typecheck` | 对源码、测试配置和 demo 执行严格类型检查 |
+| `npm run typecheck` | 对源码、测试配置、demo 和 examples 执行严格类型检查 |
 | `npm test` | 使用 Vitest 运行全部单元测试 |
 | `npm run test:watch` | 监听模式运行测试 |
 | `npm run build:lib` | 构建 ESM 库与类型声明到 `dist/` |
 | `npm run build:demo` | 构建演示站点到 `dist-demo/` |
-| `npm run build` | 依次构建库和演示站点 |
+| `npm run build:examples` | 构建三个独立示例到 `dist-examples/` |
+| `npm run build` | 依次构建库、演示站点和独立示例 |
 | `npm run pack:check` | 验证发布文件、体积、导出、类型、运行时消费和 Tree Shaking |
 | `npm run verify` | 串行执行类型、全部测试、库/demo 构建和包消费者验证 |
 
-`dist/` 和 `dist-demo/` 是生成目录且已被忽略，不要手工编辑或提交。
+`dist/`、`dist-demo/` 和 `dist-examples/` 是生成目录且已被忽略，不要手工编辑或提交。
 
 ## CI 与提交前检查
 
@@ -43,12 +46,19 @@ npm run typecheck
 npm test
 npm run build:lib
 npm run build:demo
+npm run build:examples
 npm run pack:check
 ```
 
 代码、构建配置或包配置发生变化时，本地应执行同等检查。纯文档变更至少检查 Markdown 链接、命令和描述是否对应当前文件及脚本。
 
 ## 模块职责
+
+### `demo` 与 `examples`
+
+`demo/` 是覆盖布局、特效、参数实验室和 benchmark 的综合开发面板，可以通过源码别名快速联调。`examples/` 是面向使用者的单场景代码，从正式包名导入并保持可独立阅读；它们不使用 workspace、不发布为独立包，也不进入核心运行时。
+
+新增集成示例时应保持目标单一、显式销毁 Stage 和外部资源，并将其纳入 `tsconfig.examples.json` 与 `build:examples`。真实 tgz 消费仍由 `pack:check` 负责，不能用 workspace 软链接替代。
 
 ### `src/core`
 
