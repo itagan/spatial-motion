@@ -34,7 +34,7 @@
 - Sphere 等面积/球带、Cylinder 圆弧、Ring 分配、Box 选面和 Cone 圆台等高级布局参数
 - 受控 Stage extension 生命周期，可安全挂载原生 Three.js 内容并接入 GSAP 等外部动画库
 
-源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.10.0 集成示例阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.11.0 扩展运行时完善阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
 
 ## 项目文档
 
@@ -191,6 +191,7 @@ import { Mesh, MeshBasicMaterial, TorusGeometry } from 'three'
 
 const extension: StageExtension = {
   name: 'orbit-ring',
+  order: 10,
   mount({ root, camera, signal }) {
     const geometry = new TorusGeometry(6, 0.03, 8, 96)
     const material = new MeshBasicMaterial({ color: 0x67e8f9 })
@@ -202,16 +203,22 @@ const extension: StageExtension = {
     // elapsed 不包含 Stage 暂停或页面隐藏的时间
   },
   resize({ width, height, pixelRatio }) {},
+  qualityChange(quality) {},
+  reducedMotionChange(reducedMotion) {},
   pause() {},
   resume() {},
   dispose() {}, // 扩展负责释放自己创建的 geometry/material/texture
 }
 
 const handle = await stage.addExtension(extension)
+handle.disable() // 暂停 update 并隐藏 root，不 dispose
+handle.enable()  // 从已有 elapsed 继续
 handle.remove() // 幂等；同时 abort signal、移除隔离 Group 并 dispose
 ```
 
 每个扩展只获得独立 `Group`、只读相机引用和取消信号。Stage 继续独占场景渲染循环；扩展不能访问内部卡片 Mesh 或 WebGLRenderer。`onExtensionError` 会收到生命周期错误，故障扩展会被隔离移除，其他扩展与卡片渲染继续运行。GSAP 等库应仅驱动扩展自己的对象，并通过 `update({ elapsed })` 对齐 Stage 时钟；核心包不依赖任何动画库。
+
+`stage.getExtensionStats()` 按 `order` 和挂载顺序返回活动扩展，并附带最近 20 个已释放扩展的纯数据快照。重复名称通过稳定 `id` 区分；诊断包括 enabled、update 次数、平均/P95/P99/最大耗时、超过 2ms 的慢帧、错误次数和最近错误文本。
 
 响应式平面、低动态偏好与悬停高亮：
 
@@ -365,8 +372,8 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 35.5 KB |
-| npm tarball | ≤ 150 KB | 148.1 KB |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 36.3 KB |
+| npm tarball | ≤ 150 KB | 约 139 KB |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 3.5 KB |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

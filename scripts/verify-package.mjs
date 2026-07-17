@@ -114,6 +114,7 @@ try {
       type StageExtension,
       type StageExtensionContext,
       type StageExtensionHandle,
+      type StageExtensionStats,
       createLayout,
       parseLayoutConfig,
       type LayoutConfig,
@@ -148,17 +149,21 @@ try {
       { version: 1, type: 'cone', options: { radius: 4, topRadius: 2 } },
     ]
     const extension: StageExtension = {
+      order: 10,
       mount({ root, camera, signal }: StageExtensionContext) { void [root, camera, signal] },
       update({ elapsed, delta }) { void [elapsed, delta] },
       resize({ width, height, pixelRatio }) { void [width, height, pixelRatio] },
+      qualityChange(quality) { void quality },
+      reducedMotionChange(reducedMotion) { void reducedMotion },
       dispose() {},
     }
     const extensionHandle: Promise<StageExtensionHandle> | undefined = stage?.addExtension(extension)
+    const extensionStats: StageExtensionStats[] | undefined = stage?.getExtensionStats()
     const subpathConfig = parseLayoutConfigFromSubpath(JSON.stringify(layoutConfig)) satisfies SubpathLayoutConfig
     const configuredLayouts = [createLayout(layoutConfig), createLayoutFromSubpath(subpathConfig)]
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
-    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, vortex(), BenchmarkSession, comparison, environment, emission, motion, cardStyle, stageOptions]
+    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, vortex(), BenchmarkSession, comparison, environment, emission, motion, cardStyle, stageOptions]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
@@ -215,13 +220,18 @@ try {
       update() {},
     }
     await stage.addExtension(extension)
+    const handle = await stage.addExtension({ mount() {} })
+    handle.disable()
+    handle.enable()
+    handle.remove()
     await stage.to(sphere({ radius: 3 }), { duration: 0 })
     await stage.updateItem('0', { title: 'updated' })
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
     const stats = stage.getPerformanceStats()
     const environment = stage.getPerformanceEnvironment()
+    const extensionStats = stage.getExtensionStats()
     stage.destroy()
-    const smoke = { ready: true, renderedItems: stats.renderedItems, submittedItems: stats.submittedItems, extensions: stats.extensions, drawCalls: stats.drawCalls, contextLost: stats.contextLost, p95: stats.frameTimeP95, maxTextureSize: environment.maxTextureSize, destroyed: !container.querySelector('canvas') }
+    const smoke = { ready: true, renderedItems: stats.renderedItems, submittedItems: stats.submittedItems, extensions: stats.extensions, extensionStats: extensionStats.length, drawCalls: stats.drawCalls, contextLost: stats.contextLost, p95: stats.frameTimeP95, maxTextureSize: environment.maxTextureSize, destroyed: !container.querySelector('canvas') }
     document.documentElement.dataset.packageSmoke = smoke.destroyed ? 'passed' : 'failed'
     result.textContent = JSON.stringify(smoke)
   `)

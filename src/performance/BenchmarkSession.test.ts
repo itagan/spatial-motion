@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StagePerformanceStats } from '../core/MotionStage'
+import type { StageExtensionStats } from '../core/extensions'
 import { BenchmarkSession, compareBenchmarkResults } from './BenchmarkSession'
 
 function stats(overrides: Partial<StagePerformanceStats> = {}): StagePerformanceStats {
@@ -56,6 +57,21 @@ describe('BenchmarkSession', () => {
   it('summarizes sampled render metrics', () => {
     const session = new BenchmarkSession({ itemCount: 600, qualityMode: 'high', layout: 'sphere' }, 100)
     session.record(stats(), 600)
+    const extensionStats: StageExtensionStats[] = [{
+      id: 1,
+      name: 'gsap',
+      order: 2,
+      active: true,
+      enabled: true,
+      updateCalls: 10,
+      averageUpdateMs: 0.2,
+      updateTimeP95: 0.3,
+      updateTimeP99: 0.4,
+      maximumUpdateMs: 0.5,
+      slowFrames: 0,
+      errorCount: 0,
+      lastError: null,
+    }]
     session.record(stats({
       fps: 40,
       averageFrameMs: 25,
@@ -76,7 +92,7 @@ describe('BenchmarkSession', () => {
       estimatedTextureUploadBytes: 4_000_000,
       drawCalls: 2,
       triangles: 1400,
-    }), 1100)
+    }), 1100, extensionStats)
 
     const result = session.finish(1600)
     expect(result).toMatchObject({
@@ -109,6 +125,7 @@ describe('BenchmarkSession', () => {
       visibleItems: 600,
     })
     expect(result.samples).toHaveLength(2)
+    expect(result.extensionStats).toEqual(extensionStats)
   })
 
   it('returns zero aggregates for a session without samples', () => {

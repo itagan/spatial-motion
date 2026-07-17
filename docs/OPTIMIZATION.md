@@ -86,3 +86,18 @@ Stage extension 与卡片、Timeline 和自适应质量共用同一 RAF；扩展
 500-item P95 相对 v1.8 的 18.00ms 增加 2.8%；2000-item P95 相对 v1.8 的 18.30ms 降低 4.4%，均满足不回退超过 10% 且不新增 33ms 长帧的门槛。浏览器同时验证两扩展挂载、Stage pause/resume、移除后恢复 0 扩展/1 Draw Call，以及无 error 级控制台日志。1–5 个扩展共享单一 Stage RAF 由自动化测试覆盖。
 
 最终包验证为 Library JavaScript gzip 36,306 bytes、npm tarball 150,429 bytes、sphere-only 3,572 bytes，继续满足 40 KB / 150 KB / 8 KB 预算；GSAP 只存在于 Demo 开发依赖，Three.js 与其声明包保持 peer dependency。
+
+## v1.11 扩展运行时诊断验收
+
+逐扩展诊断只在现有 Stage RAF 内记录 update 耗时；每个活动扩展保留最近 120 次样本，已释放记录转为最多 20 条纯数据快照。disable 的扩展不执行 update，因此不增加逐帧采样成本；全局 `extensionUpdateMs` 与原有性能指标语义保持不变。
+
+2026-07-16 同一 Chromium 150 / Apple M4 / 1265×633 / DPR 2 环境：
+
+| 场景 | 结果 |
+| --- | --- |
+| 500 items / auto-high / steady / BOTH / 3 秒 | 59.98 FPS，P95 18.60ms，P99 18.70ms，扩展 update 平均 0.038ms/最大 0.20ms，逐扩展 P95 为 0/0.10ms，0 长帧，4 Draw Calls |
+| 2000 items / auto-high / transition-stress / BOTH / 3 秒 | 60.00 FPS，P95 18.40ms，P99 18.60ms，扩展 update 平均 0.013ms/最大 0.10ms，逐扩展 P95 为 0/0.10ms，0 长帧，4 Draw Calls，4 次中断/patch |
+
+相对 v1.9，500-item P95 从 18.50ms 增加 0.5%，2000-item P95 从 17.50ms 增加 5.1%，均低于 10% 回归门槛且未新增 33ms 长帧。主 Demo 启停扩展时 Draw Call 在 4 与 1 之间正确切换，两个独立示例也保持单一 Canvas/RAF，浏览器控制台无错误。
+
+最终包验证为 Library JavaScript gzip 37,207 bytes、npm tarball 141,968 bytes、layout-only 3,572 bytes，继续满足 40 KB / 150 KB / 8 KB 预算。为维持既有 tarball 上限，发布包只携带公共 API、兼容性、README、CHANGELOG 和许可证；路线图、开发/发布/视觉/优化记录及 examples 保留在源码仓库。

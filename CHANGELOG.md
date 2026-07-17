@@ -2,6 +2,23 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)。日期使用 `YYYY-MM-DD`。
 
+## 1.11.0 - 2026-07-16
+
+Stage extension 运行时控制、设备联动和逐扩展诊断。
+
+### Added
+
+- `StageExtensionHandle` 增加幂等 `enable()`、`disable()` 与 `enabled`，停用时隐藏根节点并停止 update，但不释放资源。
+- `StageExtension` 增加确定性 `order`、`qualityChange()` 和 `reducedMotionChange()` 可选生命周期。
+- 新增 `StageExtensionStats` 与 `MotionStage.getExtensionStats()`，提供稳定 ID、状态、平均/P95/P99/最大 update 耗时、慢帧和错误历史。
+- Benchmark JSON 与面板增加逐扩展诊断；Demo 和独立 Three.js/GSAP 示例增加启停、质量与低动态适配。
+
+### Compatibility
+
+- 未指定 `order` 的扩展使用 0，同 order 保持挂载顺序；旧扩展的运行顺序和默认启用行为不变。
+- `disable()` 不触发 AbortSignal 或 dispose，`remove()` 与 Stage destroy 的释放语义保持不变。
+- 故障扩展仍被隔离移除，最近 20 个已释放扩展只保留纯诊断快照，不保留 Three.js 或动画资源引用。
+
 ## 1.10.0 - 2026-07-16
 
 单包仓库内的独立集成示例与构建验证。

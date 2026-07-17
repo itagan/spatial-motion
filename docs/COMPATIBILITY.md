@@ -28,5 +28,6 @@ Spatial Motion 的 `MotionStage` 面向支持 WebGL2、ES2022、Canvas 2D、Resi
 - Stage extension 的额外 Object3D 可能增加 Draw Call；扩展必须复用应用提供且满足 peer 范围的同一 Three.js，不应捆绑第二份 Three.js。
 - Reduced Motion 会立即完成布局、停止自动旋转并固定流式特效首帧。Stage extension 会收到 pause/resume 生命周期，但动画库的具体低动态表现仍由扩展实现。
 - Stage extension 不提供外部对象拾取、后处理、多相机、CSS3D 或框架组件挂载；扩展创建的 GPU/动画资源由扩展在 dispose 中释放。
+- disable 的扩展仍保留其 Three.js/动画资源并接收质量与低动态状态变化；只有 remove 或 Stage destroy 才会 abort 和 dispose。应用不应把 disable 当成释放内存。
 
 移动设备表现高度依赖 GPU、散热、像素比和内嵌浏览器。默认质量策略会降级实例数量，但不承诺任意移动设备、任意数据量下固定帧率；请在目标硬件的 benchmark 页面实测。
