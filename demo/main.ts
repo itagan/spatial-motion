@@ -307,6 +307,15 @@ document.querySelector('#extension-clear')?.addEventListener('click', () => {
   gsapExtension = null
 })
 
+document.querySelector('#extension-disable')?.addEventListener('click', () => {
+  nativeExtension?.disable()
+  gsapExtension?.disable()
+})
+document.querySelector('#extension-enable')?.addEventListener('click', () => {
+  nativeExtension?.enable()
+  gsapExtension?.enable()
+})
+
 document.querySelector('#stage-pause')?.addEventListener('click', () => stage.pause())
 document.querySelector('#stage-resume')?.addEventListener('click', () => stage.resume())
 
@@ -331,7 +340,10 @@ const updateFps = (now: number) => {
     document.querySelector('#fps')!.textContent = `${Math.round((frames * 1000) / (now - measuredAt))} FPS`
     const stats = stage.getPerformanceStats()
     document.querySelector('#render-stats')!.textContent = `${stats.drawCalls} CALL · ${stats.atlasBuilds} ATLAS`
-    document.querySelector('#extensions')!.textContent = `${stats.extensions} EXT · ${stats.extensionUpdateMs.toFixed(2)} MS`
+    const activeExtensions = stage.getExtensionStats().filter(({ active }) => active)
+    const enabledExtensions = activeExtensions.filter(({ enabled }) => enabled).length
+    const extensionP95 = Math.max(0, ...activeExtensions.map(({ updateTimeP95 }) => updateTimeP95))
+    document.querySelector('#extensions')!.textContent = `${enabledExtensions}/${stats.extensions} EXT · P95 ${extensionP95.toFixed(2)} MS`
     document.querySelector('#effect')!.textContent = stats.effect
       ? `${stats.effect.toUpperCase()} · ${stats.activeEffectItems} ACTIVE`
       : 'LAYOUT MODE'

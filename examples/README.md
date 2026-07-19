@@ -5,8 +5,8 @@
 | 示例 | 内容 |
 | --- | --- |
 | [`vanilla`](./vanilla/) | 最小 `MotionStage`、数据、布局切换和暂停/恢复 |
-| [`three-extension`](./three-extension/) | 使用 `StageExtension` 挂载和释放原生 Three.js 内容 |
-| [`gsap-extension`](./gsap-extension/) | 用 Stage 的 `elapsed` 驱动 paused GSAP timeline |
+| [`three-extension`](./three-extension/) | 使用 `StageExtension` 挂载原生 Three.js 内容，并演示启停、质量适配和释放 |
+| [`gsap-extension`](./gsap-extension/) | 用 Stage 的 `elapsed` 驱动 paused GSAP timeline，并响应启停与低动态模式 |
 
 在仓库根目录运行：
 

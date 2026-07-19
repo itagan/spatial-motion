@@ -105,6 +105,8 @@ npm run pack:check
 
 当前自动化硬预算：库 JavaScript gzip 合计不超过 40 KB，npm tarball 不超过 150 KB，仅消费布局的 Tree Shaking 产物不超过 8 KB。预算变化属于需要明确讨论的工程决策。
 
+npm tarball 只携带运行时 `dist`、README、CHANGELOG、LICENSE、PUBLIC_API 和 COMPATIBILITY。ROADMAP、DEVELOPMENT、OPTIMIZATION、RELEASE、VISUAL_QA 与 examples 保留在源码仓库，不增加安装包体积。
+
 v1.x 的稳定入口和 SemVer 规则记录在 `docs/PUBLIC_API.md`。正式发布严格按照 `docs/RELEASE.md` 执行；准备发布的代码变更不自动授权 npm publish、tag 或 GitHub Release。
 
 ## 测试策略

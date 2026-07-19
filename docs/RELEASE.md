@@ -105,3 +105,16 @@ npm install @itagan/spatial-motion three typescript vite
 - 包指标保持为 Library JavaScript gzip 36,306 bytes、tarball 约 151.7 KB、layout-only 3,572 bytes；`examples/` 未进入 tarball。
 
 本阶段不引入 workspace，不执行 npm publish、Git tag 或 GitHub Release。
+
+## v1.11.0 开发验证记录
+
+2026-07-16 本地验证：
+
+- 174 项 Vitest 覆盖幂等 enable/disable、稳定 order、quality/reduced-motion 通知、同名稳定 id、逐扩展分位数、错误记录和 20 条历史上限。
+- 主 Demo、原生 Three.js extension 与 GSAP extension 在 Chromium 中通过启停、暂停/恢复、质量切换和移除流程；停用时回落到主体 1 Draw Call，控制台无错误。
+- 500 steady / BOTH / 3 秒为 59.98 FPS、P95 18.60ms；2000 transition-stress / BOTH / 3 秒复测为 60.00 FPS、P95 18.40ms；两者均为 0 个 33ms 长帧。
+- 逐扩展 P95 为原生 0ms、GSAP 0.10ms；诊断没有改变 4 Draw Calls 或单一 Stage RAF 架构。
+- `npm run verify` 通过：严格 TypeScript、174 项 Vitest、library/demo/examples 构建、tgz Node/浏览器消费者、导出边界和 Tree Shaking 全部通过。
+- 包指标：Library JavaScript gzip 37,207 bytes、tarball 141,968 bytes、layout-only 消费者 3,572 bytes，满足 40 KB / 150 KB / 8 KB 预算。
+
+本阶段不执行 npm publish、Git tag 或 GitHub Release。

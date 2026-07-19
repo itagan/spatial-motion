@@ -18,6 +18,7 @@ export type {
   StageExtension,
   StageExtensionContext,
   StageExtensionHandle,
+  StageExtensionStats,
   StageFrameContext,
   StageViewport,
 } from './core/extensions.js'

@@ -196,7 +196,11 @@ async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
   stressOperations = 0
   setRunButtonsDisabled(true)
   setStatus(`正在运行 ${durationSeconds} 秒${scenarioLabel(scenario)}…`)
-  sampleTimer = window.setInterval(() => session.record(stage.getPerformanceStats()), 500)
+  sampleTimer = window.setInterval(() => session.record(
+    stage.getPerformanceStats(),
+    performance.now(),
+    benchmarkExtensionStats(),
+  ), 500)
   if (stressMode) {
     void runStressOperation()
     stressTimer = window.setInterval(() => void runStressOperation(), 900)
@@ -206,14 +210,14 @@ async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
   } else if (scenario === 'cold-start') {
     void runColdStart(generation)
   }
-  session.record(stage.getPerformanceStats())
+  session.record(stage.getPerformanceStats(), performance.now(), benchmarkExtensionStats())
   runTimer = window.setTimeout(() => {
     window.clearInterval(sampleTimer)
     window.clearInterval(stressTimer)
     sampleTimer = 0
     stressTimer = 0
     runTimer = 0
-    session.record(stage.getPerformanceStats())
+    session.record(stage.getPerformanceStats(), performance.now(), benchmarkExtensionStats())
     lastResult = session.finish()
     renderResult(lastResult)
     setRunButtonsDisabled(false)
@@ -274,6 +278,11 @@ function updateMetrics(): void {
     : '--')
   setText('#metric-cpu', `${stats.frameCpuMs.toFixed(2)} / ${stats.renderSubmitMs.toFixed(2)} ms`)
   setText('#metric-extensions', `${stats.extensions} / ${stats.extensionUpdateMs.toFixed(3)} ms`)
+  const extensionStats = stage.getExtensionStats().filter(({ active }) => active)
+  setText('#metric-extension-detail', extensionStats.length
+    ? extensionStats.map(({ name, enabled, updateTimeP95 }) =>
+      `${name}:${enabled ? 'ON' : 'OFF'} ${updateTimeP95.toFixed(2)}`).join(' · ')
+    : '--')
   setText('#metric-items', `${stats.renderedItems} / ${stats.inputItems}`)
   setText('#metric-submitted', String(stats.submittedItems))
   setText('#metric-visible', String(stats.visibleItems))
@@ -284,6 +293,10 @@ function updateMetrics(): void {
   setText('#metric-atlas-updates', `${stats.atlasBuilds} / ${stats.atlasPatches}`)
   setText('#metric-quality', `${stats.quality.toUpperCase()} / ${stats.qualityMode.toUpperCase()}`)
   setText('#metric-context', stats.contextLost ? 'LOST' : 'READY')
+}
+
+function benchmarkExtensionStats() {
+  return stage.getExtensionStats().filter(({ active, errorCount }) => active || errorCount > 0)
 }
 
 function renderResult(result: BenchmarkResult): void {
@@ -308,6 +321,13 @@ function renderResult(result: BenchmarkResult): void {
     averageExtensionUpdateMs: Number(result.averageExtensionUpdateMs.toFixed(3)),
     maximumExtensionUpdateMs: Number(result.maximumExtensionUpdateMs.toFixed(3)),
     maximumExtensions: result.maximumExtensions,
+    extensionStats: result.extensionStats.map((stats) => ({
+      ...stats,
+      averageUpdateMs: Number(stats.averageUpdateMs.toFixed(3)),
+      updateTimeP95: Number(stats.updateTimeP95.toFixed(3)),
+      updateTimeP99: Number(stats.updateTimeP99.toFixed(3)),
+      maximumUpdateMs: Number(stats.maximumUpdateMs.toFixed(3)),
+    })),
     maximumDrawCalls: result.maximumDrawCalls,
     maximumTriangles: result.maximumTriangles,
     maximumTextureBytes: result.maximumTextureBytes,

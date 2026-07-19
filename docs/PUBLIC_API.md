@@ -45,13 +45,16 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 
 ## Stage extension
 
-- `MotionStage.addExtension(extension)` 异步完成 mount，并返回可幂等 `remove()` 的 `StageExtensionHandle`。
+- `MotionStage.addExtension(extension)` 异步完成 mount，并返回具有 `enable()`、`disable()`、`enabled` 和幂等 `remove()` 的 `StageExtensionHandle`。disable 隐藏根节点并停止 update，但不 abort 或 dispose。
 - 每个扩展仅获得自己的隔离 `Group`、只读 `PerspectiveCamera` 引用和随 remove/destroy 中止的 `AbortSignal`；不公开 Scene、Renderer 或内部卡片实例 Mesh。
 - 可选的 `update({ elapsed, delta })` 与 Stage 同一 RAF 执行。首帧 `delta` 为 0，后续 delta 受 Stage 帧时间保护；`elapsed` 不累计暂停和页面隐藏时间。
 - Stage 尺寸变化时调用 `resize({ width, height, pixelRatio })`；有效暂停状态变化时至多调用一次 `pause()` 或 `resume()`。
+- 可选 `order` 决定 update/resize/pause/resume/dispose 顺序，数值较小者先执行，同值保持挂载顺序；非有限值安全归一化为 0。
+- mount 后立即收到当前 `qualityChange(quality)` 与 `reducedMotionChange(boolean)`，后续质量或系统低动态偏好变化继续按稳定顺序通知，包括已 disable 的扩展。
 - `remove()`、mount 失败、生命周期回调失败或 Stage 销毁都会从场景移除扩展根节点、触发取消信号并调用一次 `dispose()`。扩展仍负责释放自己创建的 Geometry、Material、Texture 和动画对象。
 - `onExtensionError(error, extension)` 隔离报告 update/resize/pause/resume/dispose 错误；故障扩展不会中断卡片或其他扩展渲染。mount 错误还会从 `addExtension()` 原样拒绝。
 - GSAP、anime.js 等动画库可在应用或 Demo 中实现该通用接口，但不是 Spatial Motion 核心依赖。
+- `getExtensionStats()` 返回活动记录和最多 20 个已释放诊断快照；`StageExtensionStats.id` 可区分同名扩展，耗时分位数使用最近 120 次 update 的有界窗口，慢帧阈值为 2ms。
 
 ## 生命周期与并发
 
