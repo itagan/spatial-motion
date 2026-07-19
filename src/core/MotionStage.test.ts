@@ -261,6 +261,77 @@ describe('MotionStage', () => {
     visibilitySpy.mockRestore()
   })
 
+  it('drives transitions from the Stage frame loop and excludes paused time', async () => {
+    let now = 0
+    let frame: FrameRequestCallback | null = null
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return requestFrame.mock.calls.length
+    })
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    const stage = createStage()
+    const cards = currentCards()
+    await stage.setItems([{ id: 'a' }])
+
+    const transition = stage.to(layout(() => [transform({ x: 4 })]), { duration: 100 })
+    expect(requestFrame).toHaveBeenCalledOnce()
+    const firstFrame = frame as FrameRequestCallback | null
+    now = 50
+    firstFrame!(now)
+    expect(cards.setProgress.mock.calls.at(-1)?.[0]).toBeCloseTo(0.5)
+
+    stage.pause()
+    now = 1050
+    stage.resume()
+    const resumedFrame = frame as FrameRequestCallback | null
+    now = 1100
+    resumedFrame!(now)
+
+    await expect(transition).resolves.toBe(true)
+    expect(cards.setProgress).toHaveBeenLastCalledWith(1)
+    stage.destroy()
+  })
+
+  it('settles an active transition immediately when the Stage is destroyed', async () => {
+    const stage = createStage()
+    await stage.setItems([{ id: 'a' }])
+    const transition = stage.to(layout(() => [transform({ x: 4 })]), { duration: 100 })
+
+    stage.destroy()
+
+    await expect(transition).resolves.toBe(false)
+    expect(requestAnimationFrame).toHaveBeenCalledOnce()
+  })
+
+  it('keeps streaming effect time stable while paused', async () => {
+    let now = 0
+    let frame: FrameRequestCallback | null = null
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
+    const stage = createStage()
+    const cards = currentCards()
+    await stage.setItems([{ id: 'a' }])
+    await stage.enterEffect(radialBurst(), { duration: 0 })
+
+    now = 500
+    const firstFrame = frame as FrameRequestCallback | null
+    firstFrame!(now)
+    expect(cards.setEffectTime).toHaveBeenLastCalledWith(0.5)
+    stage.pause()
+    now = 10_500
+    stage.resume()
+    const resumedFrame = frame as FrameRequestCallback | null
+    now = 11_000
+    resumedFrame!(now)
+
+    expect(cards.setEffectTime).toHaveBeenLastCalledWith(1)
+    stage.destroy()
+  })
+
   it('mounts extensions on isolated roots and updates them in the Stage frame loop', async () => {
     let frame: FrameRequestCallback | null = null
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {

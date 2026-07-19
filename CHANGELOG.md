@@ -2,6 +2,22 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)。日期使用 `YYYY-MM-DD`。
 
+## 1.12.0 - 2026-07-18
+
+Stage 单帧循环与暂停感知动画时钟。
+
+### Changed
+
+- 布局过渡不再创建独立 `requestAnimationFrame`，改由 Stage 主循环推进，卡片、过渡、流式特效和 extension 共享唯一 RAF。
+- 手动暂停、页面隐藏和 WebGL context loss 现在同时冻结布局过渡与流式特效时钟，恢复后从当前画面连续播放。
+- 新操作中断或 Stage 销毁会立即以 `false` 结算活动过渡，不再等待一个残留浏览器帧。
+
+### Compatibility
+
+- `to()`、`focusItems()`、`restoreLayout()` 和 `enterEffect()` 的签名及成功/中断返回值不变。
+- 正常前台播放的时长和 easing 保持兼容；变化仅涉及暂停期间不再消耗动画时间。
+- 没有新增依赖、公共入口或 Draw Call，Three.js 继续作为 peer dependency。
+
 ## 1.11.0 - 2026-07-16
 
 Stage extension 运行时控制、设备联动和逐扩展诊断。

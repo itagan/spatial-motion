@@ -59,6 +59,9 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 ## 生命周期与并发
 
 - 新布局或新 Timeline 会使旧动画失效，旧回调不能覆盖新状态。
+- 布局过渡、内置流式特效和 Stage extension 由同一个 Stage `requestAnimationFrame` 驱动；启动过渡不会创建额外动画循环。
+- `pause()`、页面隐藏与 WebGL context loss 会冻结布局过渡和流式特效的 elapsed；恢复后从暂停画面继续，不把后台停留时间计入动画。
+- 被新操作中断或随 Stage 销毁的布局过渡会立即以 `false` 结算，不依赖后续浏览器帧清理残留回调。
 - 图片与自定义异步绘制使用 token 保护；过期结果不应用到当前图集。
 - `destroy()` 幂等并释放监听器、Observer、纹理、几何体、材质和 WebGLRenderer；其他 API 在销毁后抛错。
 - `transition` 可设置 Stage 默认 duration/easing，单次调用仍可覆盖；数据更新同样透传 easing。

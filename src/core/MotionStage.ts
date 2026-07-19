@@ -160,6 +160,27 @@ interface StageExtensionRecord {
   lastError: string | null
 }
 
+interface ActiveTransition {
+  from: Transform[]
+  to: Transform[]
+  elapsedMs: number
+  lastUpdatedAt: number
+  duration: number
+  easing: (value: number) => number
+  fromBillboard: number
+  toBillboard: number
+  fromHideBackHemisphere: number
+  toHideBackHemisphere: number
+  resolve: (completed: boolean) => void
+}
+
+interface ActiveEffect {
+  effect: StreamingEffect
+  gpuData: StreamingEffectGpuData
+  elapsedSeconds: number
+  lastUpdatedAt: number
+}
+
 export class MotionStage {
   private readonly scene = new Scene()
   private readonly camera: PerspectiveCamera
@@ -177,23 +198,8 @@ export class MotionStage {
   private rotateY = 0
   private rotateSpeedX = 0
   private rotateSpeedY = 0
-  private transitionToken = 0
-  private activeTransition: {
-    from: Transform[]
-    to: Transform[]
-    startedAt: number
-    duration: number
-    easing: (value: number) => number
-    fromBillboard: number
-    toBillboard: number
-    fromHideBackHemisphere: number
-    toHideBackHemisphere: number
-  } | null = null
-  private activeEffect: {
-    effect: StreamingEffect
-    gpuData: StreamingEffectGpuData
-    startedAt: number
-  } | null = null
+  private activeTransition: ActiveTransition | null = null
+  private activeEffect: ActiveEffect | null = null
   private quality: QualityLevel
   private performanceManager: AdaptivePerformanceManager
   private qualityMode: QualityMode
@@ -286,8 +292,7 @@ export class MotionStage {
 
   private async setItemsInternal(items: MotionItem[]): Promise<void> {
     const token = ++this.itemsToken
-    this.transitionToken += 1
-    this.activeTransition = null
+    this.cancelActiveTransition()
     this.activeEffect = null
     this.cards.disableEffect()
     const maxItems = qualityProfiles[this.quality].maxVisibleItems
@@ -325,7 +330,7 @@ export class MotionStage {
       this.activeEffect = null
       this.cards.disableEffect()
     }
-    const token = ++this.transitionToken
+    this.cancelActiveTransition()
     const from = this.transforms
     const calculationStartedAt = performance.now()
     const target = layout.calculate(this.items.length, this.context())
@@ -349,17 +354,6 @@ export class MotionStage {
       this.cards.setTransforms(target)
       return true
     }
-    this.activeTransition = {
-      from,
-      to: target,
-      startedAt: now,
-      duration,
-      easing: ease,
-      fromBillboard: visualState.billboard,
-      toBillboard: targetBillboard,
-      fromHideBackHemisphere: visualState.hideBackHemisphere,
-      toHideBackHemisphere: targetHideBack,
-    }
     this.cards.prepareTransition(
       from,
       target,
@@ -369,19 +363,19 @@ export class MotionStage {
       targetHideBack,
     )
     return new Promise<boolean>((resolve) => {
-      const update = (frameTime: number) => {
-        if (token !== this.transitionToken) return resolve(false)
-        const progress = Math.min(1, (frameTime - now) / duration)
-        const eased = ease(progress)
-        this.cards.setProgress(eased)
-        if (progress < 1) requestAnimationFrame(update)
-        else {
-          this.transforms = target
-          this.activeTransition = null
-          resolve(true)
-        }
+      this.activeTransition = {
+        from,
+        to: target,
+        elapsedMs: 0,
+        lastUpdatedAt: now,
+        duration,
+        easing: ease,
+        fromBillboard: visualState.billboard,
+        toBillboard: targetBillboard,
+        fromHideBackHemisphere: visualState.hideBackHemisphere,
+        toHideBackHemisphere: targetHideBack,
+        resolve,
       }
-      requestAnimationFrame(update)
     })
   }
 
@@ -421,7 +415,7 @@ export class MotionStage {
     }
     const gpuData = effect.getGpuData()
     this.cards.enableEffect(gpuData)
-    this.activeEffect = { effect, gpuData, startedAt: performance.now() }
+    this.activeEffect = { effect, gpuData, elapsedSeconds: 0, lastUpdatedAt: performance.now() }
     return true
   }
 
@@ -536,8 +530,7 @@ export class MotionStage {
     const current = this.resolveCurrentTransforms(now)
     const previousById = new Map(this.items.map((item, index) => [item.id, current[index]]))
     const token = ++this.itemsToken
-    this.transitionToken += 1
-    this.activeTransition = null
+    this.cancelActiveTransition()
     this.activeEffect = null
     this.cards.disableEffect()
     this.transforms = current
@@ -837,7 +830,7 @@ export class MotionStage {
     if (this.destroyed) return
     this.destroyed = true
     this.itemsToken += 1
-    this.transitionToken += 1
+    this.cancelActiveTransition()
     cancelAnimationFrame(this.frameId)
     this.frameId = 0
     this.resizeObserver.disconnect()
@@ -960,12 +953,12 @@ export class MotionStage {
     if (this.activeEffect) {
       return this.activeEffect.effect.calculateTransforms(
         this.items.length,
-        Math.max(0, (now - this.activeEffect.startedAt) / 1000),
+        this.effectElapsedSeconds(this.activeEffect, now),
       )
     }
     if (!this.activeTransition) return this.transforms.map((transform) => ({ ...transform }))
-    const { from, to, startedAt, duration, easing: transitionEasing } = this.activeTransition
-    const progress = transitionEasing(Math.min(1, Math.max(0, (now - startedAt) / duration)))
+    const { from, to, easing: transitionEasing } = this.activeTransition
+    const progress = transitionEasing(this.transitionProgress(this.activeTransition, now))
     return to.map((transform, index) =>
       interpolateTransform(from[index] ?? identityTransform(), transform, progress),
     )
@@ -980,7 +973,7 @@ export class MotionStage {
       }
     }
     const transition = this.activeTransition
-    const progress = transition.easing(Math.min(1, Math.max(0, (now - transition.startedAt) / transition.duration)))
+    const progress = transition.easing(this.transitionProgress(transition, now))
     return {
       billboard: transition.fromBillboard
         + (transition.toBillboard - transition.fromBillboard) * progress,
@@ -989,11 +982,42 @@ export class MotionStage {
     }
   }
 
+  private transitionProgress(transition: ActiveTransition, now: number): number {
+    const pendingMs = this.isPaused() ? 0 : Math.max(0, now - transition.lastUpdatedAt)
+    return Math.min(1, (transition.elapsedMs + pendingMs) / transition.duration)
+  }
+
+  private effectElapsedSeconds(effect: ActiveEffect, now: number): number {
+    const pendingSeconds = this.isPaused() ? 0 : Math.max(0, now - effect.lastUpdatedAt) / 1000
+    return effect.elapsedSeconds + pendingSeconds
+  }
+
+  private advanceTransition(now: number): void {
+    const transition = this.activeTransition
+    if (!transition) return
+    transition.elapsedMs += Math.max(0, now - transition.lastUpdatedAt)
+    transition.lastUpdatedAt = now
+    const progress = Math.min(1, transition.elapsedMs / transition.duration)
+    this.cards.setProgress(transition.easing(progress))
+    if (progress < 1) return
+    this.transforms = transition.to
+    this.activeTransition = null
+    transition.resolve(true)
+  }
+
+  private cancelActiveTransition(): void {
+    const transition = this.activeTransition
+    if (!transition) return
+    this.activeTransition = null
+    transition.resolve(false)
+  }
+
   private readonly render = (now: number) => {
     const frameCpuStartedAt = performance.now()
     const rawFrameMs = now - this.lastFrame || 0
     const delta = Math.min(0.05, rawFrameMs / 1000)
     this.lastFrame = now
+    this.advanceTransition(now)
     const nextQuality = this.performanceManager.recordFrame(
       rawFrameMs,
       now,
@@ -1004,7 +1028,9 @@ export class MotionStage {
     this.rotateY += this.rotateSpeedY * delta
     this.cards.setGroupRotation(this.rotateX, this.rotateY)
     if (this.activeEffect) {
-      this.cards.setEffectTime(Math.max(0, (now - this.activeEffect.startedAt) / 1000))
+      this.activeEffect.elapsedSeconds += Math.max(0, now - this.activeEffect.lastUpdatedAt) / 1000
+      this.activeEffect.lastUpdatedAt = now
+      this.cards.setEffectTime(this.activeEffect.elapsedSeconds)
     }
     this.updateExtensions(delta)
     this.frameCpuMs = performance.now() - frameCpuStartedAt
@@ -1021,11 +1047,13 @@ export class MotionStage {
     this.cards.setVisibleRatio(visibleRatios[quality])
     this.visibleRatio = visibleRatios[quality]
     if (this.activeEffect) {
-      const elapsedSeconds = Math.max(0, (performance.now() - this.activeEffect.startedAt) / 1000)
+      const now = performance.now()
+      this.activeEffect.elapsedSeconds = this.effectElapsedSeconds(this.activeEffect, now)
+      this.activeEffect.lastUpdatedAt = now
       this.activeEffect.effect.prepare(this.items.length, profile.maxActiveEffectItems)
       this.activeEffect.gpuData = this.activeEffect.effect.getGpuData()
       this.cards.enableEffect(this.activeEffect.gpuData)
-      this.cards.setEffectTime(elapsedSeconds)
+      this.cards.setEffectTime(this.activeEffect.elapsedSeconds)
     }
     this.notifyExtensions('qualityChange', quality)
     this.resizeInternal()
@@ -1042,7 +1070,10 @@ export class MotionStage {
   private startRenderLoop(): void {
     if (this.destroyed || this.isPaused() || this.frameId) return
     this.setExtensionsPaused(false)
-    this.lastFrame = performance.now()
+    const now = performance.now()
+    this.lastFrame = now
+    if (this.activeTransition) this.activeTransition.lastUpdatedAt = now
+    if (this.activeEffect) this.activeEffect.lastUpdatedAt = now
     this.frameId = requestAnimationFrame(this.render)
   }
 

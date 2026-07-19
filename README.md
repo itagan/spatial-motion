@@ -12,6 +12,7 @@
 - 动画过程中 CPU 每帧仅更新一个进度 uniform
 - 自动旋转和串行 Timeline
 - 新布局可中断当前过渡，并自动终止已失效的 Timeline
+- 布局过渡、流式特效和扩展共享单一 Stage RAF，并使用排除暂停时间的统一时钟
 - GPU 时空隧道、线性发射、漩涡和径向爆发固定实例对象池
 - 统一 `enterEffect()` 入口，特效可直接插入 Timeline 并从当前帧回归任意布局
 - 特效活跃数量独立于数据池大小，并随质量档位限制，超额实例进入休眠
@@ -34,7 +35,7 @@
 - Sphere 等面积/球带、Cylinder 圆弧、Ring 分配、Box 选面和 Cone 圆台等高级布局参数
 - 受控 Stage extension 生命周期，可安全挂载原生 Three.js 内容并接入 GSAP 等外部动画库
 
-源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.11.0 扩展运行时完善阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.12.0 动画时钟加固阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
 
 ## 项目文档
 
@@ -238,7 +239,7 @@ await stage.to(grid({ fit: 'cover' }))   // 铺满相机可视范围
 
 低动态模式会立即完成布局切换、停止自动旋转，并把流式特效固定为确定性的静态首帧。`full` 可强制保留动画，`reduced` 可强制使用低动态行为。
 
-页面隐藏时 Stage 会自动停止 `requestAnimationFrame`，恢复可见时重置帧时间再继续，后台停留时间不会污染性能样本。
+页面隐藏时 Stage 会自动停止唯一的 `requestAnimationFrame`，布局过渡、流式特效和扩展时钟同时冻结；恢复可见时从当前画面继续，后台停留时间不会造成动画跳跃或污染性能样本。手动 `pause()` 和 WebGL context loss 使用相同的时钟语义。
 
 浏览器报告 WebGL context loss 时 Stage 会阻止默认销毁行为并暂停循环；context restored 后图集会重新标记上传并恢复运行。`getPerformanceStats().contextLost` 可用于状态面板。若此前由用户主动暂停，context 恢复不会越过该暂停状态。
 
