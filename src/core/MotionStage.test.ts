@@ -261,6 +261,77 @@ describe('MotionStage', () => {
     visibilitySpy.mockRestore()
   })
 
+  it('drives transitions from the Stage frame loop and excludes paused time', async () => {
+    let now = 0
+    let frame: FrameRequestCallback | null = null
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return requestFrame.mock.calls.length
+    })
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    const stage = createStage()
+    const cards = currentCards()
+    await stage.setItems([{ id: 'a' }])
+
+    const transition = stage.to(layout(() => [transform({ x: 4 })]), { duration: 100 })
+    expect(requestFrame).toHaveBeenCalledOnce()
+    const firstFrame = frame as FrameRequestCallback | null
+    now = 50
+    firstFrame!(now)
+    expect(cards.setProgress.mock.calls.at(-1)?.[0]).toBeCloseTo(0.5)
+
+    stage.pause()
+    now = 1050
+    stage.resume()
+    const resumedFrame = frame as FrameRequestCallback | null
+    now = 1100
+    resumedFrame!(now)
+
+    await expect(transition).resolves.toBe(true)
+    expect(cards.setProgress).toHaveBeenLastCalledWith(1)
+    stage.destroy()
+  })
+
+  it('settles an active transition immediately when the Stage is destroyed', async () => {
+    const stage = createStage()
+    await stage.setItems([{ id: 'a' }])
+    const transition = stage.to(layout(() => [transform({ x: 4 })]), { duration: 100 })
+
+    stage.destroy()
+
+    await expect(transition).resolves.toBe(false)
+    expect(requestAnimationFrame).toHaveBeenCalledOnce()
+  })
+
+  it('keeps streaming effect time stable while paused', async () => {
+    let now = 0
+    let frame: FrameRequestCallback | null = null
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
+    const stage = createStage()
+    const cards = currentCards()
+    await stage.setItems([{ id: 'a' }])
+    await stage.enterEffect(radialBurst(), { duration: 0 })
+
+    now = 500
+    const firstFrame = frame as FrameRequestCallback | null
+    firstFrame!(now)
+    expect(cards.setEffectTime).toHaveBeenLastCalledWith(0.5)
+    stage.pause()
+    now = 10_500
+    stage.resume()
+    const resumedFrame = frame as FrameRequestCallback | null
+    now = 11_000
+    resumedFrame!(now)
+
+    expect(cards.setEffectTime).toHaveBeenLastCalledWith(1)
+    stage.destroy()
+  })
+
   it('mounts extensions on isolated roots and updates them in the Stage frame loop', async () => {
     let frame: FrameRequestCallback | null = null
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
@@ -327,6 +398,186 @@ describe('MotionStage', () => {
     stage.destroy()
   })
 
+  it('disables and enables an extension without disposing its resources', async () => {
+    let frame: FrameRequestCallback | null = null
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
+    let context: StageExtensionContext | null = null
+    const update = vi.fn()
+    const resize = vi.fn()
+    const pause = vi.fn()
+    const resume = vi.fn()
+    const dispose = vi.fn()
+    const stage = createStage()
+    const handle = await stage.addExtension({
+      mount(value) { context = value },
+      update,
+      resize,
+      pause,
+      resume,
+      dispose,
+    })
+
+    const firstFrame = frame as FrameRequestCallback | null
+    firstFrame!(1000)
+    expect(update).toHaveBeenCalledOnce()
+    handle.disable()
+    handle.disable()
+    expect(handle.enabled).toBe(false)
+    expect((context as StageExtensionContext | null)?.root.visible).toBe(false)
+    expect(pause).toHaveBeenCalledOnce()
+    expect(dispose).not.toHaveBeenCalled()
+
+    const disabledFrame = frame as FrameRequestCallback | null
+    disabledFrame!(1016)
+    expect(update).toHaveBeenCalledOnce()
+    stage.pause()
+    stage.resume()
+    expect(pause).toHaveBeenCalledOnce()
+    expect(resume).not.toHaveBeenCalled()
+    handle.enable()
+    handle.enable()
+    expect(handle.enabled).toBe(true)
+    expect((context as StageExtensionContext | null)?.root.visible).toBe(true)
+    expect(resume).toHaveBeenCalledOnce()
+    expect(resize).toHaveBeenCalledTimes(2)
+
+    const enabledFrame = frame as FrameRequestCallback | null
+    enabledFrame!(1032)
+    expect(update).toHaveBeenCalledTimes(2)
+    handle.remove()
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(handle.enabled).toBe(false)
+    stage.destroy()
+  })
+
+  it('runs extension callbacks by order and retains mount order for ties', async () => {
+    let frame: FrameRequestCallback | null = null
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
+    const events: string[] = []
+    const stage = createStage()
+    const createOrderedExtension = (name: string, order: number) => ({
+      name,
+      order,
+      mount: vi.fn(),
+      update: () => events.push(`update:${name}`),
+      resize: () => events.push(`resize:${name}`),
+      pause: () => events.push(`pause:${name}`),
+      resume: () => events.push(`resume:${name}`),
+      dispose: () => events.push(`dispose:${name}`),
+    })
+    await stage.addExtension(createOrderedExtension('later-a', 10))
+    await stage.addExtension(createOrderedExtension('first', -1))
+    await stage.addExtension(createOrderedExtension('later-b', 10))
+
+    events.length = 0
+    stage.resize()
+    expect(events).toEqual(['resize:first', 'resize:later-a', 'resize:later-b'])
+    events.length = 0
+    const renderFrame = frame as FrameRequestCallback | null
+    renderFrame!(1000)
+    expect(events).toEqual(['update:first', 'update:later-a', 'update:later-b'])
+    events.length = 0
+    stage.pause()
+    expect(events).toEqual(['pause:first', 'pause:later-a', 'pause:later-b'])
+    events.length = 0
+    stage.resume()
+    expect(events).toEqual(['resume:first', 'resume:later-a', 'resume:later-b'])
+    events.length = 0
+    stage.destroy()
+    expect(events).toEqual(['dispose:first', 'dispose:later-a', 'dispose:later-b'])
+  })
+
+  it('notifies extensions about current and changed quality and reduced motion', async () => {
+    let motionListener: ((event: { matches: boolean }) => void) | null = null
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false,
+      addEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => {
+        motionListener = listener
+      },
+      removeEventListener: vi.fn(),
+    })))
+    const qualityChange = vi.fn()
+    const reducedMotionChange = vi.fn()
+    const stage = createStage()
+    const handle = await stage.addExtension({ mount: vi.fn(), qualityChange, reducedMotionChange })
+
+    expect(qualityChange).toHaveBeenCalledWith('high')
+    expect(reducedMotionChange).toHaveBeenCalledWith(false)
+    handle.disable()
+    stage.setQuality('low')
+    ;(motionListener as ((event: { matches: boolean }) => void) | null)?.({ matches: true })
+    ;(motionListener as ((event: { matches: boolean }) => void) | null)?.({ matches: false })
+    expect(qualityChange).toHaveBeenLastCalledWith('low')
+    expect(reducedMotionChange.mock.calls.map(([value]) => value)).toEqual([false, true, false])
+    stage.destroy()
+  })
+
+  it('reports bounded per-extension timing diagnostics and distinguishes duplicate names', async () => {
+    let frame: FrameRequestCallback | null = null
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => {
+      now += 3
+      return now
+    })
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
+    const stage = createStage()
+    const first = await stage.addExtension({ name: 'duplicate', mount: vi.fn(), update: vi.fn() })
+    await stage.addExtension({ name: 'duplicate', order: -2, mount: vi.fn(), update: vi.fn() })
+
+    const firstFrame = frame as FrameRequestCallback | null
+    firstFrame!(1000)
+    const secondFrame = frame as FrameRequestCallback | null
+    secondFrame!(1016)
+    const activeStats = stage.getExtensionStats()
+    expect(activeStats.map(({ name }) => name)).toEqual(['duplicate', 'duplicate'])
+    expect(new Set(activeStats.map(({ id }) => id)).size).toBe(2)
+    expect(activeStats[0]).toMatchObject({
+      order: -2,
+      active: true,
+      enabled: true,
+      updateCalls: 2,
+      averageUpdateMs: 3,
+      updateTimeP95: 3,
+      updateTimeP99: 3,
+      maximumUpdateMs: 3,
+      slowFrames: 2,
+      errorCount: 0,
+      lastError: null,
+    })
+
+    first.remove()
+    expect(stage.getExtensionStats().at(-1)).toMatchObject({
+      name: 'duplicate',
+      active: false,
+      enabled: false,
+    })
+    stage.destroy()
+  })
+
+  it('bounds disposed extension diagnostics without retaining an unbounded history', async () => {
+    const stage = createStage()
+    for (let index = 0; index < 25; index += 1) {
+      const handle = await stage.addExtension({ name: `history-${index}`, mount: vi.fn() })
+      handle.remove()
+    }
+
+    const history = stage.getExtensionStats()
+    expect(history).toHaveLength(20)
+    expect(history[0].name).toBe('history-24')
+    expect(history.at(-1)?.name).toBe('history-5')
+    expect(history.every(({ active }) => !active)).toBe(true)
+    stage.destroy()
+  })
+
   it('forwards effective pause and resume transitions exactly once', async () => {
     let visibility: DocumentVisibilityState = 'visible'
     const visibilitySpy = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
@@ -375,6 +626,9 @@ describe('MotionStage', () => {
     expect(dispose).toHaveBeenCalledOnce()
     expect(handle.active).toBe(false)
     expect(stage.getPerformanceStats().extensions).toBe(0)
+    expect(stage.getExtensionStats()).toEqual([
+      expect.objectContaining({ active: false, errorCount: 1, lastError: 'extension update failed' }),
+    ])
     expect(renderer.render).toHaveBeenCalledOnce()
     stage.destroy()
   })

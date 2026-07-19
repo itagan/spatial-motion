@@ -20,6 +20,7 @@ import type {
   StageExtension,
   StageExtensionContext,
   StageExtensionHandle,
+  StageExtensionStats,
   StageViewport,
 } from './extensions.js'
 import { TunnelEffect } from '../effects/TunnelEffect.js'
@@ -136,15 +137,48 @@ export interface StagePerformanceEnvironment {
 }
 
 interface StageExtensionRecord {
+  id: number
+  order: number
+  sequence: number
   extension: StageExtension
   root: Group
   abortController: AbortController
   active: boolean
+  enabled: boolean
   mounted: boolean
   disposed: boolean
+  archived: boolean
   paused: boolean
   hasUpdated: boolean
   elapsed: number
+  updateCalls: number
+  updateTotalMs: number
+  updateSamples: number[]
+  maximumUpdateMs: number
+  slowFrames: number
+  errorCount: number
+  lastError: string | null
+}
+
+interface ActiveTransition {
+  from: Transform[]
+  to: Transform[]
+  elapsedMs: number
+  lastUpdatedAt: number
+  duration: number
+  easing: (value: number) => number
+  fromBillboard: number
+  toBillboard: number
+  fromHideBackHemisphere: number
+  toHideBackHemisphere: number
+  resolve: (completed: boolean) => void
+}
+
+interface ActiveEffect {
+  effect: StreamingEffect
+  gpuData: StreamingEffectGpuData
+  elapsedSeconds: number
+  lastUpdatedAt: number
 }
 
 export class MotionStage {
@@ -164,23 +198,8 @@ export class MotionStage {
   private rotateY = 0
   private rotateSpeedX = 0
   private rotateSpeedY = 0
-  private transitionToken = 0
-  private activeTransition: {
-    from: Transform[]
-    to: Transform[]
-    startedAt: number
-    duration: number
-    easing: (value: number) => number
-    fromBillboard: number
-    toBillboard: number
-    fromHideBackHemisphere: number
-    toHideBackHemisphere: number
-  } | null = null
-  private activeEffect: {
-    effect: StreamingEffect
-    gpuData: StreamingEffectGpuData
-    startedAt: number
-  } | null = null
+  private activeTransition: ActiveTransition | null = null
+  private activeEffect: ActiveEffect | null = null
   private quality: QualityLevel
   private performanceManager: AdaptivePerformanceManager
   private qualityMode: QualityMode
@@ -212,7 +231,9 @@ export class MotionStage {
   } | null = null
   private itemUpdateChain: Promise<unknown> = Promise.resolve()
   private readonly extensions = new Set<StageExtensionRecord>()
+  private readonly extensionHistory: StageExtensionStats[] = []
   private extensionUpdateMs = 0
+  private extensionSequence = 0
 
   constructor(private readonly options: MotionStageOptions) {
     this.motionPreference = options.motionPreference ?? 'auto'
@@ -271,8 +292,7 @@ export class MotionStage {
 
   private async setItemsInternal(items: MotionItem[]): Promise<void> {
     const token = ++this.itemsToken
-    this.transitionToken += 1
-    this.activeTransition = null
+    this.cancelActiveTransition()
     this.activeEffect = null
     this.cards.disableEffect()
     const maxItems = qualityProfiles[this.quality].maxVisibleItems
@@ -310,7 +330,7 @@ export class MotionStage {
       this.activeEffect = null
       this.cards.disableEffect()
     }
-    const token = ++this.transitionToken
+    this.cancelActiveTransition()
     const from = this.transforms
     const calculationStartedAt = performance.now()
     const target = layout.calculate(this.items.length, this.context())
@@ -334,17 +354,6 @@ export class MotionStage {
       this.cards.setTransforms(target)
       return true
     }
-    this.activeTransition = {
-      from,
-      to: target,
-      startedAt: now,
-      duration,
-      easing: ease,
-      fromBillboard: visualState.billboard,
-      toBillboard: targetBillboard,
-      fromHideBackHemisphere: visualState.hideBackHemisphere,
-      toHideBackHemisphere: targetHideBack,
-    }
     this.cards.prepareTransition(
       from,
       target,
@@ -354,19 +363,19 @@ export class MotionStage {
       targetHideBack,
     )
     return new Promise<boolean>((resolve) => {
-      const update = (frameTime: number) => {
-        if (token !== this.transitionToken) return resolve(false)
-        const progress = Math.min(1, (frameTime - now) / duration)
-        const eased = ease(progress)
-        this.cards.setProgress(eased)
-        if (progress < 1) requestAnimationFrame(update)
-        else {
-          this.transforms = target
-          this.activeTransition = null
-          resolve(true)
-        }
+      this.activeTransition = {
+        from,
+        to: target,
+        elapsedMs: 0,
+        lastUpdatedAt: now,
+        duration,
+        easing: ease,
+        fromBillboard: visualState.billboard,
+        toBillboard: targetBillboard,
+        fromHideBackHemisphere: visualState.hideBackHemisphere,
+        toHideBackHemisphere: targetHideBack,
+        resolve,
       }
-      requestAnimationFrame(update)
     })
   }
 
@@ -406,7 +415,7 @@ export class MotionStage {
     }
     const gpuData = effect.getGpuData()
     this.cards.enableEffect(gpuData)
-    this.activeEffect = { effect, gpuData, startedAt: performance.now() }
+    this.activeEffect = { effect, gpuData, elapsedSeconds: 0, lastUpdatedAt: performance.now() }
     return true
   }
 
@@ -521,8 +530,7 @@ export class MotionStage {
     const current = this.resolveCurrentTransforms(now)
     const previousById = new Map(this.items.map((item, index) => [item.id, current[index]]))
     const token = ++this.itemsToken
-    this.transitionToken += 1
-    this.activeTransition = null
+    this.cancelActiveTransition()
     this.activeEffect = null
     this.cards.disableEffect()
     this.transforms = current
@@ -733,16 +741,29 @@ export class MotionStage {
 
     const root = new Group()
     root.name = `SpatialMotionExtension:${extension.name ?? 'anonymous'}`
+    const sequence = this.extensionSequence++
     const record: StageExtensionRecord = {
+      id: sequence + 1,
+      order: Number.isFinite(extension.order) ? extension.order as number : 0,
+      sequence,
       extension,
       root,
       abortController: new AbortController(),
       active: true,
+      enabled: true,
       mounted: false,
       disposed: false,
+      archived: false,
       paused: false,
       hasUpdated: false,
       elapsed: 0,
+      updateCalls: 0,
+      updateTotalMs: 0,
+      updateSamples: [],
+      maximumUpdateMs: 0,
+      slowFrames: 0,
+      errorCount: 0,
+      lastError: null,
     }
     this.extensions.add(record)
     this.scene.add(root)
@@ -760,13 +781,13 @@ export class MotionStage {
         this.disposeExtensionRecord(record)
         throw new Error('MotionStage was destroyed or the extension was removed during mount')
       }
+      extension.qualityChange?.(this.quality)
+      extension.reducedMotionChange?.(this.reducedMotion)
       extension.resize?.(this.extensionViewport())
-      if (this.isPaused()) {
-        record.paused = true
-        extension.pause?.()
-      }
+      this.syncExtensionPaused(record)
     } catch (error) {
       const cancelled = !record.active || this.destroyed
+      if (!cancelled) this.recordExtensionError(record, error)
       record.mounted = true
       if (record.active) this.removeExtensionRecord(record)
       else this.disposeExtensionRecord(record)
@@ -776,6 +797,9 @@ export class MotionStage {
 
     return {
       get active() { return record.active },
+      get enabled() { return record.active && record.enabled },
+      enable: () => this.setExtensionEnabled(record, true),
+      disable: () => this.setExtensionEnabled(record, false),
       remove: () => this.removeExtensionRecord(record),
     }
   }
@@ -792,8 +816,8 @@ export class MotionStage {
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(width, height, false)
     const viewport = this.extensionViewport()
-    for (const record of [...this.extensions]) {
-      if (!record.active || !record.mounted || !record.extension.resize) continue
+    for (const record of this.orderedExtensions()) {
+      if (!record.active || !record.mounted || !record.enabled || !record.extension.resize) continue
       try {
         record.extension.resize(viewport)
       } catch (error) {
@@ -806,7 +830,7 @@ export class MotionStage {
     if (this.destroyed) return
     this.destroyed = true
     this.itemsToken += 1
-    this.transitionToken += 1
+    this.cancelActiveTransition()
     cancelAnimationFrame(this.frameId)
     this.frameId = 0
     this.resizeObserver.disconnect()
@@ -817,7 +841,7 @@ export class MotionStage {
     this.renderer.domElement.removeEventListener('pointerleave', this.handlePointerLeave)
     this.motionQuery?.removeEventListener('change', this.handleMotionPreferenceChange)
     document.removeEventListener('visibilitychange', this.handleVisibilityChange)
-    for (const extension of [...this.extensions]) this.removeExtensionRecord(extension)
+    for (const extension of this.orderedExtensions()) this.removeExtensionRecord(extension)
     this.cards.dispose()
     this.renderer.dispose()
     this.renderer.domElement.remove()
@@ -874,6 +898,14 @@ export class MotionStage {
     }
   }
 
+  getExtensionStats(): StageExtensionStats[] {
+    this.assertActive()
+    return [
+      ...this.orderedExtensions().map((record) => extensionStats(record)),
+      ...this.extensionHistory.map((stats) => ({ ...stats })),
+    ]
+  }
+
   getPerformanceEnvironment(): StagePerformanceEnvironment {
     this.assertActive()
     const context = this.renderer.getContext()
@@ -921,12 +953,12 @@ export class MotionStage {
     if (this.activeEffect) {
       return this.activeEffect.effect.calculateTransforms(
         this.items.length,
-        Math.max(0, (now - this.activeEffect.startedAt) / 1000),
+        this.effectElapsedSeconds(this.activeEffect, now),
       )
     }
     if (!this.activeTransition) return this.transforms.map((transform) => ({ ...transform }))
-    const { from, to, startedAt, duration, easing: transitionEasing } = this.activeTransition
-    const progress = transitionEasing(Math.min(1, Math.max(0, (now - startedAt) / duration)))
+    const { from, to, easing: transitionEasing } = this.activeTransition
+    const progress = transitionEasing(this.transitionProgress(this.activeTransition, now))
     return to.map((transform, index) =>
       interpolateTransform(from[index] ?? identityTransform(), transform, progress),
     )
@@ -941,7 +973,7 @@ export class MotionStage {
       }
     }
     const transition = this.activeTransition
-    const progress = transition.easing(Math.min(1, Math.max(0, (now - transition.startedAt) / transition.duration)))
+    const progress = transition.easing(this.transitionProgress(transition, now))
     return {
       billboard: transition.fromBillboard
         + (transition.toBillboard - transition.fromBillboard) * progress,
@@ -950,11 +982,42 @@ export class MotionStage {
     }
   }
 
+  private transitionProgress(transition: ActiveTransition, now: number): number {
+    const pendingMs = this.isPaused() ? 0 : Math.max(0, now - transition.lastUpdatedAt)
+    return Math.min(1, (transition.elapsedMs + pendingMs) / transition.duration)
+  }
+
+  private effectElapsedSeconds(effect: ActiveEffect, now: number): number {
+    const pendingSeconds = this.isPaused() ? 0 : Math.max(0, now - effect.lastUpdatedAt) / 1000
+    return effect.elapsedSeconds + pendingSeconds
+  }
+
+  private advanceTransition(now: number): void {
+    const transition = this.activeTransition
+    if (!transition) return
+    transition.elapsedMs += Math.max(0, now - transition.lastUpdatedAt)
+    transition.lastUpdatedAt = now
+    const progress = Math.min(1, transition.elapsedMs / transition.duration)
+    this.cards.setProgress(transition.easing(progress))
+    if (progress < 1) return
+    this.transforms = transition.to
+    this.activeTransition = null
+    transition.resolve(true)
+  }
+
+  private cancelActiveTransition(): void {
+    const transition = this.activeTransition
+    if (!transition) return
+    this.activeTransition = null
+    transition.resolve(false)
+  }
+
   private readonly render = (now: number) => {
     const frameCpuStartedAt = performance.now()
     const rawFrameMs = now - this.lastFrame || 0
     const delta = Math.min(0.05, rawFrameMs / 1000)
     this.lastFrame = now
+    this.advanceTransition(now)
     const nextQuality = this.performanceManager.recordFrame(
       rawFrameMs,
       now,
@@ -965,7 +1028,9 @@ export class MotionStage {
     this.rotateY += this.rotateSpeedY * delta
     this.cards.setGroupRotation(this.rotateX, this.rotateY)
     if (this.activeEffect) {
-      this.cards.setEffectTime(Math.max(0, (now - this.activeEffect.startedAt) / 1000))
+      this.activeEffect.elapsedSeconds += Math.max(0, now - this.activeEffect.lastUpdatedAt) / 1000
+      this.activeEffect.lastUpdatedAt = now
+      this.cards.setEffectTime(this.activeEffect.elapsedSeconds)
     }
     this.updateExtensions(delta)
     this.frameCpuMs = performance.now() - frameCpuStartedAt
@@ -982,12 +1047,15 @@ export class MotionStage {
     this.cards.setVisibleRatio(visibleRatios[quality])
     this.visibleRatio = visibleRatios[quality]
     if (this.activeEffect) {
-      const elapsedSeconds = Math.max(0, (performance.now() - this.activeEffect.startedAt) / 1000)
+      const now = performance.now()
+      this.activeEffect.elapsedSeconds = this.effectElapsedSeconds(this.activeEffect, now)
+      this.activeEffect.lastUpdatedAt = now
       this.activeEffect.effect.prepare(this.items.length, profile.maxActiveEffectItems)
       this.activeEffect.gpuData = this.activeEffect.effect.getGpuData()
       this.cards.enableEffect(this.activeEffect.gpuData)
-      this.cards.setEffectTime(elapsedSeconds)
+      this.cards.setEffectTime(this.activeEffect.elapsedSeconds)
     }
+    this.notifyExtensions('qualityChange', quality)
     this.resizeInternal()
     this.options.onQualityChange?.(quality, this.performanceManager.getStats())
   }
@@ -1002,7 +1070,10 @@ export class MotionStage {
   private startRenderLoop(): void {
     if (this.destroyed || this.isPaused() || this.frameId) return
     this.setExtensionsPaused(false)
-    this.lastFrame = performance.now()
+    const now = performance.now()
+    this.lastFrame = now
+    if (this.activeTransition) this.activeTransition.lastUpdatedAt = now
+    if (this.activeEffect) this.activeEffect.lastUpdatedAt = now
     this.frameId = requestAnimationFrame(this.render)
   }
 
@@ -1025,38 +1096,98 @@ export class MotionStage {
     }
   }
 
+  private orderedExtensions(): StageExtensionRecord[] {
+    return [...this.extensions].sort((left, right) =>
+      left.order - right.order || left.sequence - right.sequence)
+  }
+
+  private setExtensionEnabled(record: StageExtensionRecord, enabled: boolean): void {
+    if (!record.active || record.enabled === enabled) return
+    record.enabled = enabled
+    record.root.visible = enabled
+    if (enabled && record.mounted && record.extension.resize) {
+      try {
+        record.extension.resize(this.extensionViewport())
+      } catch (error) {
+        this.failExtension(record, error)
+        return
+      }
+    }
+    this.syncExtensionPaused(record)
+  }
+
+  private syncExtensionPaused(record: StageExtensionRecord, stagePaused = this.isPaused()): void {
+    if (!record.active || !record.mounted) return
+    const paused = stagePaused || !record.enabled
+    if (record.paused === paused) return
+    record.paused = paused
+    const callback = paused ? record.extension.pause : record.extension.resume
+    if (!callback) return
+    try {
+      callback.call(record.extension)
+    } catch (error) {
+      this.failExtension(record, error)
+    }
+  }
+
+  private notifyExtensions(
+    callbackName: 'qualityChange' | 'reducedMotionChange',
+    value: QualityLevel | boolean,
+  ): void {
+    for (const record of this.orderedExtensions()) {
+      if (!record.active || !record.mounted) continue
+      try {
+        if (callbackName === 'qualityChange') {
+          record.extension.qualityChange?.(value as QualityLevel)
+        } else {
+          record.extension.reducedMotionChange?.(value as boolean)
+        }
+      } catch (error) {
+        this.failExtension(record, error)
+      }
+    }
+  }
+
+  private recordExtensionUpdate(record: StageExtensionRecord, durationMs: number): void {
+    const duration = Math.max(0, durationMs)
+    record.updateCalls += 1
+    record.updateTotalMs += duration
+    record.maximumUpdateMs = Math.max(record.maximumUpdateMs, duration)
+    if (duration > SLOW_EXTENSION_UPDATE_MS) record.slowFrames += 1
+    record.updateSamples.push(duration)
+    if (record.updateSamples.length > EXTENSION_SAMPLE_LIMIT) record.updateSamples.shift()
+  }
+
+  private recordExtensionError(record: StageExtensionRecord, error: unknown): void {
+    record.errorCount += 1
+    record.lastError = error instanceof Error ? error.message : String(error)
+  }
+
   private updateExtensions(delta: number): void {
     const startedAt = performance.now()
-    for (const record of [...this.extensions]) {
-      if (!record.active || !record.mounted || !record.extension.update) continue
+    for (const record of this.orderedExtensions()) {
+      if (!record.active || !record.mounted || !record.enabled || !record.extension.update) continue
       const extensionDelta = record.hasUpdated ? delta : 0
       record.hasUpdated = true
       record.elapsed += extensionDelta
+      const extensionStartedAt = performance.now()
       try {
         record.extension.update({ elapsed: record.elapsed, delta: extensionDelta })
       } catch (error) {
         this.failExtension(record, error)
+      } finally {
+        this.recordExtensionUpdate(record, performance.now() - extensionStartedAt)
       }
     }
     this.extensionUpdateMs = performance.now() - startedAt
   }
 
   private setExtensionsPaused(paused: boolean): void {
-    for (const record of [...this.extensions]) {
-      if (!record.active || !record.mounted) continue
-      if (record.paused === paused) continue
-      record.paused = paused
-      const callback = paused ? record.extension.pause : record.extension.resume
-      if (!callback) continue
-      try {
-        callback.call(record.extension)
-      } catch (error) {
-        this.failExtension(record, error)
-      }
-    }
+    for (const record of this.orderedExtensions()) this.syncExtensionPaused(record, paused)
   }
 
   private failExtension(record: StageExtensionRecord, error: unknown): void {
+    this.recordExtensionError(record, error)
     this.removeExtensionRecord(record)
     this.reportExtensionError(error, record.extension)
   }
@@ -1076,10 +1207,19 @@ export class MotionStage {
     try {
       record.extension.dispose?.()
     } catch (error) {
+      this.recordExtensionError(record, error)
       this.reportExtensionError(error, record.extension)
     } finally {
       record.root.clear()
+      this.archiveExtensionRecord(record)
     }
+  }
+
+  private archiveExtensionRecord(record: StageExtensionRecord): void {
+    if (record.archived || record.active) return
+    record.archived = true
+    this.extensionHistory.unshift({ ...extensionStats(record), active: false, enabled: false })
+    if (this.extensionHistory.length > EXTENSION_HISTORY_LIMIT) this.extensionHistory.pop()
   }
 
   private reportExtensionError(error: unknown, extension: StageExtension): void {
@@ -1132,6 +1272,7 @@ export class MotionStage {
   private readonly handleMotionPreferenceChange = (event: MediaQueryListEvent) => {
     if (this.destroyed || this.motionPreference !== 'auto') return
     this.reducedMotion = event.matches
+    this.notifyExtensions('reducedMotionChange', this.reducedMotion)
     if (!this.reducedMotion) return
     this.stopRotation()
     if (!this.activeEffect) return
@@ -1182,6 +1323,34 @@ export class MotionStage {
 interface ScreenPoint {
   x: number
   y: number
+}
+
+const EXTENSION_SAMPLE_LIMIT = 120
+const EXTENSION_HISTORY_LIMIT = 20
+const SLOW_EXTENSION_UPDATE_MS = 2
+
+function extensionStats(record: StageExtensionRecord): StageExtensionStats {
+  const orderedSamples = [...record.updateSamples].sort((left, right) => left - right)
+  return {
+    id: record.id,
+    name: record.extension.name ?? 'anonymous',
+    order: record.order,
+    active: record.active,
+    enabled: record.active && record.enabled,
+    updateCalls: record.updateCalls,
+    averageUpdateMs: record.updateCalls ? record.updateTotalMs / record.updateCalls : 0,
+    updateTimeP95: percentile(orderedSamples, 0.95),
+    updateTimeP99: percentile(orderedSamples, 0.99),
+    maximumUpdateMs: record.maximumUpdateMs,
+    slowFrames: record.slowFrames,
+    errorCount: record.errorCount,
+    lastError: record.lastError,
+  }
+}
+
+function percentile(orderedValues: number[], fraction: number): number {
+  if (!orderedValues.length) return 0
+  return orderedValues[Math.min(orderedValues.length - 1, Math.floor(orderedValues.length * fraction))]
 }
 
 function isFrontFacing(corners: Vector3[], center: Vector3, cameraPosition: Vector3): boolean {

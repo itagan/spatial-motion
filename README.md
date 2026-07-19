@@ -12,6 +12,7 @@
 - 动画过程中 CPU 每帧仅更新一个进度 uniform
 - 自动旋转和串行 Timeline
 - 新布局可中断当前过渡，并自动终止已失效的 Timeline
+- 布局过渡、流式特效和扩展共享单一 Stage RAF，并使用排除暂停时间的统一时钟
 - GPU 时空隧道、线性发射、漩涡和径向爆发固定实例对象池
 - 统一 `enterEffect()` 入口，特效可直接插入 Timeline 并从当前帧回归任意布局
 - 特效活跃数量独立于数据池大小，并随质量档位限制，超额实例进入休眠
@@ -34,7 +35,7 @@
 - Sphere 等面积/球带、Cylinder 圆弧、Ring 分配、Box 选面和 Cone 圆台等高级布局参数
 - 受控 Stage extension 生命周期，可安全挂载原生 Three.js 内容并接入 GSAP 等外部动画库
 
-源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.10.0 集成示例阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.12.0 动画时钟加固阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
 
 ## 项目文档
 
@@ -191,6 +192,7 @@ import { Mesh, MeshBasicMaterial, TorusGeometry } from 'three'
 
 const extension: StageExtension = {
   name: 'orbit-ring',
+  order: 10,
   mount({ root, camera, signal }) {
     const geometry = new TorusGeometry(6, 0.03, 8, 96)
     const material = new MeshBasicMaterial({ color: 0x67e8f9 })
@@ -202,16 +204,22 @@ const extension: StageExtension = {
     // elapsed 不包含 Stage 暂停或页面隐藏的时间
   },
   resize({ width, height, pixelRatio }) {},
+  qualityChange(quality) {},
+  reducedMotionChange(reducedMotion) {},
   pause() {},
   resume() {},
   dispose() {}, // 扩展负责释放自己创建的 geometry/material/texture
 }
 
 const handle = await stage.addExtension(extension)
+handle.disable() // 暂停 update 并隐藏 root，不 dispose
+handle.enable()  // 从已有 elapsed 继续
 handle.remove() // 幂等；同时 abort signal、移除隔离 Group 并 dispose
 ```
 
 每个扩展只获得独立 `Group`、只读相机引用和取消信号。Stage 继续独占场景渲染循环；扩展不能访问内部卡片 Mesh 或 WebGLRenderer。`onExtensionError` 会收到生命周期错误，故障扩展会被隔离移除，其他扩展与卡片渲染继续运行。GSAP 等库应仅驱动扩展自己的对象，并通过 `update({ elapsed })` 对齐 Stage 时钟；核心包不依赖任何动画库。
+
+`stage.getExtensionStats()` 按 `order` 和挂载顺序返回活动扩展，并附带最近 20 个已释放扩展的纯数据快照。重复名称通过稳定 `id` 区分；诊断包括 enabled、update 次数、平均/P95/P99/最大耗时、超过 2ms 的慢帧、错误次数和最近错误文本。
 
 响应式平面、低动态偏好与悬停高亮：
 
@@ -231,7 +239,7 @@ await stage.to(grid({ fit: 'cover' }))   // 铺满相机可视范围
 
 低动态模式会立即完成布局切换、停止自动旋转，并把流式特效固定为确定性的静态首帧。`full` 可强制保留动画，`reduced` 可强制使用低动态行为。
 
-页面隐藏时 Stage 会自动停止 `requestAnimationFrame`，恢复可见时重置帧时间再继续，后台停留时间不会污染性能样本。
+页面隐藏时 Stage 会自动停止唯一的 `requestAnimationFrame`，布局过渡、流式特效和扩展时钟同时冻结；恢复可见时从当前画面继续，后台停留时间不会造成动画跳跃或污染性能样本。手动 `pause()` 和 WebGL context loss 使用相同的时钟语义。
 
 浏览器报告 WebGL context loss 时 Stage 会阻止默认销毁行为并暂停循环；context restored 后图集会重新标记上传并恢复运行。`getPerformanceStats().contextLost` 可用于状态面板。若此前由用户主动暂停，context 恢复不会越过该暂停状态。
 
@@ -365,8 +373,8 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 35.5 KB |
-| npm tarball | ≤ 150 KB | 148.1 KB |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 36.3 KB |
+| npm tarball | ≤ 150 KB | 约 139 KB |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 3.5 KB |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

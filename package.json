@@ -1,6 +1,6 @@
 {
   "name": "@itagan/spatial-motion",
-  "version": "1.10.0",
+  "version": "1.12.0",
   "description": "High-performance Three.js spatial card layouts and streaming effects for large-screen experiences.",
   "type": "module",
   "license": "MIT",
@@ -26,9 +26,9 @@
   "sideEffects": false,
   "files": [
     "dist",
-    "docs",
+    "docs/PUBLIC_API.md",
+    "docs/COMPATIBILITY.md",
     "README.md",
-    "ROADMAP.md",
     "CHANGELOG.md",
     "LICENSE"
   ],

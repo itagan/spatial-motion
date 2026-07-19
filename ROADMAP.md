@@ -1,6 +1,6 @@
 # Spatial Motion 路线图
 
-更新时间：2026-07-16
+更新时间：2026-07-18
 
 本文件用于让维护者和开发代理理解仓库已经走到哪里、接下来准备解决什么。它描述方向，不替代具体任务的验收标准；优先级发生变化时应先更新本文。
 
@@ -39,8 +39,10 @@
 - [x] **v1.8 高级布局生成**：Sphere 等面积/球带、Cylinder 圆弧、Ring 分配方向、Box 选面权重和 Cone 圆台。
 - [x] **v1.9 外部 3D 内容与动画扩展**：受控 Group 挂载、Stage 时钟更新、resize/pause/resume/dispose、错误隔离及 GSAP 示例。
 - [x] **v1.10 集成示例与仓库边界**：Vanilla、Three.js extension、GSAP 单场景示例及独立类型/构建验证。
+- [x] **v1.11 扩展运行时加固**：可逆启停、确定性优先级、质量/低动态通知和逐扩展有界诊断。
+- [x] **v1.12 动画时钟加固**：单一 Stage RAF、暂停感知布局/特效时钟和立即中断结算。
 
-以上状态以当前源码、测试、构建脚本和浏览器验收为依据。`package.json` 已推进到 `1.10.0`，但当前阶段不执行 npm publish、tag 或 GitHub Release。
+以上状态以当前源码、测试、构建脚本和浏览器验收为依据。`package.json` 已推进到 `1.12.0`，但当前阶段不执行 npm publish、tag 或 GitHub Release。
 
 ## 当前优化阶段
 
@@ -54,16 +56,24 @@
 - [x] **v1.8 高级布局生成**：深化五类生成算法，并将全部新增参数接入严格配置和实验室。
 - [x] **v1.9 外部 3D 内容与动画扩展**：在不开放 Renderer/卡片 Mesh 的前提下提供通用扩展生命周期。
 - [x] **v1.10 集成示例与仓库边界**：先建设独立 examples，不为目录拆分提前引入 monorepo 成本。
+- [x] **v1.11 扩展运行时加固**：在不开放 Renderer/Scene 的边界内补齐扩展启停、顺序和性能诊断。
+- [x] **v1.12 动画时钟加固**：消除布局过渡的额外 RAF，并让暂停、页面隐藏与 context loss 冻结全部 Stage 动画时间。
 
 本阶段明确暂停 npm 发布、Tag、GitHub Release、CSS3D 和框架适配器，把工程投入集中在可量化性能和现有效果质量。
 
-## 最近完成：v1.10 集成示例与仓库边界
+## 最近完成：v1.11 扩展运行时加固
 
-- [x] 建立 Vanilla、原生 Three.js extension 和 GSAP extension 三个可单独阅读/运行的示例。
-- [x] 示例从正式包名导入，并纳入严格类型检查、生产构建和 CI。
-- [x] `demo/` 继续承担综合联调，`examples/` 只承担单场景集成说明。
-- [x] 不引入 workspace；核心包、稳定入口、发布流程和 tarball 内容保持不变。
-- [x] 等出现首个独立适配器或扩展包时，再评估 npm workspaces monorepo。
+- [x] `StageExtensionHandle` 支持不释放资源的幂等 enable/disable，remove/destroy 仍负责最终释放。
+- [x] `order` 按数值和挂载顺序稳定执行 update、resize、pause/resume、通知与销毁。
+- [x] 扩展可接收当前及后续 quality/reduced-motion 状态，自行适配外部动画和画面复杂度。
+- [x] 逐扩展统计使用稳定 id、有界 120 样本窗口和最多 20 条无资源历史快照。
+- [x] Demo、独立示例、基准 JSON 和真实包消费者覆盖新增 API，继续保持单一 Stage RAF。
+
+## 最近完成：v1.12 动画时钟加固
+
+- [x] 布局过渡并入 Stage 主渲染循环，启动和中断过渡不再产生独立或残留 RAF。
+- [x] 手动暂停、页面隐藏和 WebGL context loss 冻结布局与流式特效 elapsed，恢复时排除暂停时长。
+- [x] 新布局、数据更新与 destroy 立即结算失效过渡，并以回归测试覆盖单 RAF、暂停连续性和销毁路径。
 
 ## 后续候选方向
 

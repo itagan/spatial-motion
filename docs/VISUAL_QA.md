@@ -83,6 +83,10 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 - [ ] resize 传入 CSS 尺寸与实际 pixel ratio；快速 add/remove 和 Stage destroy 后无残留对象或动画。
 - [ ] 任一扩展的 update/resize/pause/resume/dispose 抛错时，只移除故障扩展，卡片和其他扩展继续渲染。
 - [ ] benchmark 记录 1–5 个扩展的数量、update 耗时和额外 Draw Call；扩展不创建自己的 RAF 或 Renderer。
+- [ ] disable 后根节点隐藏、update 停止且 Draw Call 回落，enable 后在不重建资源的情况下恢复；remove 才最终 dispose。
+- [ ] 相同 `order` 保持挂载顺序，不同 `order` 的 update/resize/pause/resume/dispose 顺序稳定。
+- [ ] high/medium/low 与 Reduced Motion 切换会通知活动和已 disable 扩展，外部动画按示例策略降级或冻结。
+- [ ] 同名扩展仍具有不同诊断 id；移除后只保留有界纯数据历史，不保留 Group、信号或动画资源。
 
 ## 自动化覆盖
 
@@ -95,3 +99,5 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 2026-07-16 已完成 v1.8 桌面浏览器验收：Fibonacci Sphere、Box 前/右选面与权重、Cylinder 半圆展墙、Ring 等量顺时针和 Cone 圆台均可从预设生成并写入 URL，保持 60 FPS、1 Draw Call、1 Atlas，控制台无错误。500 steady 与 2000 transition-stress 均为 0 个 24/33/50ms 长帧；目标触控设备手势验收仍沿用上项待办。
 
 2026-07-16 已完成 v1.9 桌面浏览器验收：原生 Three.js 与 GSAP 扩展可单独/同时挂载，BOTH 模式为 2 个扩展、4 Draw Calls，移除后恢复 0 扩展、主体 1 Draw Call；Stage pause/resume 控件和动画恢复通过，控制台无错误。500 steady 与 2000 transition-stress 均保持约 60 FPS、扩展 update 最大 0.10ms，且为 0 个 24/33/50ms 长帧。
+
+2026-07-16 已完成 v1.11 桌面浏览器验收：主 Demo、原生 Three.js 示例和 GSAP 示例均可在不 dispose 的情况下停用/启用扩展；主 Demo 从 2/2 EXT、4 Draw Calls 降至 0/2 EXT、1 Draw Call，再恢复至 2/2 EXT、4 Draw Calls，暂停/恢复、质量切换与最终移除正常，控制台无错误。500 steady 与复测的 2000 transition-stress 均为 0 个 24/33/50ms 长帧；回调顺序、Reduced Motion、同名 id、历史上限和故障隔离由自动化测试覆盖。

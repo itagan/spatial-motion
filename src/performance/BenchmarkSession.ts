@@ -3,6 +3,7 @@ import type {
   StagePerformanceEnvironment,
   StagePerformanceStats,
 } from '../core/MotionStage.js'
+import type { StageExtensionStats } from '../core/extensions.js'
 
 export interface BenchmarkConfiguration {
   itemCount: number
@@ -15,6 +16,7 @@ export interface BenchmarkConfiguration {
 export interface BenchmarkSample {
   elapsedMs: number
   stats: StagePerformanceStats
+  extensionStats: StageExtensionStats[]
 }
 
 export interface BenchmarkResult {
@@ -61,6 +63,7 @@ export interface BenchmarkResult {
   renderedItems: number
   submittedItems: number
   visibleItems: number
+  extensionStats: StageExtensionStats[]
   samples: BenchmarkSample[]
 }
 
@@ -95,8 +98,16 @@ export class BenchmarkSession {
     private readonly startedAt = performance.now(),
   ) {}
 
-  record(stats: StagePerformanceStats, now = performance.now()): void {
-    this.samples.push({ elapsedMs: Math.max(0, now - this.startedAt), stats: { ...stats } })
+  record(
+    stats: StagePerformanceStats,
+    now = performance.now(),
+    extensionStats: StageExtensionStats[] = [],
+  ): void {
+    this.samples.push({
+      elapsedMs: Math.max(0, now - this.startedAt),
+      stats: { ...stats },
+      extensionStats: extensionStats.map((entry) => ({ ...entry })),
+    })
   }
 
   finish(now = performance.now()): BenchmarkResult {
@@ -156,7 +167,12 @@ export class BenchmarkSession {
       renderedItems: latest?.renderedItems ?? 0,
       submittedItems: latest?.submittedItems ?? 0,
       visibleItems: latest?.visibleItems ?? 0,
-      samples: this.samples.map((sample) => ({ elapsedMs: sample.elapsedMs, stats: { ...sample.stats } })),
+      extensionStats: this.samples.at(-1)?.extensionStats.map((entry) => ({ ...entry })) ?? [],
+      samples: this.samples.map((sample) => ({
+        elapsedMs: sample.elapsedMs,
+        stats: { ...sample.stats },
+        extensionStats: sample.extensionStats.map((entry) => ({ ...entry })),
+      })),
     }
   }
 }
