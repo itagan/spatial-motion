@@ -101,3 +101,17 @@ Stage extension 与卡片、Timeline 和自适应质量共用同一 RAF；扩展
 相对 v1.9，500-item P95 从 18.50ms 增加 0.5%，2000-item P95 从 17.50ms 增加 5.1%，均低于 10% 回归门槛且未新增 33ms 长帧。主 Demo 启停扩展时 Draw Call 在 4 与 1 之间正确切换，两个独立示例也保持单一 Canvas/RAF，浏览器控制台无错误。
 
 最终包验证为 Library JavaScript gzip 37,207 bytes、npm tarball 141,968 bytes、layout-only 3,572 bytes，继续满足 40 KB / 150 KB / 8 KB 预算。为维持既有 tarball 上限，发布包只携带公共 API、兼容性、README、CHANGELOG 和许可证；路线图、开发/发布/视觉/优化记录及 examples 保留在源码仓库。
+
+## v1.13–v1.15 自动回归与异步管线验收
+
+v1.13 将 Benchmark JSON 固定为 version 1，并通过严格字段校验、方向感知阈值与 CLI 退出码形成自动回归门禁。六组预设覆盖 100/500/1000/2000 实例、low/medium/high/auto 和四类场景，默认门禁包含 Atlas build/patch；包消费者验证会真实安装 tarball、调用 `parseBenchmarkResult()`/`evaluateBenchmarkRegression()`，并以 `--preset` 执行安装后的 `spatial-motion-benchmark` 二进制。包体积继续由同一 `pack:check` 的 40/150/8 KB 硬阈值阻断。
+
+v1.14 的图片管线不改变纹理数量或 Draw Call：单次操作按 URL 去重，默认最多 6 个请求并发，每个 Stage 保留最多 128 个成功图片引用。自动化测试证明两个卡片共享 URL 只请求一次、后续 patch 命中缓存不再请求、并发上限为 2 时只启动两个 Image，以及 abort 会停止活动请求；A→B→A 并发回归证明中间图集不能覆盖最新请求。
+
+本阶段评估后未默认启用 `createImageBitmap`/OffscreenCanvas Worker：当前公共 `drawCard` 接收主线程 Canvas 2D 上下文，直接迁移 Worker 会破坏回调契约；ImageBitmap 还需要额外 close 生命周期和跨浏览器/CORS 实测。后续只有在 cold-start/atlas-update 基准证明解码或主线程绘制是主要瓶颈时，才考虑保持现有路径的可选实现。
+
+v1.15 的过渡、流式特效、Stage Timeline 和 extension 继续共享单个 Stage RAF。自动化测试覆盖 completed/interrupted/aborted/destroyed 完成原因、暂停感知进度、destroy 停止 Timeline 后续步骤，以及键盘焦点、方向导航和激活。上述变更没有增加卡片 Mesh 或内建特效 Draw Call。
+
+真实 Chromium/WebGL 2 验收中，500 items / high / cold-start / 3 秒保持平均 59.1 FPS、P95 18.20ms、1 Draw Call，完整图集构建 85.1ms；1000 items / high / atlas-update / 3 秒保持平均 60.0 FPS、P95 18.30ms、0 个 33ms 长帧、1 Draw Call，17 次局部更新累计 45.6ms、估算上传 272 KB。页面键盘实测可从首项移动到第 2/1000 项并同步无障碍标签，控制台无 error 日志。
+
+2026-07-19 最终包验证：Library JavaScript gzip 40,939 bytes、npm tarball 151,331 bytes、layout-only 3,572 bytes，仍满足 40 KB / 150 KB / 8 KB 硬预算。npm 包排除 `.d.ts.map`，但保留类型声明和 JavaScript source map；Three.js 继续保持 peer dependency。

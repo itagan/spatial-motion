@@ -296,12 +296,65 @@ describe('MotionStage', () => {
   it('settles an active transition immediately when the Stage is destroyed', async () => {
     const stage = createStage()
     await stage.setItems([{ id: 'a' }])
-    const transition = stage.to(layout(() => [transform({ x: 4 })]), { duration: 100 })
+    const transition = stage.startTransition(layout(() => [transform({ x: 4 })]), { duration: 100 })
 
     stage.destroy()
 
-    await expect(transition).resolves.toBe(false)
+    await expect(transition.finished).resolves.toEqual({ completed: false, status: 'destroyed' })
     expect(requestAnimationFrame).toHaveBeenCalledOnce()
+  })
+
+  it('exposes cancellable transition handles, progress, and completion reasons', async () => {
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const stage = createStage()
+    await stage.setItems([{ id: 'a' }])
+    const handle = stage.startTransition(layout(() => [transform({ x: 4 })], 'target'), { duration: 100 })
+
+    now = 40
+    expect(stage.getTransitionState()).toMatchObject({
+      active: true,
+      status: 'running',
+      layout: 'target',
+      progress: 0.4,
+    })
+    handle.cancel()
+
+    await expect(handle.finished).resolves.toEqual({ completed: false, status: 'aborted' })
+    expect(handle.status).toBe('aborted')
+    expect(stage.getTransitionState()).toMatchObject({ active: false, status: 'aborted', layout: 'target' })
+    const completed = stage.startTransition(layout(() => [transform({ x: 1 })], 'complete'), { duration: 0 })
+    await expect(completed.finished).resolves.toEqual({ completed: true, status: 'completed' })
+    expect(completed.status).toBe('completed')
+    stage.destroy()
+  })
+
+  it('accepts AbortSignal on the compatible Promise transition API', async () => {
+    const stage = createStage()
+    await stage.setItems([{ id: 'a' }])
+    const controller = new AbortController()
+    const transition = stage.to(layout(() => [transform({ x: 2 })], 'abortable'), {
+      duration: 100,
+      signal: controller.signal,
+    })
+
+    controller.abort()
+
+    await expect(transition).resolves.toBe(false)
+    expect(stage.getTransitionState().status).toBe('aborted')
+    stage.destroy()
+  })
+
+  it('distinguishes a newer layout interruption from explicit cancellation', async () => {
+    const stage = createStage()
+    await stage.setItems([{ id: 'a' }])
+    const first = stage.startTransition(layout(() => [transform({ x: -2 })], 'first'), { duration: 100 })
+
+    await stage.to(layout(() => [transform({ x: 2 })], 'second'), { duration: 0 })
+
+    await expect(first.finished).resolves.toEqual({ completed: false, status: 'interrupted' })
+    expect(stage.getTransitionState()).toMatchObject({ status: 'completed', layout: 'second', progress: 1 })
+    stage.destroy()
   })
 
   it('keeps streaming effect time stable while paused', async () => {
@@ -330,6 +383,44 @@ describe('MotionStage', () => {
 
     expect(cards.setEffectTime).toHaveBeenLastCalledWith(1)
     stage.destroy()
+  })
+
+  it('drives Timeline waits from the pause-aware Stage clock', async () => {
+    let now = 0
+    let frame: FrameRequestCallback | null = null
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
+    const stage = createStage()
+    const finalStep = vi.fn()
+    const playing = stage.timeline().wait(100).add(finalStep).play()
+    await Promise.resolve()
+
+    now = 50
+    ;(frame as FrameRequestCallback | null)!(now)
+    stage.pause()
+    now = 1050
+    stage.resume()
+    now = 1100
+    ;(frame as FrameRequestCallback | null)!(now)
+    await playing
+
+    expect(finalStep).toHaveBeenCalledOnce()
+    stage.destroy()
+  })
+
+  it('stops Stage Timeline steps that are waiting when destroyed', async () => {
+    const stage = createStage()
+    const finalStep = vi.fn()
+    const playing = stage.timeline().wait(10_000).add(finalStep).play()
+    await Promise.resolve()
+
+    stage.destroy()
+    await playing
+
+    expect(finalStep).not.toHaveBeenCalled()
   })
 
   it('mounts extensions on isolated roots and updates them in the Stage frame loop', async () => {
@@ -961,6 +1052,35 @@ describe('MotionStage', () => {
     canvas?.dispatchEvent(new PointerEvent('pointerleave'))
     expect(onItemHover).toHaveBeenLastCalledWith(null, null)
     expect(cards.setHoverIndex).toHaveBeenLastCalledWith(null)
+    stage.destroy()
+  })
+
+  it('supports keyboard focus, navigation, activation, and accessible labeling', async () => {
+    const onItemFocus = vi.fn()
+    const onItemClick = vi.fn()
+    const stage = createStage({ onItemFocus, onItemClick, ariaLabel: 'Guests' })
+    const cards = currentCards()
+    await stage.setItems([
+      { id: 'a', title: 'Alice' },
+      { id: 'b', title: 'Bob' },
+      { id: 'c', title: 'Carol' },
+    ])
+    const canvas = document.querySelector('canvas')!
+
+    expect(canvas.tabIndex).toBe(0)
+    expect(canvas.getAttribute('role')).toBe('region')
+    canvas.focus()
+    expect(stage.getFocusedItem()?.id).toBe('a')
+    expect(canvas.getAttribute('aria-label')).toContain('Alice (1 of 3)')
+    canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    expect(stage.getFocusedItem()?.id).toBe('b')
+    canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(onItemClick).toHaveBeenLastCalledWith({ id: 'b', title: 'Bob' }, 1)
+    expect(stage.focusItem('c')).toBe(true)
+    expect(cards.setHoverIndex).toHaveBeenLastCalledWith(2)
+    canvas.blur()
+    expect(stage.getFocusedItem()).toBeNull()
+    expect(onItemFocus).toHaveBeenLastCalledWith(null, null)
     stage.destroy()
   })
 

@@ -56,6 +56,7 @@ export interface Layout {
 export interface TransitionOptions {
   duration?: number
   easing?: EasingFunction
+  signal?: AbortSignal
 }
 
 export type EasingFunction = (value: number) => number

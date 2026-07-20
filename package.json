@@ -1,6 +1,6 @@
 {
   "name": "@itagan/spatial-motion",
-  "version": "1.12.0",
+  "version": "1.15.0",
   "description": "High-performance Three.js spatial card layouts and streaming effects for large-screen experiences.",
   "type": "module",
   "license": "MIT",
@@ -24,8 +24,14 @@
     "node": ">=20"
   },
   "sideEffects": false,
+  "bin": {
+    "spatial-motion-benchmark": "./scripts/compare-benchmarks.mjs"
+  },
   "files": [
     "dist",
+    "!dist/**/*.d.ts.map",
+    "scripts/compare-benchmarks.mjs",
+    "scripts/benchmark-presets.json",
     "docs/PUBLIC_API.md",
     "docs/COMPATIBILITY.md",
     "README.md",
@@ -63,6 +69,7 @@
   "scripts": {
     "dev": "vite",
     "dev:examples": "vite --config vite.examples.config.ts",
+    "benchmark:compare": "npm run build:lib --silent && node scripts/compare-benchmarks.mjs",
     "build": "npm run build:lib && npm run build:demo && npm run build:examples",
     "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.build.json",
     "build:demo": "vite build",

@@ -37,13 +37,20 @@ export interface MotionStageOptions {
   onItemClick?: (item: MotionItem, index: number) => void
   motionPreference?: MotionPreference
   onItemHover?: (item: MotionItem | null, index: number | null) => void
+  onItemFocus?: (item: MotionItem | null, index: number | null) => void
   hoverEffect?: 'none' | 'highlight'
+  keyboardNavigation?: boolean
+  ariaLabel?: string
   cardStyle?: CardStyle
   drawCard?: DrawCard
   /** Atlas pixels per card before GPU texture-size clamping. */
   cardResolution?: number
   /** Maximum time to wait for each image before drawing the fallback card. */
   imageTimeout?: number
+  /** Maximum concurrent image requests per Stage. Defaults to 6. */
+  imageConcurrency?: number
+  /** Completed images retained per Stage for atlas redraws. Defaults to 128; 0 disables caching. */
+  imageCacheSize?: number
   /** Defaults used when an individual transition omits duration or easing. */
   transition?: TransitionOptions
   onContextChange?: (state: 'lost' | 'restored') => void
@@ -84,6 +91,25 @@ export interface PickOptions {
 
 export type QualityMode = QualityLevel | 'auto'
 export type MotionPreference = 'auto' | 'full' | 'reduced'
+export type StageTransitionStatus = 'running' | 'completed' | 'interrupted' | 'aborted' | 'destroyed'
+
+export interface StageTransitionResult {
+  completed: boolean
+  status: Exclude<StageTransitionStatus, 'running'>
+}
+
+export interface StageTransitionHandle {
+  readonly status: StageTransitionStatus
+  readonly finished: Promise<StageTransitionResult>
+  cancel(): void
+}
+
+export interface StageTransitionState {
+  active: boolean
+  status: StageTransitionStatus | null
+  layout: string | null
+  progress: number
+}
 
 export interface StagePerformanceStats extends PerformanceStats {
   qualityMode: QualityMode
@@ -171,7 +197,9 @@ interface ActiveTransition {
   toBillboard: number
   fromHideBackHemisphere: number
   toHideBackHemisphere: number
-  resolve: (completed: boolean) => void
+  layout: string
+  resolve: (result: StageTransitionResult) => void
+  removeAbortListener: () => void
 }
 
 interface ActiveEffect {
@@ -217,7 +245,16 @@ export class MotionStage {
   private readonly motionQuery: MediaQueryList | null
   private reducedMotion = false
   private hoveredIndex: number | null = null
+  private focusedItemId: string | null = null
   private readonly hoverEnabled: boolean
+  private readonly keyboardNavigation: boolean
+  private readonly baseAriaLabel: string
+  private lastTransitionStatus: StageTransitionStatus | null = null
+  private lastTransitionLayout: string | null = null
+  private readonly stageWaits = new Set<{
+    remainingMs: number
+    complete: (result?: boolean) => void
+  }>()
   private frameCpuMs = 0
   private renderSubmitMs = 0
   private transformCalculationMs = 0
@@ -243,6 +280,8 @@ export class MotionStage {
     this.reducedMotion = this.motionPreference === 'reduced'
       || (this.motionPreference === 'auto' && Boolean(this.motionQuery?.matches))
     this.hoverEnabled = Boolean(options.onItemHover) || options.hoverEffect === 'highlight'
+    this.keyboardNavigation = options.keyboardNavigation !== false
+    this.baseAriaLabel = options.ariaLabel ?? 'Spatial Motion'
     this.qualityMode = options.quality ?? 'auto'
     this.quality = this.qualityMode === 'auto' ? detectQuality() : this.qualityMode
     this.performanceManager = new AdaptivePerformanceManager(this.quality)
@@ -255,6 +294,14 @@ export class MotionStage {
     this.renderer.domElement.addEventListener('webglcontextlost', this.handleContextLost)
     this.renderer.domElement.addEventListener('webglcontextrestored', this.handleContextRestored)
     this.renderer.domElement.addEventListener('pointerup', this.handlePointerUp)
+    if (this.keyboardNavigation) {
+      this.renderer.domElement.tabIndex = 0
+      this.renderer.domElement.setAttribute('role', 'region')
+      this.renderer.domElement.setAttribute('aria-label', this.baseAriaLabel)
+      this.renderer.domElement.addEventListener('keydown', this.handleKeyDown)
+      this.renderer.domElement.addEventListener('focus', this.handleCanvasFocus)
+      this.renderer.domElement.addEventListener('blur', this.handleCanvasBlur)
+    }
     if (this.hoverEnabled) {
       this.renderer.domElement.addEventListener('pointermove', this.handlePointerMove)
       this.renderer.domElement.addEventListener('pointerleave', this.handlePointerLeave)
@@ -268,6 +315,8 @@ export class MotionStage {
       drawCard: options.drawCard,
       cellSize: options.cardResolution,
       imageTimeout: options.imageTimeout,
+      imageConcurrency: options.imageConcurrency,
+      imageCacheSize: options.imageCacheSize,
       maxTextureSize: this.renderer.capabilities.maxTextureSize,
       anisotropy: Math.min(4, this.renderer.capabilities.getMaxAnisotropy()),
     })
@@ -276,7 +325,10 @@ export class MotionStage {
     })
     this.resizeObserver.observe(this.options.container)
     this.resizeInternal()
-    if (!this.isPaused()) this.frameId = requestAnimationFrame(this.render)
+    if (!this.isPaused()) {
+      this.lastFrame = performance.now()
+      this.frameId = requestAnimationFrame(this.render)
+    }
   }
 
   setItems(items: MotionItem[]): Promise<void> {
@@ -292,7 +344,7 @@ export class MotionStage {
 
   private async setItemsInternal(items: MotionItem[]): Promise<void> {
     const token = ++this.itemsToken
-    this.cancelActiveTransition()
+    this.cancelActiveTransition('interrupted')
     this.activeEffect = null
     this.cards.disableEffect()
     const maxItems = qualityProfiles[this.quality].maxVisibleItems
@@ -309,11 +361,51 @@ export class MotionStage {
     this.cards.setTransforms(nextTransforms)
     this.visibleRatio = visibleRatios[this.quality]
     this.cards.setVisibleRatio(this.visibleRatio)
+    this.syncFocusedItem()
   }
 
   to(layout: Layout, options: TransitionOptions = {}): Promise<boolean> {
     this.assertActive()
     return this.toInternal(layout, options)
+  }
+
+  startTransition(layout: Layout, options: TransitionOptions = {}): StageTransitionHandle {
+    this.assertActive()
+    const controller = new AbortController()
+    const forwardAbort = () => controller.abort()
+    if (options.signal?.aborted) controller.abort()
+    else options.signal?.addEventListener('abort', forwardAbort, { once: true })
+    const state: { status: StageTransitionStatus } = { status: 'running' }
+    const finished = this.transitionToResult(layout, { ...options, signal: controller.signal })
+      .then((result) => {
+        state.status = result.status
+        if (result.completed) this.lastLayout = layout
+        return result
+      })
+      .finally(() => options.signal?.removeEventListener('abort', forwardAbort))
+    return {
+      get status() { return state.status },
+      finished,
+      cancel: () => controller.abort(),
+    }
+  }
+
+  getTransitionState(): StageTransitionState {
+    this.assertActive()
+    const transition = this.activeTransition
+    return transition
+      ? {
+          active: true,
+          status: 'running',
+          layout: transition.layout,
+          progress: this.transitionProgress(transition, performance.now()),
+        }
+      : {
+          active: false,
+          status: this.lastTransitionStatus,
+          layout: this.lastTransitionLayout,
+          progress: this.lastTransitionStatus === 'completed' ? 1 : 0,
+        }
   }
 
   private async toInternal(layout: Layout, options: TransitionOptions): Promise<boolean> {
@@ -323,6 +415,18 @@ export class MotionStage {
   }
 
   private async transitionTo(layout: Layout, options: TransitionOptions = {}): Promise<boolean> {
+    return (await this.transitionToResult(layout, options)).completed
+  }
+
+  private transitionToResult(
+    layout: Layout,
+    options: TransitionOptions = {},
+  ): Promise<StageTransitionResult> {
+    if (options.signal?.aborted) {
+      this.lastTransitionStatus = 'aborted'
+      this.lastTransitionLayout = layout.name
+      return Promise.resolve({ completed: false, status: 'aborted' })
+    }
     const now = performance.now()
     const visualState = this.resolveCurrentVisualState(now)
     this.transforms = this.resolveCurrentTransforms(now)
@@ -330,7 +434,7 @@ export class MotionStage {
       this.activeEffect = null
       this.cards.disableEffect()
     }
-    this.cancelActiveTransition()
+    this.cancelActiveTransition('interrupted')
     const from = this.transforms
     const calculationStartedAt = performance.now()
     const target = layout.calculate(this.items.length, this.context())
@@ -352,7 +456,9 @@ export class MotionStage {
       this.cards.setOrientation(targetOrientation)
       this.cards.setHideBackHemisphere(targetHideBackHemisphere)
       this.cards.setTransforms(target)
-      return true
+      this.lastTransitionStatus = 'completed'
+      this.lastTransitionLayout = layout.name
+      return Promise.resolve({ completed: true, status: 'completed' })
     }
     this.cards.prepareTransition(
       from,
@@ -362,8 +468,8 @@ export class MotionStage {
       visualState.hideBackHemisphere,
       targetHideBack,
     )
-    return new Promise<boolean>((resolve) => {
-      this.activeTransition = {
+    return new Promise<StageTransitionResult>((resolve) => {
+      const transition: ActiveTransition = {
         from,
         to: target,
         elapsedMs: 0,
@@ -374,8 +480,16 @@ export class MotionStage {
         toBillboard: targetBillboard,
         fromHideBackHemisphere: visualState.hideBackHemisphere,
         toHideBackHemisphere: targetHideBack,
+        layout: layout.name,
         resolve,
+        removeAbortListener: () => {},
       }
+      const handleAbort = () => {
+        if (this.activeTransition === transition) this.cancelActiveTransition('aborted')
+      }
+      options.signal?.addEventListener('abort', handleAbort, { once: true })
+      transition.removeAbortListener = () => options.signal?.removeEventListener('abort', handleAbort)
+      this.activeTransition = transition
     })
   }
 
@@ -515,6 +629,7 @@ export class MotionStage {
     this.sourceItems = nextSource
     this.items = nextItems
     this.inputItemCount = nextSource.length
+    this.syncFocusedItem()
 
     if (!options.layout) return true
     const completed = await this.transitionTo(options.layout, {
@@ -530,7 +645,7 @@ export class MotionStage {
     const current = this.resolveCurrentTransforms(now)
     const previousById = new Map(this.items.map((item, index) => [item.id, current[index]]))
     const token = ++this.itemsToken
-    this.cancelActiveTransition()
+    this.cancelActiveTransition('interrupted')
     this.activeEffect = null
     this.cards.disableEffect()
     this.transforms = current
@@ -552,6 +667,7 @@ export class MotionStage {
     this.cards.setHideBackHemisphere(this.hideBackHemisphere)
     this.cards.setTransforms(nextTransforms)
     this.cards.setVisibleRatio(this.visibleRatio)
+    this.syncFocusedItem()
 
     const targetLayout = options.layout ?? this.lastLayout
     if (!targetLayout) return true
@@ -624,6 +740,21 @@ export class MotionStage {
       this.pickingMs += performance.now() - startedAt
       this.pickOperations += 1
     }
+  }
+
+  focusItem(id: string): boolean {
+    this.assertActive()
+    const index = this.items.findIndex((item) => item.id === id)
+    if (index < 0 || visibilityRank(index) > this.visibleRatio) return false
+    this.setFocusedIndex(index)
+    this.renderer.domElement.focus()
+    return true
+  }
+
+  getFocusedItem(): MotionItem | null {
+    this.assertActive()
+    const index = this.focusedIndex()
+    return index === null ? null : this.items[index]
   }
 
   private pickInternal(clientX: number, clientY: number, options: number | PickOptions): PickResult | null {
@@ -730,7 +861,7 @@ export class MotionStage {
 
   timeline(): Timeline {
     this.assertActive()
-    return new Timeline()
+    return new Timeline((duration) => this.waitOnStageClock(duration))
   }
 
   async addExtension(extension: StageExtension): Promise<StageExtensionHandle> {
@@ -830,7 +961,7 @@ export class MotionStage {
     if (this.destroyed) return
     this.destroyed = true
     this.itemsToken += 1
-    this.cancelActiveTransition()
+    this.cancelActiveTransition('destroyed')
     cancelAnimationFrame(this.frameId)
     this.frameId = 0
     this.resizeObserver.disconnect()
@@ -841,6 +972,11 @@ export class MotionStage {
     this.renderer.domElement.removeEventListener('pointerleave', this.handlePointerLeave)
     this.motionQuery?.removeEventListener('change', this.handleMotionPreferenceChange)
     document.removeEventListener('visibilitychange', this.handleVisibilityChange)
+    this.renderer.domElement.removeEventListener('keydown', this.handleKeyDown)
+    this.renderer.domElement.removeEventListener('focus', this.handleCanvasFocus)
+    this.renderer.domElement.removeEventListener('blur', this.handleCanvasBlur)
+    for (const wait of this.stageWaits) wait.complete(false)
+    this.stageWaits.clear()
     for (const extension of this.orderedExtensions()) this.removeExtensionRecord(extension)
     this.cards.dispose()
     this.renderer.dispose()
@@ -1002,14 +1138,20 @@ export class MotionStage {
     if (progress < 1) return
     this.transforms = transition.to
     this.activeTransition = null
-    transition.resolve(true)
+    transition.removeAbortListener()
+    this.lastTransitionStatus = 'completed'
+    this.lastTransitionLayout = transition.layout
+    transition.resolve({ completed: true, status: 'completed' })
   }
 
-  private cancelActiveTransition(): void {
+  private cancelActiveTransition(status: 'interrupted' | 'aborted' | 'destroyed'): void {
     const transition = this.activeTransition
     if (!transition) return
     this.activeTransition = null
-    transition.resolve(false)
+    transition.removeAbortListener()
+    this.lastTransitionStatus = status
+    this.lastTransitionLayout = transition.layout
+    transition.resolve({ completed: false, status })
   }
 
   private readonly render = (now: number) => {
@@ -1017,6 +1159,7 @@ export class MotionStage {
     const rawFrameMs = now - this.lastFrame || 0
     const delta = Math.min(0.05, rawFrameMs / 1000)
     this.lastFrame = now
+    this.advanceStageWaits(rawFrameMs)
     this.advanceTransition(now)
     const nextQuality = this.performanceManager.recordFrame(
       rawFrameMs,
@@ -1046,6 +1189,7 @@ export class MotionStage {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
     this.cards.setVisibleRatio(visibleRatios[quality])
     this.visibleRatio = visibleRatios[quality]
+    this.syncFocusedItem()
     if (this.activeEffect) {
       const now = performance.now()
       this.activeEffect.elapsedSeconds = this.effectElapsedSeconds(this.activeEffect, now)
@@ -1086,6 +1230,36 @@ export class MotionStage {
 
   private isPaused(): boolean {
     return this.pausedByUser || this.pausedByVisibility || this.pausedByContext
+  }
+
+  private waitOnStageClock(duration: number): {
+    promise: Promise<boolean | void>
+    cancel: () => void
+  } {
+    this.assertActive()
+    let settled = false
+    let resolvePromise!: (result?: boolean) => void
+    const wait = {
+      remainingMs: Math.max(0, Number.isFinite(duration) ? duration : 0),
+      complete: (result?: boolean) => {
+        if (settled) return
+        settled = true
+        this.stageWaits.delete(wait)
+        resolvePromise(result)
+      },
+    }
+    const promise = new Promise<boolean | void>((resolve) => { resolvePromise = resolve })
+    if (wait.remainingMs === 0) wait.complete()
+    else this.stageWaits.add(wait)
+    return { promise, cancel: () => wait.complete(false) }
+  }
+
+  private advanceStageWaits(deltaMs: number): void {
+    if (deltaMs <= 0) return
+    for (const wait of [...this.stageWaits]) {
+      wait.remainingMs -= deltaMs
+      if (wait.remainingMs <= 0) wait.complete()
+    }
   }
 
   private extensionViewport(): StageViewport {
@@ -1258,15 +1432,107 @@ export class MotionStage {
     const index = result?.index ?? null
     if (index === this.hoveredIndex) return
     this.hoveredIndex = index
-    this.cards.setHoverIndex(this.options.hoverEffect === 'highlight' ? index : null)
+    this.updateInteractionHighlight()
     this.options.onItemHover?.(result?.item ?? null, index)
   }
 
   private readonly handlePointerLeave = () => {
     if (this.destroyed || this.hoveredIndex === null) return
     this.hoveredIndex = null
-    this.cards.setHoverIndex(null)
+    this.updateInteractionHighlight()
     this.options.onItemHover?.(null, null)
+  }
+
+  private readonly handleCanvasFocus = () => {
+    if (this.destroyed || this.focusedIndex() !== null) return
+    const first = this.visibleItemIndices()[0]
+    if (first !== undefined) this.setFocusedIndex(first)
+  }
+
+  private readonly handleCanvasBlur = () => {
+    if (this.destroyed) return
+    this.setFocusedIndex(null)
+  }
+
+  private readonly handleKeyDown = (event: KeyboardEvent) => {
+    if (this.destroyed) return
+    const visible = this.visibleItemIndices()
+    if (!visible.length) return
+    const current = this.focusedIndex()
+    const position = current === null ? -1 : visible.indexOf(current)
+    let next: number | undefined
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        next = visible[(position + 1 + visible.length) % visible.length]
+        break
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        next = visible[(position - 1 + visible.length) % visible.length]
+        break
+      case 'Home':
+        next = visible[0]
+        break
+      case 'End':
+        next = visible.at(-1)
+        break
+      case 'Enter':
+      case ' ':
+        if (current !== null) {
+          event.preventDefault()
+          this.options.onItemClick?.(this.items[current], current)
+        }
+        return
+      default:
+        return
+    }
+    event.preventDefault()
+    if (next !== undefined) this.setFocusedIndex(next)
+  }
+
+  private focusedIndex(): number | null {
+    if (this.focusedItemId === null) return null
+    const index = this.items.findIndex((item) => item.id === this.focusedItemId)
+    return index >= 0 ? index : null
+  }
+
+  private visibleItemIndices(): number[] {
+    return this.items
+      .map((_item, index) => visibilityRank(index) <= this.visibleRatio ? index : -1)
+      .filter((index) => index >= 0)
+  }
+
+  private setFocusedIndex(index: number | null): void {
+    const previousId = this.focusedItemId
+    const item = index === null ? null : this.items[index] ?? null
+    this.focusedItemId = item?.id ?? null
+    this.updateInteractionHighlight()
+    this.updateAriaLabel(item, index)
+    if (previousId !== this.focusedItemId) this.options.onItemFocus?.(item, item ? index : null)
+  }
+
+  private syncFocusedItem(): void {
+    const index = this.focusedIndex()
+    if (this.focusedItemId !== null && (index === null || visibilityRank(index) > this.visibleRatio)) {
+      this.setFocusedIndex(null)
+    }
+    else if (index !== null) {
+      this.updateInteractionHighlight()
+      this.updateAriaLabel(this.items[index], index)
+    }
+  }
+
+  private updateInteractionHighlight(): void {
+    const index = (this.options.hoverEffect === 'highlight' ? this.hoveredIndex : null) ?? this.focusedIndex()
+    this.cards.setHoverIndex(index)
+  }
+
+  private updateAriaLabel(item: MotionItem | null, index: number | null): void {
+    if (!this.keyboardNavigation) return
+    const detail = item && index !== null
+      ? `: ${item.title?.trim() || item.id} (${index + 1} of ${this.items.length})`
+      : ''
+    this.renderer.domElement.setAttribute('aria-label', `${this.baseAriaLabel}${detail}`)
   }
 
   private readonly handleMotionPreferenceChange = (event: MediaQueryListEvent) => {

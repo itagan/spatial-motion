@@ -14,13 +14,14 @@ Spatial Motion 的 `MotionStage` 面向支持 WebGL2、ES2022、Canvas 2D、Resi
 ## 图片与 Canvas
 
 - 远程图片以匿名 CORS 请求加载；源站必须返回允许当前页面读取图片的响应头。
+- 每个 Stage 默认最多并发 6 个图片请求，完成图片保存在 Stage 私有有界 LRU 中；destroy 会中止请求并释放缓存引用。
 - 加载失败、CORS 拒绝、超过 `imageTimeout` 或自定义 `drawCard` 抛错时，卡片会回退到基于 id/title 的内置占位图。
 - 自定义绘制回调接收 Canvas 2D 上下文，不接收 HTML；异步回调应自行处理业务请求的超时和取消。
 - 图集使用固定 64px 单元，适合大量缩略卡片，不是高清近景图片管线。
 
 ## 已知限制
 
-- 不提供 DOM/CSS3D 卡片、HTML 模板、Vue/React 组件挂载或内建无障碍语义。
+- 不提供 DOM/CSS3D 卡片、HTML 模板或 Vue/React 组件挂载；内建可访问性限于 Canvas region、键盘导航和焦点事件，不为每张卡片创建独立 DOM 语义。
 - WebGL context loss 会暂停 Stage，context restored 后重新上传图集并恢复；若浏览器无法恢复上下文，应用仍应提供重新创建 Stage 或静态回退入口。
 - 一个 Stage 使用单张纹理图集，没有跨图集分页；图集会自动降低单元分辨率以遵守设备最大纹理尺寸，因此极端实例量下清晰度会下降。
 - FPS 与纹理内存统计用于相对基准，不等同于浏览器完整 GPU/进程内存。

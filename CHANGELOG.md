@@ -2,6 +2,54 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)。日期使用 `YYYY-MM-DD`。
 
+## 1.15.0 - 2026-07-19
+
+可取消动画控制、统一 Timeline 时钟和键盘交互。
+
+### Added
+
+- 新增 `startTransition()`、`StageTransitionHandle`、结构化完成原因和 `getTransitionState()` 进度查询。
+- `TransitionOptions` 增加 `AbortSignal`，并保持现有 `Promise<boolean>` 调用兼容。
+- Stage Timeline wait 改用暂停感知时钟，destroy 会终止等待和后续步骤。
+- 新增 Canvas 方向键/Home/End 导航、Enter/Space 激活、`onItemFocus`、`focusItem()`、`getFocusedItem()` 和动态 aria-label。
+
+### Compatibility
+
+- `to()`、`focusItems()`、`restoreLayout()` 与 `enterEffect()` 继续返回 `Promise<boolean>`；句柄 API 为新增选择。
+- 直接构造的 `Timeline` 继续使用普通计时器，只有 `stage.timeline()` 绑定 Stage 时钟。
+- 键盘导航默认开启，可通过 `keyboardNavigation: false` 恢复不可聚焦 Canvas。
+- npm tarball 排除仅供声明源码跳转使用的 `.d.ts.map`，保留 `.d.ts` 和 JavaScript source map，在不提高 150 KB 预算的前提下容纳新增 API。
+
+## 1.14.0 - 2026-07-19
+
+图片加载和纹理图集异步管线优化。
+
+### Added
+
+- `MotionStageOptions` 增加 `imageConcurrency` 和 `imageCacheSize`，默认每 Stage 6 个并发请求和 128 项有界缓存。
+- 单次图集操作按 URL 去重，跨增量更新复用已完成图片。
+- 新图集操作和 Stage destroy 使用 `AbortSignal` 中止失效图片请求。
+
+### Compatibility
+
+- 默认绘制、图片超时和 CORS 回退行为不变；缓存仅保留成功完成的图片。
+- 缓存属于单个 Stage 并在 destroy 时释放，不引入全局图片状态。
+
+## 1.13.0 - 2026-07-19
+
+性能基准结果校验与自动回归门禁。
+
+### Added
+
+- 基准结果增加 `version: 1`，新增 `parseBenchmarkResult()` 严格解析外部 JSON。
+- 新增方向感知的 `evaluateBenchmarkRegression()`、默认阈值和结构化失败报告。
+- 新增 `benchmark:compare` CLI，支持六组固定规模/质量/场景预设、自定义阈值、JSON 输出及 CI 退出码。
+
+### Compatibility
+
+- `parseBenchmarkResult()` 继续接受 v1.12 及更早未带 version 的完整基准结果，并归一化为 version 1。
+- `compareBenchmarkResults()` 的现有指标和配置兼容判断不变。
+
 ## 1.12.0 - 2026-07-18
 
 Stage 单帧循环与暂停感知动画时钟。

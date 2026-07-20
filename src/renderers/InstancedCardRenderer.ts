@@ -16,7 +16,9 @@ import {
   applyTextureAtlasPatch,
   createTextureAtlas,
   createTextureAtlasPatch,
+  TextureAtlasImageCache,
   type TextureAtlasOptions,
+  type TextureAtlasPatch,
   type TextureAtlasResult,
 } from './textureAtlas.js'
 
@@ -64,14 +66,26 @@ export class InstancedCardRenderer {
   private estimatedTextureUploadBytes = 0
   private readonly euler = new Euler()
   private readonly quaternion = new Quaternion()
+  private readonly imageCache: TextureAtlasImageCache
+  private atlasAbortController: AbortController | null = null
 
-  constructor(private readonly scene: Scene, private readonly atlasOptions: CardRendererOptions = {}) {}
+  constructor(private readonly scene: Scene, private readonly atlasOptions: CardRendererOptions = {}) {
+    this.imageCache = new TextureAtlasImageCache(normalizeImageCacheSize(atlasOptions.imageCacheSize))
+  }
 
   async setItems(items: MotionItem[]): Promise<boolean> {
     const fingerprint = createItemsFingerprint(items)
-    if (this.mesh && fingerprint === this.itemsFingerprint) return true
-    const generation = ++this.generation
-    const atlas = await createTextureAtlas(items, this.atlasOptions.cellSize ?? 64, this.atlasOptions)
+    if (this.mesh && fingerprint === this.itemsFingerprint && !this.atlasAbortController) return true
+    const { controller, generation, options } = this.beginAtlasOperation()
+    let atlas: TextureAtlasResult
+    try {
+      atlas = await createTextureAtlas(items, this.atlasOptions.cellSize ?? 64, options)
+    } catch (error) {
+      if (generation !== this.generation || isAbortError(error)) return false
+      throw error
+    } finally {
+      if (this.atlasAbortController === controller) this.atlasAbortController = null
+    }
     if (generation !== this.generation) {
       this.atlasDiscardedBuilds += 1
       atlas.texture.dispose()
@@ -305,9 +319,17 @@ export class InstancedCardRenderer {
       return this.setItems(items)
     }
     const fingerprint = createItemsFingerprint(items)
-    if (fingerprint === this.itemsFingerprint) return true
-    const generation = ++this.generation
-    const patch = await createTextureAtlasPatch(items, changedIndices, this.atlas.cellSize, this.atlasOptions)
+    if (fingerprint === this.itemsFingerprint && !this.atlasAbortController) return true
+    const { controller, generation, options } = this.beginAtlasOperation()
+    let patch: TextureAtlasPatch
+    try {
+      patch = await createTextureAtlasPatch(items, changedIndices, this.atlas.cellSize, options)
+    } catch (error) {
+      if (generation !== this.generation || isAbortError(error)) return false
+      throw error
+    } finally {
+      if (this.atlasAbortController === controller) this.atlasAbortController = null
+    }
     if (generation !== this.generation || !this.atlas) {
       this.atlasDiscardedPatches += 1
       return false
@@ -463,7 +485,29 @@ export class InstancedCardRenderer {
 
   dispose(): void {
     this.generation += 1
+    this.atlasAbortController?.abort()
+    this.atlasAbortController = null
+    this.imageCache.clear()
     this.disposeCurrent()
+  }
+
+  private beginAtlasOperation(): {
+    controller: AbortController
+    generation: number
+    options: TextureAtlasOptions
+  } {
+    this.atlasAbortController?.abort()
+    const controller = new AbortController()
+    this.atlasAbortController = controller
+    return {
+      controller,
+      generation: ++this.generation,
+      options: {
+        ...this.atlasOptions,
+        imageCache: this.imageCache,
+        signal: controller.signal,
+      },
+    }
   }
 
   private disposeCurrent(): void {
@@ -499,6 +543,14 @@ export class InstancedCardRenderer {
     scales[index] = transform.scale
     opacities[index] = transform.opacity
   }
+}
+
+function normalizeImageCacheSize(value: number | undefined): number {
+  return Math.min(1024, Math.max(0, Math.floor(Number.isFinite(value) ? value as number : 128)))
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
 }
 
 function effectMode(kind: StreamingEffectKind): number {

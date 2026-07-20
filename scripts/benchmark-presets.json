@@ -1,0 +1,38 @@
+{
+  "steady-100-low": {
+    "itemCount": 100,
+    "qualityMode": "low",
+    "layout": "sphere",
+    "scenario": "steady"
+  },
+  "steady-500-medium": {
+    "itemCount": 500,
+    "qualityMode": "medium",
+    "layout": "sphere",
+    "scenario": "steady"
+  },
+  "steady-1000-high": {
+    "itemCount": 1000,
+    "qualityMode": "high",
+    "layout": "sphere",
+    "scenario": "steady"
+  },
+  "cold-start-500-high": {
+    "itemCount": 500,
+    "qualityMode": "high",
+    "layout": "sphere",
+    "scenario": "cold-start"
+  },
+  "atlas-update-1000-high": {
+    "itemCount": 1000,
+    "qualityMode": "high",
+    "layout": "grid",
+    "scenario": "atlas-update"
+  },
+  "transition-stress-2000-auto": {
+    "itemCount": 2000,
+    "qualityMode": "auto",
+    "layout": "sphere",
+    "scenario": "transition-stress"
+  }
+}

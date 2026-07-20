@@ -13,6 +13,7 @@
 - 自动旋转和串行 Timeline
 - 新布局可中断当前过渡，并自动终止已失效的 Timeline
 - 布局过渡、流式特效和扩展共享单一 Stage RAF，并使用排除暂停时间的统一时钟
+- 可取消过渡句柄、完成原因、实时进度和 `AbortSignal`，旧 `Promise<boolean>` API 保持兼容
 - GPU 时空隧道、线性发射、漩涡和径向爆发固定实例对象池
 - 统一 `enterEffect()` 入口，特效可直接插入 Timeline 并从当前帧回归任意布局
 - 特效活跃数量独立于数据池大小，并随质量档位限制，超额实例进入休眠
@@ -24,18 +25,20 @@
 - 独立性能基准页和 JSON 采样结果导出
 - 按稳定 `id` 动态增删数据，并从已有卡片的当前空间位置继续过渡
 - 基于投影四边形和相机深度的精确遮挡拾取、卡片点击回调和任意 `id` 聚焦
+- Canvas 键盘焦点、方向键导航、Enter/Space 激活和稳定 id 程序化聚焦
 - 聚焦后恢复最近一次业务布局
 - ResizeObserver 响应式画布及完整资源释放
 - 圆角、圆形、边框与背景卡片样式，以及安全的 Canvas 自定义绘制
 - 按稳定 `id` 局部重绘单张或多张图集卡片
 - 统一的平滑特效运动曲线、mipmap 图集采样和 GPU 纹理尺寸保护
 - WebGL context loss 暂停/恢复、图片超时回退和长时间压力基准
+- 每 Stage 有界图片缓存、重复 URL 去重、并发请求上限和失效图集请求取消
 - P50/P95/P99、长帧、Stage/图集分阶段成本和可导入对比的性能基准
 - 八种布局的版本化 JSON 配置、严格解析与可折叠参数实验室
 - Sphere 等面积/球带、Cylinder 圆弧、Ring 分配、Box 选面和 Cone 圆台等高级布局参数
 - 受控 Stage extension 生命周期，可安全挂载原生 Three.js 内容并接入 GSAP 等外部动画库
 
-源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.12.0 动画时钟加固阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
+源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.15.0 交互与动画控制完善阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
 
 ## 项目文档
 
@@ -112,6 +115,8 @@ const stage = new MotionStage({
   transition: { duration: 1200, easing: easing.sineInOut },
   cardResolution: 64,
   imageTimeout: 10_000,
+  imageConcurrency: 6,
+  imageCacheSize: 128,
   onContextChange(state) {
     console.log('WebGL context:', state)
   },
@@ -124,6 +129,18 @@ await stage.setItems(participants)
 stage.autoRotate({ y: 0.25 })
 await stage.to(sphere({ radius: 5 }), { duration: 1600 })
 await stage.to(cylinder({ radius: 5 }), { duration: 1400 })
+```
+
+需要查询、取消或区分完成原因时使用句柄 API；原有 `to()` 仍返回 `Promise<boolean>`：
+
+```ts
+const transition = stage.startTransition(sphere({ radius: 5 }), { duration: 1600 })
+console.log(stage.getTransitionState()) // layout、progress、status
+transition.cancel()
+const result = await transition.finished // { completed: false, status: 'aborted' }
+
+const controller = new AbortController()
+await stage.to(grid(), { signal: controller.signal })
 ```
 
 按需子路径入口：
@@ -239,6 +256,8 @@ await stage.to(grid({ fit: 'cover' }))   // 铺满相机可视范围
 
 低动态模式会立即完成布局切换、停止自动旋转，并把流式特效固定为确定性的静态首帧。`full` 可强制保留动画，`reduced` 可强制使用低动态行为。
 
+默认 Canvas 可通过 Tab 聚焦，方向键在当前质量档位可见卡片之间循环，Home/End 跳到首尾，Enter/Space 复用 `onItemClick`。`onItemFocus` 接收键盘焦点变化，`focusItem(id)` 和 `getFocusedItem()` 提供稳定 id 控制；可用 `ariaLabel` 自定义区域名称，或以 `keyboardNavigation: false` 关闭内建键盘行为。
+
 页面隐藏时 Stage 会自动停止唯一的 `requestAnimationFrame`，布局过渡、流式特效和扩展时钟同时冻结；恢复可见时从当前画面继续，后台停留时间不会造成动画跳跃或污染性能样本。手动 `pause()` 和 WebGL context loss 使用相同的时钟语义。
 
 浏览器报告 WebGL context loss 时 Stage 会阻止默认销毁行为并暂停循环；context restored 后图集会重新标记上传并恢复运行。`getPerformanceStats().contextLost` 可用于状态面板。若此前由用户主动暂停，context 恢复不会越过该暂停状态。
@@ -255,6 +274,8 @@ await stage.updateItems(nextParticipants, {
 
 相同 `id` 的卡片会继承更新发生时的位置，新卡片从初始状态进入；尺寸或实例数量变化时纹理图集会批量重建，但不进入逐帧渲染路径。
 快速连续更新时仅最后一次调用生效，已失效的图集结果会被释放。`id` 必须是非空字符串且在完整输入中唯一，否则调用会在修改舞台状态前抛出错误。
+
+同一次图集操作中的重复图片 URL 只发起一次请求；完成的图片按 Stage 保存在有界 LRU 缓存中，默认最多 128 项。`imageConcurrency` 默认 6，可针对低带宽设备降低；`imageCacheSize: 0` 可关闭跨更新缓存。新图集操作和 `destroy()` 会通过 `AbortSignal` 中止旧图片请求，缓存不会跨 Stage 持有。
 
 只更新已有卡片内容时使用稳定 `id` API。它仅重绘受影响的图集单元，不重建 Mesh，也不会打断当前布局或流式特效：
 
@@ -362,7 +383,19 @@ http://localhost:5173/benchmark.html
 - 图集构建/patch、图片加载失败和估算纹理上传字节
 - steady、cold-start、atlas-update、transition-stress 四类可复现场景
 - 导入基线 JSON，并通过 `compareBenchmarkResults()` 输出同配置前后差异
+- 版本化基准 JSON 严格解析、方向感知回归阈值和可用于 CI 的退出码
 - 3 秒至 30 分钟采样、持续布局/特效中断与局部图集更新压力模式
+
+导出的基准结果包含 `version: 1`。可在代码中使用 `parseBenchmarkResult()` 和 `evaluateBenchmarkRegression()`，或直接在命令行比较同配置结果：
+
+```bash
+npm run benchmark:compare -- baseline.json current.json
+npm run benchmark:compare -- baseline.json current.json --thresholds thresholds.json --json
+npx spatial-motion-benchmark baseline.json current.json
+npx spatial-motion-benchmark baseline.json current.json --preset transition-stress-2000-auto
+```
+
+默认阈值覆盖 FPS、最大帧时间、P95/P99、33ms 长帧、Stage CPU、WebGL 提交、Atlas build/patch、纹理内存与估算上传量。配置不兼容或超过阈值时命令返回非零退出码；自定义阈值可对每个指标设置 `maxRegressionPercent`、`maxRegressionAbsolute` 或两者。随包提供的六个 `--preset` 覆盖 100/500/1000/2000 实例、low/medium/high/auto 质量和四类固定场景，CLI 会拒绝与预设不一致的结果。
 
 重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。同一 JavaScript turn 内的稳定 id 更新会合并；已初始化图集只上传变化单元对应的数据行。
 图集默认使用 4px 隔离、mipmap 和最高 4x 各向异性采样；`cardResolution` 会被限制在 32–256px，并在实例规模超过设备 `MAX_TEXTURE_SIZE` 时自动降低实际单元分辨率，避免创建无效纹理。首次上传和 WebGL context 恢复仍使用完整图集上传。
@@ -373,8 +406,8 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 36.3 KB |
-| npm tarball | ≤ 150 KB | 约 139 KB |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 40.0 KB（40,939 bytes） |
+| npm tarball | ≤ 150 KB | 147.8 KB（151,331 bytes） |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 3.5 KB |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。
@@ -551,6 +584,8 @@ await stage
   .add(() => stage.to(cylinder()))
   .play()
 ```
+
+`stage.timeline().wait()` 使用与布局和特效相同的暂停感知时钟；页面隐藏、手动暂停和 context loss 不消耗等待时间，destroy 会停止等待及后续步骤。直接 `new Timeline()` 仍使用普通计时器。
 
 ## 源码边界
 

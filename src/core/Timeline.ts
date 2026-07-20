@@ -1,9 +1,16 @@
 export type TimelineStep = () => Promise<boolean | void> | boolean | void
+export interface TimelineWaitHandle {
+  promise: Promise<boolean | void>
+  cancel(): void
+}
+export type TimelineWaiter = (duration: number) => TimelineWaitHandle
 
 export class Timeline {
   private readonly steps: TimelineStep[] = []
   private runToken = 0
-  private pendingWait: { timeoutId: ReturnType<typeof setTimeout>; resolve: () => void } | null = null
+  private pendingWait: TimelineWaitHandle | null = null
+
+  constructor(private readonly waiter?: TimelineWaiter) {}
 
   add(step: TimelineStep): this {
     this.steps.push(step)
@@ -11,14 +18,13 @@ export class Timeline {
   }
 
   wait(duration: number): this {
-    return this.add(() => new Promise<void>((resolve) => {
-      const complete = () => {
-        if (this.pendingWait?.resolve === complete) this.pendingWait = null
-        resolve()
-      }
-      const timeoutId = setTimeout(complete, Math.max(0, duration))
-      this.pendingWait = { timeoutId, resolve: complete }
-    }))
+    return this.add(() => {
+      const wait = this.waiter?.(duration) ?? timeoutWait(duration)
+      this.pendingWait = wait
+      return wait.promise.finally(() => {
+        if (this.pendingWait === wait) this.pendingWait = null
+      })
+    })
   }
 
   async play(): Promise<void> {
@@ -38,9 +44,21 @@ export class Timeline {
 
   private cancelPendingWait(): void {
     if (!this.pendingWait) return
-    clearTimeout(this.pendingWait.timeoutId)
-    const { resolve } = this.pendingWait
+    const wait = this.pendingWait
     this.pendingWait = null
-    resolve()
+    wait.cancel()
+  }
+}
+
+function timeoutWait(duration: number): TimelineWaitHandle {
+  let resolve!: (result?: boolean) => void
+  const timeoutId = setTimeout(() => resolve(), Math.max(0, duration))
+  const promise = new Promise<boolean | void>((complete) => { resolve = complete })
+  return {
+    promise,
+    cancel() {
+      clearTimeout(timeoutId)
+      resolve(false)
+    },
   }
 }

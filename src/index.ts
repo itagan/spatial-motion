@@ -10,10 +10,14 @@ export type {
   QualityMode,
   StagePerformanceStats,
   StagePerformanceEnvironment,
+  StageTransitionHandle,
+  StageTransitionResult,
+  StageTransitionState,
+  StageTransitionStatus,
   UpdateItemsOptions,
 } from './core/MotionStage.js'
 export { Timeline } from './core/Timeline.js'
-export type { TimelineStep } from './core/Timeline.js'
+export type { TimelineStep, TimelineWaitHandle, TimelineWaiter } from './core/Timeline.js'
 export type {
   StageExtension,
   StageExtensionContext,
