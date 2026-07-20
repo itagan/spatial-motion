@@ -114,4 +114,4 @@ v1.15 的过渡、流式特效、Stage Timeline 和 extension 继续共享单个
 
 真实 Chromium/WebGL 2 验收中，500 items / high / cold-start / 3 秒保持平均 59.1 FPS、P95 18.20ms、1 Draw Call，完整图集构建 85.1ms；1000 items / high / atlas-update / 3 秒保持平均 60.0 FPS、P95 18.30ms、0 个 33ms 长帧、1 Draw Call，17 次局部更新累计 45.6ms、估算上传 272 KB。页面键盘实测可从首项移动到第 2/1000 项并同步无障碍标签，控制台无 error 日志。
 
-2026-07-19 最终包验证：Library JavaScript gzip 40,939 bytes、npm tarball 151,331 bytes、layout-only 3,572 bytes，仍满足 40 KB / 150 KB / 8 KB 硬预算。npm 包排除 `.d.ts.map`，但保留类型声明和 JavaScript source map；Three.js 继续保持 peer dependency。
+2026-07-20 加入不随 npm 发布的 Vue Lottery Screen 示例后复验：Library JavaScript gzip 40,939 bytes、npm tarball 151,507 bytes、layout-only 3,572 bytes，仍满足 40 KB / 150 KB / 8 KB 硬预算。npm 包排除 `.d.ts.map`，但保留类型声明和 JavaScript source map；Three.js 继续保持 peer dependency。

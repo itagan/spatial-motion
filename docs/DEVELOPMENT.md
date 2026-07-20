@@ -17,7 +17,7 @@ npm run dev
 - `/benchmark.html`：不同实例数量和质量档位的性能基准。
 - `/benchmark.html` 的压力模式：持续中断布局/特效并局部更新图集，可选择最长 30 分钟。
 
-`npm run dev:examples` 独立启动单场景示例站点，提供 `/vanilla/`、`/three-extension/` 和 `/gsap-extension/`。
+`npm run dev:examples` 独立启动集成示例站点，提供 `/vanilla/`、`/three-extension/`、`/gsap-extension/` 和 `/lottery-screen/`。Lottery Screen 使用 Vue 3 验证真实应用编排，但抽奖状态与随机选择保持在 examples，不进入核心库。
 
 ## 常用命令
 
@@ -30,7 +30,7 @@ npm run dev
 | `npm run benchmark:compare -- baseline.json current.json` | 严格解析并按阈值判定性能回归 |
 | `npm run build:lib` | 构建 ESM 库与类型声明到 `dist/` |
 | `npm run build:demo` | 构建演示站点到 `dist-demo/` |
-| `npm run build:examples` | 构建三个独立示例到 `dist-examples/` |
+| `npm run build:examples` | 构建四个独立示例到 `dist-examples/` |
 | `npm run build` | 依次构建库、演示站点和独立示例 |
 | `npm run pack:check` | 验证发布文件、体积、导出、类型、运行时消费和 Tree Shaking |
 | `npm run verify` | 串行执行类型、全部测试、库/demo 构建和包消费者验证 |
