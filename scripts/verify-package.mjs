@@ -47,7 +47,9 @@ for (const file of dryRun.files) {
       || file.path === 'CHANGELOG.md'
       || file.path === 'LICENSE'
       || file.path.startsWith('docs/')
-      || file.path.startsWith('dist/'),
+      || file.path.startsWith('dist/')
+      || file.path === 'scripts/compare-benchmarks.mjs'
+      || file.path === 'scripts/benchmark-presets.json',
     `Unexpected published file: ${file.path}`,
   )
 }
@@ -91,9 +93,14 @@ try {
     assert.equal(typeof effects.vortex, 'function')
     assert.equal(typeof performance.BenchmarkSession, 'function')
     assert.equal(typeof performance.compareBenchmarkResults, 'function')
+    assert.equal(typeof performance.parseBenchmarkResult, 'function')
+    assert.equal(typeof performance.evaluateBenchmarkRegression, 'function')
     assert.equal(typeof main.MotionStage.prototype.updateItem, 'function')
     assert.equal(typeof main.MotionStage.prototype.updateItemsById, 'function')
     assert.equal(typeof main.MotionStage.prototype.addExtension, 'function')
+    assert.equal(typeof main.MotionStage.prototype.startTransition, 'function')
+    assert.equal(typeof main.MotionStage.prototype.getTransitionState, 'function')
+    assert.equal(typeof main.MotionStage.prototype.focusItem, 'function')
     assert.equal(typeof main.easing.sineInOut, 'function')
     await assert.rejects(
       import('${packageName}/renderers/InstancedCardRenderer'),
@@ -101,6 +108,63 @@ try {
     )
   `)
   run(process.execPath, ['runtime-check.mjs'], consumer)
+
+  const benchmarkFixture = {
+    version: 1,
+    configuration: { itemCount: 1000, qualityMode: 'high', layout: 'sphere', scenario: 'steady' },
+    samples: [],
+    durationMs: 1000,
+    sampleCount: 10,
+    averageFps: 60,
+    minimumFps: 58,
+    averageFrameMs: 16.7,
+    maximumFrameMs: 20,
+    averageFrameTimeP50: 16.5,
+    maximumFrameTimeP95: 18,
+    maximumFrameTimeP99: 20,
+    longFramesOver24Ms: 0,
+    longFramesOver33Ms: 0,
+    longFramesOver50Ms: 0,
+    ignoredFrames: 0,
+    averageFrameCpuMs: 0.3,
+    maximumFrameCpuMs: 0.5,
+    averageRenderSubmitMs: 0.5,
+    maximumRenderSubmitMs: 0.8,
+    averageExtensionUpdateMs: 0,
+    maximumExtensionUpdateMs: 0,
+    maximumExtensions: 0,
+    transformCalculationMs: 0,
+    transformCalculations: 0,
+    pickingMs: 0,
+    pickOperations: 0,
+    atlasBuilds: 0,
+    atlasPatches: 0,
+    atlasDiscardedBuilds: 0,
+    atlasDiscardedPatches: 0,
+    atlasCellsUpdated: 0,
+    atlasBuildMs: 0,
+    atlasPatchMs: 0,
+    atlasDrawMs: 0,
+    imageLoadMs: 0,
+    imageRequests: 0,
+    imageFailures: 0,
+    maximumDrawCalls: 1,
+    maximumTriangles: 200,
+    maximumTextureBytes: 1_000_000,
+    estimatedTextureUploadBytes: 1_000_000,
+    renderedItems: 100,
+    submittedItems: 100,
+    visibleItems: 100,
+    extensionStats: [],
+  }
+  await writeFile(join(consumer, 'baseline.json'), JSON.stringify(benchmarkFixture))
+  await writeFile(join(consumer, 'current.json'), JSON.stringify(benchmarkFixture))
+  run(join(consumer, 'node_modules/.bin/spatial-motion-benchmark'), [
+    'baseline.json',
+    'current.json',
+    '--preset',
+    'steady-1000-high',
+  ], consumer)
 
   await writeFile(join(consumer, 'consumer.ts'), `
     import {
@@ -111,6 +175,8 @@ try {
       type MotionStage,
       type MotionStageOptions,
       type StagePerformanceEnvironment,
+      type StageTransitionHandle,
+      type StageTransitionResult,
       type StageExtension,
       type StageExtensionContext,
       type StageExtensionHandle,
@@ -123,7 +189,7 @@ try {
     } from '${packageName}'
     import { box, createLayout as createLayoutFromSubpath, parseLayoutConfig as parseLayoutConfigFromSubpath, ring, scatter, type LayoutConfig as SubpathLayoutConfig } from '${packageName}/layouts'
     import { vortex, type EmissionOptions } from '${packageName}/effects'
-    import { BenchmarkSession, compareBenchmarkResults, type BenchmarkResult } from '${packageName}/performance'
+    import { BenchmarkSession, compareBenchmarkResults, evaluateBenchmarkRegression, parseBenchmarkResult, type BenchmarkRegressionThresholds, type BenchmarkResult } from '${packageName}/performance'
     const items: MotionItem[] = [{ id: 'one' }]
     declare const stage: MotionStage | undefined
     const emission: EmissionOptions = { mode: 'wave' }
@@ -132,13 +198,20 @@ try {
     const stageOptions: Omit<MotionStageOptions, 'container'> = {
       cardResolution: 96,
       imageTimeout: 5000,
+      imageConcurrency: 4,
+      imageCacheSize: 64,
       transition: { duration: 900 },
       onContextChange: (state) => void state,
+      keyboardNavigation: true,
+      ariaLabel: 'Participants',
     }
     const updates: MotionItemUpdate[] = [{ id: 'one', patch: { title: 'updated' } }]
     declare const benchmark: BenchmarkResult
     const environment: StagePerformanceEnvironment | undefined = stage?.getPerformanceEnvironment()
     const comparison = compareBenchmarkResults(benchmark, benchmark)
+    const thresholds: BenchmarkRegressionThresholds = { averageFps: { maxRegressionPercent: 8 } }
+    const regression = evaluateBenchmarkRegression(benchmark, benchmark, thresholds)
+    const parsedBenchmark = parseBenchmarkResult(JSON.stringify(benchmark))
     const layoutConfig = parseLayoutConfig({ version: 1, type: 'sphere', options: { rings: 8 } }) satisfies LayoutConfig
     const face: BoxFace = 'front'
     const advancedLayouts: LayoutConfig[] = [
@@ -158,12 +231,14 @@ try {
       dispose() {},
     }
     const extensionHandle: Promise<StageExtensionHandle> | undefined = stage?.addExtension(extension)
+    const transitionHandle: StageTransitionHandle | undefined = stage?.startTransition(sphere(), { duration: 100, signal: new AbortController().signal })
+    const transitionResult: Promise<StageTransitionResult> | undefined = transitionHandle?.finished
     const extensionStats: StageExtensionStats[] | undefined = stage?.getExtensionStats()
     const subpathConfig = parseLayoutConfigFromSubpath(JSON.stringify(layoutConfig)) satisfies SubpathLayoutConfig
     const configuredLayouts = [createLayout(layoutConfig), createLayoutFromSubpath(subpathConfig)]
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
-    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, vortex(), BenchmarkSession, comparison, environment, emission, motion, cardStyle, stageOptions]
+    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, stageOptions]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {

@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { StagePerformanceStats } from '../core/MotionStage'
 import type { StageExtensionStats } from '../core/extensions'
-import { BenchmarkSession, compareBenchmarkResults } from './BenchmarkSession'
+import {
+  BenchmarkSession,
+  compareBenchmarkResults,
+  evaluateBenchmarkRegression,
+  parseBenchmarkResult,
+} from './BenchmarkSession'
 
 function stats(overrides: Partial<StagePerformanceStats> = {}): StagePerformanceStats {
   return {
@@ -96,6 +101,7 @@ describe('BenchmarkSession', () => {
 
     const result = session.finish(1600)
     expect(result).toMatchObject({
+      version: 1,
       durationMs: 1500,
       sampleCount: 2,
       averageFps: 50,
@@ -164,5 +170,53 @@ describe('BenchmarkSession', () => {
       lowerIsBetter: false,
     })
     expect(comparison.metrics.maximumFrameTimeP95.delta).toBe(-4)
+  })
+
+  it('evaluates directional percentage and absolute regression limits', () => {
+    const baseline = new BenchmarkSession({
+      itemCount: 1000,
+      qualityMode: 'high',
+      layout: 'sphere',
+      scenario: 'steady',
+    }, 0)
+    baseline.record(stats({ fps: 60, frameTimeP95: 20, longFramesOver33Ms: 0 }), 100)
+    baseline.record(stats({ fps: 60, frameTimeP95: 20, longFramesOver33Ms: 1 }), 200)
+    const current = new BenchmarkSession({
+      itemCount: 1000,
+      qualityMode: 'high',
+      layout: 'sphere',
+      scenario: 'steady',
+    }, 0)
+    current.record(stats({ fps: 50, frameTimeP95: 25, longFramesOver33Ms: 0 }), 100)
+    current.record(stats({ fps: 50, frameTimeP95: 25, longFramesOver33Ms: 8 }), 200)
+
+    const report = evaluateBenchmarkRegression(baseline.finish(300), current.finish(300), {
+      averageFps: { maxRegressionPercent: 10 },
+      maximumFrameTimeP95: { maxRegressionPercent: 20 },
+      longFramesOver33Ms: { maxRegressionAbsolute: 5 },
+      atlasPatchMs: { maxRegressionPercent: 10 },
+    })
+
+    expect(report.passed).toBe(false)
+    expect(report.failures.map(({ metric }) => metric)).toEqual([
+      'averageFps',
+      'maximumFrameTimeP95',
+      'longFramesOver33Ms',
+    ])
+    expect(report.failures[0].regressionPercent).toBeCloseTo(16.67, 1)
+  })
+
+  it('rejects incompatible comparisons and strictly parses benchmark JSON', () => {
+    const result = new BenchmarkSession({ itemCount: 100, qualityMode: 'high', layout: 'grid' }, 0).finish(10)
+    const parsed = parseBenchmarkResult(JSON.stringify({ ...result, version: undefined }))
+    expect(parsed.version).toBe(1)
+    expect(() => parseBenchmarkResult({ ...result, averageFps: Number.NaN })).toThrow('benchmark.averageFps')
+    expect(() => parseBenchmarkResult({ ...result, version: 2 })).toThrow('benchmark version')
+    expect(() => evaluateBenchmarkRegression(result, result, {
+      averageFps: { maxRegressionPercent: -1 },
+    })).toThrow('Invalid threshold')
+
+    const other = new BenchmarkSession({ itemCount: 200, qualityMode: 'high', layout: 'grid' }, 0).finish(10)
+    expect(evaluateBenchmarkRegression(result, other, {}).passed).toBe(false)
   })
 })

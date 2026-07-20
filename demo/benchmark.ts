@@ -1,6 +1,7 @@
 import {
   BenchmarkSession,
   compareBenchmarkResults,
+  parseBenchmarkResult,
   MotionStage,
   box,
   cone,
@@ -357,12 +358,7 @@ async function importBaseline(event: Event): Promise<void> {
   const file = input.files?.[0]
   if (!file) return
   try {
-    const parsed = JSON.parse(await file.text()) as BenchmarkResult
-    if (!parsed.configuration || !Array.isArray(parsed.samples)
-      || !Number.isFinite(parsed.averageFps)
-      || !Number.isFinite(parsed.maximumFrameTimeP95)) {
-      throw new Error('Unsupported benchmark result')
-    }
+    const parsed = parseBenchmarkResult(await file.text())
     baselineResult = parsed
     setStatus(`已导入基线：${parsed.configuration.itemCount} items / ${parsed.configuration.qualityMode} / ${parsed.configuration.scenario ?? parsed.configuration.layout}`)
     renderComparison()

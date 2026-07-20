@@ -7,6 +7,10 @@ export interface TextureAtlasOptions {
   imageTimeout?: number
   maxTextureSize?: number
   anisotropy?: number
+  imageConcurrency?: number
+  imageCacheSize?: number
+  imageCache?: TextureAtlasImageCache
+  signal?: AbortSignal
 }
 
 export interface TextureAtlasResult {
@@ -42,34 +46,79 @@ interface ImageLoadResult {
   image: HTMLImageElement | null
   durationMs: number
   failed: boolean
+  requested: boolean
 }
 
 interface RenderedCell {
   canvas: HTMLCanvasElement
-  imageLoadMs: number
-  imageRequests: number
-  imageFailures: number
 }
 
-const loadImage = (url: string, timeoutMs: number): Promise<ImageLoadResult> =>
-  new Promise((resolve) => {
+export class TextureAtlasImageCache {
+  private readonly entries = new Map<string, HTMLImageElement>()
+
+  constructor(private readonly maximumEntries = 128) {}
+
+  get(url: string): HTMLImageElement | null {
+    const image = this.entries.get(url)
+    if (!image) return null
+    this.entries.delete(url)
+    this.entries.set(url, image)
+    return image
+  }
+
+  set(url: string, image: HTMLImageElement): void {
+    if (this.maximumEntries <= 0) return
+    this.entries.delete(url)
+    this.entries.set(url, image)
+    while (this.entries.size > this.maximumEntries) {
+      const oldest = this.entries.keys().next().value as string | undefined
+      if (oldest === undefined) break
+      this.entries.delete(oldest)
+    }
+  }
+
+  clear(): void {
+    this.entries.clear()
+  }
+}
+
+const loadImage = (
+  url: string,
+  timeoutMs: number,
+  cache: TextureAtlasImageCache | undefined,
+  signal: AbortSignal | undefined,
+): Promise<ImageLoadResult> => {
+  const cached = cache?.get(url)
+  if (cached) return Promise.resolve({ image: cached, durationMs: 0, failed: false, requested: false })
+  if (signal?.aborted) return Promise.reject(abortError())
+  return new Promise((resolve, reject) => {
     const startedAt = now()
     const image = new Image()
     let settled = false
-    const complete = (result: HTMLImageElement | null) => {
+    const complete = (result: HTMLImageElement | null, aborted = false) => {
       if (settled) return
       settled = true
       window.clearTimeout(timeoutId)
+      signal?.removeEventListener('abort', handleAbort)
       image.onload = null
       image.onerror = null
-      resolve({ image: result, durationMs: now() - startedAt, failed: result === null })
+      if (aborted) {
+        image.src = ''
+        reject(abortError())
+        return
+      }
+      if (result) cache?.set(url, result)
+      resolve({ image: result, durationMs: now() - startedAt, failed: result === null, requested: true })
     }
     const timeoutId = window.setTimeout(() => complete(null), timeoutMs)
+    const handleAbort = () => complete(null, true)
+    signal?.addEventListener('abort', handleAbort, { once: true })
     image.crossOrigin = 'anonymous'
     image.onload = () => complete(image)
     image.onerror = () => complete(null)
     image.src = url
   })
+}
 
 export async function createTextureAtlas(
   items: MotionItem[],
@@ -144,19 +193,34 @@ export async function createTextureAtlasPatch(
 ): Promise<TextureAtlasPatch> {
   const startedAt = now()
   const uniqueIndices = [...new Set(indices)].filter((index) => index >= 0 && index < items.length)
+  throwIfAborted(options.signal)
+  const imageTimeout = resolveImageTimeout(options.imageTimeout)
+  const imageUrls = [...new Set(uniqueIndices
+    .map((index) => !options.drawCard ? items[index].image : undefined)
+    .filter((url): url is string => Boolean(url)))]
+  const imageResults = await mapWithConcurrency(
+    imageUrls,
+    options.imageConcurrency,
+    (url) => loadImage(url, imageTimeout, options.imageCache, options.signal),
+    options.signal,
+  )
+  const images = new Map(imageUrls.map((url, index) => [url, imageResults[index]]))
   const renderedCells = await Promise.all(uniqueIndices.map(async (index) => ({
     index,
-    rendered: await renderCell(items[index], cellSize, options),
+    rendered: await renderCell(items[index], cellSize, options, items[index].image
+      ? images.get(items[index].image) ?? null
+      : null),
   })))
+  throwIfAborted(options.signal)
   return {
     cells: renderedCells.map(({ index, rendered }) => ({ index, canvas: rendered.canvas })),
     metrics: {
       cells: renderedCells.length,
       renderMs: now() - startedAt,
       applyMs: 0,
-      imageLoadMs: renderedCells.reduce((sum, { rendered }) => sum + rendered.imageLoadMs, 0),
-      imageRequests: renderedCells.reduce((sum, { rendered }) => sum + rendered.imageRequests, 0),
-      imageFailures: renderedCells.reduce((sum, { rendered }) => sum + rendered.imageFailures, 0),
+      imageLoadMs: imageResults.reduce((sum, result) => sum + result.durationMs, 0),
+      imageRequests: imageResults.filter((result) => result.requested).length,
+      imageFailures: imageResults.filter((result) => result.failed).length,
       uploadBytes: 0,
     },
   }
@@ -211,6 +275,7 @@ async function renderCell(
   item: MotionItem,
   cellSize: number,
   options: TextureAtlasOptions,
+  imageResult: ImageLoadResult | null,
 ): Promise<RenderedCell> {
   const canvas = document.createElement('canvas')
   canvas.width = cellSize
@@ -219,12 +284,6 @@ async function renderCell(
   if (!context) throw new Error('Canvas 2D context is unavailable')
   const style = options.cardStyle ?? {}
   const bounds = { x: 0, y: 0, width: cellSize, height: cellSize }
-  const imageTimeout = Number.isFinite(options.imageTimeout) && (options.imageTimeout ?? 0) > 0
-    ? Math.min(60_000, Math.max(100, options.imageTimeout as number))
-    : 10_000
-  const imageResult = !options.drawCard && item.image
-    ? await loadImage(item.image, imageTimeout)
-    : null
   const image = imageResult?.image ?? null
 
   context.save()
@@ -235,9 +294,14 @@ async function renderCell(
   }
   context.clip()
   try {
-    if (options.drawCard) await options.drawCard(context, item, bounds)
-    else drawDefaultCard(context, item, image, bounds)
-  } catch {
+    if (options.drawCard) {
+      await options.drawCard(context, item, bounds)
+      throwIfAborted(options.signal)
+    } else {
+      drawDefaultCard(context, item, image, bounds)
+    }
+  } catch (error) {
+    if (options.signal?.aborted) throw error
     drawDefaultCard(context, item, image, bounds)
   } finally {
     context.restore()
@@ -252,12 +316,44 @@ async function renderCell(
     context.stroke()
     context.restore()
   }
-  return {
-    canvas,
-    imageLoadMs: imageResult?.durationMs ?? 0,
-    imageRequests: imageResult ? 1 : 0,
-    imageFailures: imageResult?.failed ? 1 : 0,
-  }
+  return { canvas }
+}
+
+function resolveImageTimeout(value: number | undefined): number {
+  return Number.isFinite(value) && (value ?? 0) > 0
+    ? Math.min(60_000, Math.max(100, value as number))
+    : 10_000
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  requestedConcurrency: number | undefined,
+  task: (value: T) => Promise<R>,
+  signal: AbortSignal | undefined,
+): Promise<R[]> {
+  if (!values.length) return []
+  const concurrency = Math.min(values.length, Math.max(1, Math.floor(
+    Number.isFinite(requestedConcurrency) ? requestedConcurrency as number : 6,
+  )))
+  const results = new Array<R>(values.length)
+  let cursor = 0
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (cursor < values.length) {
+      throwIfAborted(signal)
+      const index = cursor
+      cursor += 1
+      results[index] = await task(values[index])
+    }
+  }))
+  return results
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortError()
+}
+
+function abortError(): DOMException {
+  return new DOMException('Atlas aborted', 'AbortError')
 }
 
 export function resolveAtlasMetrics(

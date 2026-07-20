@@ -27,6 +27,7 @@ npm run dev
 | `npm run typecheck` | 对源码、测试配置、demo 和 examples 执行严格类型检查 |
 | `npm test` | 使用 Vitest 运行全部单元测试 |
 | `npm run test:watch` | 监听模式运行测试 |
+| `npm run benchmark:compare -- baseline.json current.json` | 严格解析并按阈值判定性能回归 |
 | `npm run build:lib` | 构建 ESM 库与类型声明到 `dist/` |
 | `npm run build:demo` | 构建演示站点到 `dist-demo/` |
 | `npm run build:examples` | 构建三个独立示例到 `dist-examples/` |
@@ -107,6 +108,8 @@ npm run pack:check
 
 npm tarball 只携带运行时 `dist`、README、CHANGELOG、LICENSE、PUBLIC_API 和 COMPATIBILITY。ROADMAP、DEVELOPMENT、OPTIMIZATION、RELEASE、VISUAL_QA 与 examples 保留在源码仓库，不增加安装包体积。
 
+本地 `dist` 会生成声明映射便于源码跳转，但 npm tarball 排除 `.d.ts.map`；类型声明和 JavaScript source map 仍随包提供。该发布裁剪属于包体积控制，不应通过提高 150 KB 预算替代。
+
 v1.x 的稳定入口和 SemVer 规则记录在 `docs/PUBLIC_API.md`。正式发布严格按照 `docs/RELEASE.md` 执行；准备发布的代码变更不自动授权 npm publish、tag 或 GitHub Release。
 
 ## 测试策略
@@ -131,7 +134,7 @@ v1.x 的稳定入口和 SemVer 规则记录在 `docs/PUBLIC_API.md`。正式发�
 - Stage CPU、WebGL 提交、图集构建/patch、图片加载和估算纹理上传；
 - 设备、浏览器和采样时长。
 
-优先使用 steady、cold-start、atlas-update 与 transition-stress 四类固定场景，并导出完整 JSON。比较优化前后结果时，实例数、质量、布局、场景和环境应一致；`compareBenchmarkResults()` 会标记配置是否可直接比较。
+优先使用 steady、cold-start、atlas-update 与 transition-stress 四类固定场景，并导出完整 JSON。`scripts/benchmark-presets.json` 固化了跨 100/500/1000/2000 实例和 low/medium/high/auto 质量的六组配置；CLI 的 `--preset` 会同时校验基线和当前结果。比较优化前后结果时，实例数、质量、布局、场景和环境应一致；`compareBenchmarkResults()` 会标记配置是否可直接比较，`evaluateBenchmarkRegression()` 和 `benchmark:compare` 可进一步按方向感知阈值产生 CI 退出码。基准 JSON 必须先通过 `parseBenchmarkResult()`，不要把结构不完整的手写对象作为性能证据。
 
 性能结果会受设备与浏览器影响，所以不要只报告一个孤立 FPS 数字，也不要以降低视觉数量之外的指标来掩盖退化。
 

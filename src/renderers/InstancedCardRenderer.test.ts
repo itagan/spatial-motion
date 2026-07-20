@@ -15,6 +15,9 @@ vi.mock('./textureAtlas', () => ({
   createTextureAtlas: atlasMock.create,
   createTextureAtlasPatch: atlasMock.createPatch,
   applyTextureAtlasPatch: atlasMock.applyPatch,
+  TextureAtlasImageCache: class {
+    clear = vi.fn()
+  },
 }))
 
 function deferred<T>() {
@@ -131,6 +134,31 @@ describe('InstancedCardRenderer item loading', () => {
     })
     renderer.refreshTexture()
     expect(currentAtlas.texture.needsUpdate).toBe(true)
+    renderer.dispose()
+  })
+
+  it('does not let an in-flight atlas override a newer request for the currently displayed items', async () => {
+    const initialAtlas = atlas(1)
+    const pendingOther = deferred<TextureAtlasResult>()
+    const pendingInitial = deferred<TextureAtlasResult>()
+    const otherAtlas = atlas(2)
+    const restoredAtlas = atlas(1)
+    atlasMock.create
+      .mockResolvedValueOnce(initialAtlas.result)
+      .mockReturnValueOnce(pendingOther.promise)
+      .mockReturnValueOnce(pendingInitial.promise)
+    const renderer = new InstancedCardRenderer(new Scene())
+    await renderer.setItems([{ id: 'a' }])
+
+    const other = renderer.setItems([{ id: 'b' }, { id: 'c' }])
+    const restored = renderer.setItems([{ id: 'a' }])
+    pendingOther.resolve(otherAtlas.result)
+    pendingInitial.resolve(restoredAtlas.result)
+
+    await expect(other).resolves.toBe(false)
+    await expect(restored).resolves.toBe(true)
+    expect(otherAtlas.dispose).toHaveBeenCalledOnce()
+    expect(renderer.getStats().instanceCount).toBe(1)
     renderer.dispose()
   })
 

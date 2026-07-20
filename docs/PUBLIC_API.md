@@ -62,14 +62,26 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 - 布局过渡、内置流式特效和 Stage extension 由同一个 Stage `requestAnimationFrame` 驱动；启动过渡不会创建额外动画循环。
 - `pause()`、页面隐藏与 WebGL context loss 会冻结布局过渡和流式特效的 elapsed；恢复后从暂停画面继续，不把后台停留时间计入动画。
 - 被新操作中断或随 Stage 销毁的布局过渡会立即以 `false` 结算，不依赖后续浏览器帧清理残留回调。
+- `startTransition()` 返回包含实时 status、`cancel()` 和结构化 `finished` 结果的句柄；完成原因区分 completed、interrupted、aborted 与 destroyed。`getTransitionState()` 提供当前布局名和进度。
+- 所有 `TransitionOptions` 接受可选 `AbortSignal`；原有 `to()`、聚焦、恢复和特效入口继续返回 `Promise<boolean>`。
+- `stage.timeline().wait()` 使用 Stage 暂停感知时钟，destroy 会让活动 wait 返回 `false` 并阻止后续步骤；直接 `new Timeline()` 仍使用普通计时器。
 - 图片与自定义异步绘制使用 token 保护；过期结果不应用到当前图集。
 - `destroy()` 幂等并释放监听器、Observer、纹理、几何体、材质和 WebGLRenderer；其他 API 在销毁后抛错。
 - `transition` 可设置 Stage 默认 duration/easing，单次调用仍可覆盖；数据更新同样透传 easing。
 - `cardResolution` 请求 32–256px 的图集单元，实际值可能为遵守 GPU 最大纹理尺寸而降低。
 - `imageTimeout` 控制单图等待时间；`onContextChange` 与 `getPerformanceStats().contextLost` 暴露 WebGL 上下文状态。
+- `imageConcurrency` 控制每个 Stage 同时进行的图片请求（默认 6）；`imageCacheSize` 控制 Stage 私有完成图片 LRU（默认 128，0 表示禁用）。重复 URL 在单次图集操作内去重，失效操作和 destroy 会中止未完成请求。
 - `getPerformanceStats()` 额外提供帧分位数、长帧、Stage CPU/提交、布局/拾取、图集更新、图片加载、估算纹理上传、`extensions` 和 `extensionUpdateMs`；`renderedItems` 表示实例池容量，`submittedItems` 表示当前实际提交给 GPU 的实例数，累计字段在 Stage 生命周期内单调递增。
 - `getPerformanceEnvironment()` 返回浏览器、GPU、视口、DPR、实际像素比与最大纹理尺寸，用于保存可复现基准环境。
-- `BenchmarkSession` 汇总采样窗口，`compareBenchmarkResults()` 只在实例数、质量、布局与场景一致时标记结果可直接比较。
+- `BenchmarkSession` 汇总采样窗口并输出 `version: 1` 的结果；`parseBenchmarkResult()` 严格验证外部 JSON，同时兼容解析无 version 的旧结果。
+- `compareBenchmarkResults()` 只在实例数、质量、布局与场景一致时标记结果可直接比较；`evaluateBenchmarkRegression()` 按指标方向、百分比和绝对阈值返回结构化通过/失败报告。
 - `scatter()` 的 `layers` 和 `spinMode` 是向后兼容的可选视觉控制；默认 seed 行为仍保持确定性。
 
 外部扩展不包含外部拾取、后处理、多相机或任意 Scene/Renderer 操作。CSS3D 渲染器、Vue/React 适配器和业务动画配方仍不属于稳定核心；未来如加入，会使用独立入口或薄适配层设计。
+
+## 键盘与可访问交互
+
+- `keyboardNavigation` 默认启用，为 Canvas 设置可聚焦 region 和动态 `aria-label`。
+- 方向键循环当前可见卡片，Home/End 跳到首尾，Enter/Space 通过既有 `onItemClick` 激活。
+- `onItemFocus`、`focusItem(id)` 和 `getFocusedItem()` 使用稳定 id；数据重排后保持焦点，删除或质量降级隐藏目标时清除焦点。
+- 这是 Canvas 级键盘与区域语义，不等同于每张卡片具有独立 DOM/屏幕阅读器节点；需要完整 HTML 语义时仍应由应用提供并与 Stage 状态同步。

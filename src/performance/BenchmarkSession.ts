@@ -20,6 +20,7 @@ export interface BenchmarkSample {
 }
 
 export interface BenchmarkResult {
+  version: 1
   configuration: BenchmarkConfiguration
   durationMs: number
   sampleCount: number
@@ -85,9 +86,47 @@ export interface BenchmarkComparison {
     longFramesOver33Ms: BenchmarkComparisonMetric
     averageFrameCpuMs: BenchmarkComparisonMetric
     averageRenderSubmitMs: BenchmarkComparisonMetric
+    atlasBuildMs: BenchmarkComparisonMetric
+    atlasPatchMs: BenchmarkComparisonMetric
     maximumTextureBytes: BenchmarkComparisonMetric
     estimatedTextureUploadBytes: BenchmarkComparisonMetric
   }
+}
+
+export type BenchmarkMetricName = keyof BenchmarkComparison['metrics']
+
+export interface BenchmarkRegressionThreshold {
+  maxRegressionPercent?: number
+  maxRegressionAbsolute?: number
+}
+
+export type BenchmarkRegressionThresholds = Partial<Record<BenchmarkMetricName, BenchmarkRegressionThreshold>>
+
+export interface BenchmarkRegressionFailure extends BenchmarkRegressionThreshold {
+  metric: BenchmarkMetricName
+  regressionPercent: number | null
+  regressionAbsolute: number
+}
+
+export interface BenchmarkRegressionReport {
+  passed: boolean
+  compatible: boolean
+  comparison: BenchmarkComparison
+  failures: BenchmarkRegressionFailure[]
+}
+
+export const defaultBenchmarkRegressionThresholds: BenchmarkRegressionThresholds = {
+  averageFps: { maxRegressionPercent: 8 },
+  maximumFrameMs: { maxRegressionPercent: 20 },
+  maximumFrameTimeP95: { maxRegressionPercent: 12 },
+  maximumFrameTimeP99: { maxRegressionPercent: 15 },
+  longFramesOver33Ms: { maxRegressionAbsolute: 5 },
+  averageFrameCpuMs: { maxRegressionPercent: 15 },
+  averageRenderSubmitMs: { maxRegressionPercent: 15 },
+  atlasBuildMs: { maxRegressionPercent: 20 },
+  atlasPatchMs: { maxRegressionPercent: 20 },
+  maximumTextureBytes: { maxRegressionPercent: 5 },
+  estimatedTextureUploadBytes: { maxRegressionPercent: 10 },
 }
 
 export class BenchmarkSession {
@@ -119,6 +158,7 @@ export class BenchmarkSession {
     const latest = this.samples.at(-1)?.stats
     const first = this.samples[0]?.stats
     return {
+      version: 1,
       configuration: {
         ...this.configuration,
         environment: this.configuration.environment
@@ -195,6 +235,8 @@ export function compareBenchmarkResults(
       longFramesOver33Ms: comparisonMetric(baseline.longFramesOver33Ms, current.longFramesOver33Ms, true),
       averageFrameCpuMs: comparisonMetric(baseline.averageFrameCpuMs, current.averageFrameCpuMs, true),
       averageRenderSubmitMs: comparisonMetric(baseline.averageRenderSubmitMs, current.averageRenderSubmitMs, true),
+      atlasBuildMs: comparisonMetric(baseline.atlasBuildMs, current.atlasBuildMs, true),
+      atlasPatchMs: comparisonMetric(baseline.atlasPatchMs, current.atlasPatchMs, true),
       maximumTextureBytes: comparisonMetric(baseline.maximumTextureBytes, current.maximumTextureBytes, true),
       estimatedTextureUploadBytes: comparisonMetric(
         baseline.estimatedTextureUploadBytes,
@@ -203,6 +245,72 @@ export function compareBenchmarkResults(
       ),
     },
   }
+}
+
+export function evaluateBenchmarkRegression(
+  baseline: BenchmarkResult,
+  current: BenchmarkResult,
+  thresholds: BenchmarkRegressionThresholds = defaultBenchmarkRegressionThresholds,
+): BenchmarkRegressionReport {
+  const comparison = compareBenchmarkResults(baseline, current)
+  const failures: BenchmarkRegressionFailure[] = []
+  for (const metric of Object.keys(thresholds) as BenchmarkMetricName[]) {
+    if (!(metric in comparison.metrics)) throw new TypeError(`Unknown metric: ${metric}`)
+    const threshold = thresholds[metric]
+    if (!threshold) continue
+    validateThreshold(metric, threshold)
+    const comparisonMetric = comparison.metrics[metric]
+    const signedRegression = comparisonMetric.lowerIsBetter
+      ? comparisonMetric.delta
+      : -comparisonMetric.delta
+    const regressionAbsolute = Math.max(0, signedRegression)
+    const regressionPercent = comparisonMetric.deltaPercent === null
+      ? null
+      : Math.max(0, comparisonMetric.lowerIsBetter
+        ? comparisonMetric.deltaPercent
+        : -comparisonMetric.deltaPercent)
+    const exceedsPercent = threshold.maxRegressionPercent !== undefined
+      && regressionPercent !== null
+      && regressionPercent > threshold.maxRegressionPercent
+    const exceedsAbsolute = threshold.maxRegressionAbsolute !== undefined
+      && regressionAbsolute > threshold.maxRegressionAbsolute
+    if (exceedsPercent || exceedsAbsolute) {
+      failures.push({
+        metric,
+        maxRegressionPercent: threshold.maxRegressionPercent,
+        maxRegressionAbsolute: threshold.maxRegressionAbsolute,
+        regressionPercent,
+        regressionAbsolute,
+      })
+    }
+  }
+  return {
+    passed: comparison.compatible && failures.length === 0,
+    compatible: comparison.compatible,
+    comparison,
+    failures,
+  }
+}
+
+export function parseBenchmarkResult(value: unknown): BenchmarkResult {
+  const parsed = typeof value === 'string' ? parseJson(value) : value
+  assertRecord(parsed, 'benchmark')
+  if (parsed.version !== undefined && parsed.version !== 1) {
+    throw new TypeError('Unsupported benchmark version')
+  }
+  assertRecord(parsed.configuration, 'benchmark.configuration')
+  assertNonNegativeNumber(parsed.configuration.itemCount, 'benchmark.configuration.itemCount')
+  if (typeof parsed.configuration.qualityMode !== 'string'
+    || !['auto', 'high', 'medium', 'low'].includes(parsed.configuration.qualityMode)) {
+    throw new TypeError('Invalid benchmark qualityMode')
+  }
+  if (typeof parsed.configuration.layout !== 'string' || !parsed.configuration.layout) {
+    throw new TypeError('Invalid benchmark layout')
+  }
+  if (!Array.isArray(parsed.samples)) throw new TypeError('Invalid benchmark samples')
+  if (!Array.isArray(parsed.extensionStats)) throw new TypeError('Invalid extensionStats')
+  for (const key of benchmarkNumberFields) assertNonNegativeNumber(parsed[key], `benchmark.${key}`)
+  return { ...parsed, version: 1 } as unknown as BenchmarkResult
 }
 
 function average(values: number[]): number {
@@ -235,6 +343,79 @@ function comparisonMetric(
     delta: current - baseline,
     deltaPercent: baseline === 0 ? null : (current - baseline) / Math.abs(baseline) * 100,
     lowerIsBetter,
+  }
+}
+
+const benchmarkNumberFields = [
+  'durationMs',
+  'sampleCount',
+  'averageFps',
+  'minimumFps',
+  'averageFrameMs',
+  'maximumFrameMs',
+  'averageFrameTimeP50',
+  'maximumFrameTimeP95',
+  'maximumFrameTimeP99',
+  'longFramesOver24Ms',
+  'longFramesOver33Ms',
+  'longFramesOver50Ms',
+  'ignoredFrames',
+  'averageFrameCpuMs',
+  'maximumFrameCpuMs',
+  'averageRenderSubmitMs',
+  'maximumRenderSubmitMs',
+  'averageExtensionUpdateMs',
+  'maximumExtensionUpdateMs',
+  'maximumExtensions',
+  'transformCalculationMs',
+  'transformCalculations',
+  'pickingMs',
+  'pickOperations',
+  'atlasBuilds',
+  'atlasPatches',
+  'atlasDiscardedBuilds',
+  'atlasDiscardedPatches',
+  'atlasCellsUpdated',
+  'atlasBuildMs',
+  'atlasPatchMs',
+  'atlasDrawMs',
+  'imageLoadMs',
+  'imageRequests',
+  'imageFailures',
+  'estimatedTextureUploadBytes',
+  'maximumDrawCalls',
+  'maximumTriangles',
+  'maximumTextureBytes',
+  'renderedItems',
+  'submittedItems',
+  'visibleItems',
+] as const
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value)
+  } catch {
+    throw new TypeError('benchmark must be valid JSON')
+  }
+}
+
+function assertRecord(value: unknown, path: string): asserts value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${path} is invalid`)
+  }
+}
+
+function assertNonNegativeNumber(value: unknown, path: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new TypeError(`${path} is invalid`)
+  }
+}
+
+function validateThreshold(metric: BenchmarkMetricName, threshold: BenchmarkRegressionThreshold): void {
+  const values = [threshold.maxRegressionPercent, threshold.maxRegressionAbsolute]
+    .filter((value) => value !== undefined)
+  if (!values.length || values.some((value) => typeof value !== 'number' || !Number.isFinite(value) || value < 0)) {
+    throw new TypeError(`Invalid threshold: ${metric}`)
   }
 }
 

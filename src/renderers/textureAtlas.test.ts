@@ -7,6 +7,7 @@ import {
   createTextureAtlas,
   createTextureAtlasPatch,
   resolveAtlasMetrics,
+  TextureAtlasImageCache,
 } from './textureAtlas'
 
 const contexts = new WeakMap<HTMLCanvasElement, ReturnType<typeof createContext>>()
@@ -109,6 +110,62 @@ describe('texture atlas card rendering', () => {
       imageRequests: 1,
       imageFailures: 1,
     })
+  })
+
+  it('deduplicates image URLs and reuses the bounded Stage image cache', async () => {
+    class ImmediateImage {
+      crossOrigin = ''
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      naturalWidth = 32
+      naturalHeight = 32
+      private value = ''
+      get src() { return this.value }
+      set src(value: string) {
+        this.value = value
+        if (value) queueMicrotask(() => this.onload?.())
+      }
+    }
+    vi.stubGlobal('Image', ImmediateImage)
+    const cache = new TextureAtlasImageCache(2)
+    const items = [
+      { id: 'a', image: 'https://example.test/shared.png' },
+      { id: 'b', image: 'https://example.test/shared.png' },
+    ]
+
+    const first = await createTextureAtlasPatch(items, [0, 1], 32, { imageCache: cache })
+    const second = await createTextureAtlasPatch(items, [0, 1], 32, { imageCache: cache })
+
+    expect(first.metrics).toMatchObject({ imageRequests: 1, imageFailures: 0 })
+    expect(second.metrics).toMatchObject({ imageRequests: 0, imageFailures: 0, imageLoadMs: 0 })
+  })
+
+  it('limits concurrent image loads and aborts queued atlas work', async () => {
+    const instances: ControlledImage[] = []
+    class ControlledImage {
+      crossOrigin = ''
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      naturalWidth = 32
+      naturalHeight = 32
+      src = ''
+      constructor() { instances.push(this) }
+    }
+    vi.stubGlobal('Image', ControlledImage)
+    const controller = new AbortController()
+    const pending = createTextureAtlasPatch(
+      Array.from({ length: 5 }, (_, index) => ({ id: String(index), image: `https://example.test/${index}.png` })),
+      [0, 1, 2, 3, 4],
+      32,
+      { imageConcurrency: 2, signal: controller.signal },
+    )
+    await Promise.resolve()
+    expect(instances).toHaveLength(2)
+
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(instances.every((image) => image.src === '')).toBe(true)
   })
 
   it('isolates a custom async draw callback inside the configured card shape', async () => {
