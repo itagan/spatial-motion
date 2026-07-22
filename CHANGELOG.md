@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)。日期使用 `YYYY-MM-DD`。
 
+## Unreleased
+
+### Fixed
+
+- Canvas 的 CSS 尺寸现在始终跟随 Stage 容器，避免高 DPR 设备把内部像素尺寸当作布局尺寸，导致画面放大、偏移和裁切。
+
 ## 1.15.0 - 2026-07-19
 
 可取消动画控制、统一 Timeline 时钟和键盘交互。

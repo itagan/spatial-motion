@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { MotionStage, sphere, vortex, type MotionItem } from '@itagan/spatial-motion'
+import { MotionStage, radialBurst, sphere, tunnel, vortex, type MotionItem } from '@itagan/spatial-motion'
+import avatarAtlasUrl from './assets/avatar-atlas.jpg'
 import {
+  createParticipantTemplateCsv,
+  createWinnerHistoryCsv,
   createParticipants,
   loadLotteryState,
   parseParticipants,
   pickParticipants,
   prizes,
+  saveLotteryState,
   toMotionItem,
   type LotteryParticipant,
   type PersistedLotteryState,
@@ -15,6 +19,21 @@ import {
 } from './lottery'
 
 type DrawPhase = 'idle' | 'drawing' | 'revealing'
+type DrawEffectId = 'sphere' | 'vortex' | 'tunnel'
+
+interface DrawEffectOption {
+  id: DrawEffectId
+  name: string
+  label: string
+  icon: string
+}
+
+const drawEffects: DrawEffectOption[] = [
+  { id: 'sphere', name: '旋转球体', label: 'SPHERE', icon: '●' },
+  { id: 'vortex', name: '幸运漩涡', label: 'VORTEX', icon: '◎' },
+  { id: 'tunnel', name: '时空隧道', label: 'TUNNEL', icon: '◇' },
+]
+const avatarAtlas = loadAvatarAtlas(avatarAtlasUrl)
 
 const storageKey = 'spatial-motion:lottery-screen:v1'
 const savedState = loadLotteryState(storageKey)
@@ -24,6 +43,7 @@ const participants = ref<LotteryParticipant[]>(savedState?.participants ?? creat
 const history = ref<WinnerRecord[]>(savedState?.history ?? [])
 const selectedPrizeId = ref(savedState?.selectedPrizeId ?? prizes[0].id)
 const drawCount = ref(savedState?.drawCount ?? prizes[0].defaultCount)
+const selectedDrawEffectId = ref<DrawEffectId>('vortex')
 const generatedCount = ref(participants.value.length)
 const phase = ref<DrawPhase>('idle')
 const currentWinners = ref<LotteryParticipant[]>([])
@@ -33,19 +53,31 @@ const drawCalls = ref(0)
 const quality = ref('AUTO')
 const isFullscreen = ref(false)
 const stageReady = ref(false)
+const autoSaveAvailable = ref(true)
+const effectParticles = Array.from({ length: 24 }, (_, index) => index)
 
 let stage: MotionStage | null = null
 let statusTimer = 0
 let operation = 0
 
 const selectedPrize = computed(() => prizes.find(({ id }) => id === selectedPrizeId.value) ?? prizes[0])
+const selectedDrawEffect = computed(() => drawEffects.find(({ id }) => id === selectedDrawEffectId.value) ?? drawEffects[0])
+const drawingHeadline = computed(() => ({
+  sphere: 'LUCK IN ORBIT',
+  vortex: 'LUCK IS MOVING',
+  tunnel: 'THROUGH THE STARS',
+})[selectedDrawEffectId.value])
 const winnerIds = computed(() => new Set(history.value.map(({ participantId }) => participantId)))
 const eligibleParticipants = computed(() => participants.value.filter(({ id }) => !winnerIds.value.has(id)))
 const historyNewestFirst = computed(() => [...history.value].reverse())
 const nextRound = computed(() => history.value.reduce((maximum, record) => Math.max(maximum, record.round), 0) + 1)
 const canStart = computed(() => stageReady.value && eligibleParticipants.value.length > 0 && drawCount.value > 0)
 
-watch([participants, history, selectedPrizeId, drawCount], persistState, { deep: true })
+watch([eligibleParticipants, drawCount], ([eligible, count]) => {
+  const normalized = Math.min(Math.max(1, eligible.length), Math.max(1, Number.isFinite(count) ? Math.floor(count) : 1))
+  if (drawCount.value !== normalized) drawCount.value = normalized
+}, { immediate: true })
+watch([participants, history, selectedPrizeId, drawCount], persistState, { deep: true, immediate: true })
 
 onMounted(async () => {
   if (!stageElement.value) return
@@ -53,13 +85,15 @@ onMounted(async () => {
     container: stageElement.value,
     quality: 'auto',
     adaptivePerformance: true,
+    cameraZ: 18,
     transition: { duration: 900 },
-    motionPreference: 'full',
+    motionPreference: 'auto',
     cardResolution: 96,
     cardStyle: {
-      shape: 'circle',
-      borderWidth: 2,
-      borderColor: 'rgba(255, 232, 173, .72)',
+      shape: 'rounded',
+      cornerRadius: 7,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 244, 218, .46)',
       backgroundColor: '#11101b',
     },
     ariaLabel: '抽奖参与者空间舞台',
@@ -89,8 +123,15 @@ onBeforeUnmount(() => {
 })
 
 function stageLayout() {
-  const radius = Math.min(6.2, 4.35 + Math.sqrt(participants.value.length) / 42)
-  return sphere({ radius, distribution: 'fibonacci', density: 0.9 })
+  const radius = Math.min(6.05, 5.45 + Math.sqrt(participants.value.length) / 60)
+  return sphere({
+    radius,
+    distribution: 'latitude',
+    poleMode: 'exclude',
+    stagger: true,
+    density: 0.92,
+    orientation: 'surface',
+  })
 }
 
 function winnerRecordFor(id: string): WinnerRecord | undefined {
@@ -110,11 +151,47 @@ async function startDraw(): Promise<void> {
   const currentOperation = ++operation
   currentWinners.value = []
   phase.value = 'drawing'
-  message.value = `${selectedPrize.value.name}正在抽取 · 再按空格停止`
+  message.value = `${selectedPrize.value.name} · ${selectedDrawEffect.value.name}正在运行 · 再按空格停止`
   playCue('start')
 
   await stage.updateItems(motionItems(), { layout: stageLayout(), duration: 420 })
   if (!stage || currentOperation !== operation || phase.value !== 'drawing') return
+  await enterSelectedDrawEffect(currentOperation)
+}
+
+async function enterSelectedDrawEffect(currentOperation: number): Promise<void> {
+  if (!stage || currentOperation !== operation || phase.value !== 'drawing') return
+  const seed = nextRound.value * 97
+
+  if (selectedDrawEffectId.value === 'sphere') {
+    stage.autoRotate({ x: 0.025, y: 0.52 })
+    await stage.to(sphere({
+      radius: Math.min(6.2, 5.58 + Math.sqrt(participants.value.length) / 60),
+      distribution: 'latitude',
+      poleMode: 'exclude',
+      stagger: true,
+      density: 0.94,
+      orientation: 'surface',
+    }), { duration: 760 })
+    return
+  }
+
+  stage.autoRotate({ y: 0.08 })
+  if (selectedDrawEffectId.value === 'tunnel') {
+    await stage.enterEffect(tunnel({
+      speed: 0.22,
+      twist: 0.16,
+      innerRadius: 0.3,
+      outerRadius: 5.8,
+      nearZ: 8,
+      farZ: -16,
+      maxActiveItems: 360,
+      seed,
+      crossSection: 'circle',
+    }), { duration: 700 })
+    return
+  }
+
   await stage.enterEffect(vortex({
     speed: 0.24,
     turns: 3.2,
@@ -122,7 +199,7 @@ async function startDraw(): Promise<void> {
     nearZ: 6,
     farZ: -10,
     maxActiveItems: 360,
-    seed: nextRound.value * 97,
+    seed,
   }), { duration: 680 })
 }
 
@@ -144,6 +221,7 @@ async function stopDraw(): Promise<void> {
   history.value.push(...records)
   currentWinners.value = winners
   phase.value = 'revealing'
+  stage.autoRotate({ y: 0.12 })
   message.value = `第 ${round} 轮揭晓 · ${selectedPrize.value.name}`
   persistState()
   playCue('reveal')
@@ -152,13 +230,24 @@ async function stopDraw(): Promise<void> {
   const revealOrder = [...winners, ...participants.value.filter(({ id }) => !selected.has(id))]
   await stage.updateItems(motionItems(revealOrder), { layout: stageLayout(), duration: 360 })
   if (!stage || phase.value !== 'revealing') return
+  await stage.enterEffect(radialBurst({
+    sourceRadius: 0.08,
+    outerRadius: 7.4,
+    speed: 0.16,
+    z: 1.6,
+    startScale: 0.16,
+    endScale: 0.78,
+    maxActiveItems: 220,
+    seed: round * 131,
+  }), { duration: 260 })
+  if (!stage || phase.value !== 'revealing') return
   await stage.focusItems(winners.map(({ id }) => id), {
-    duration: 920,
+    duration: 860,
     columns: Math.ceil(Math.sqrt(winners.length)),
-    gap: winners.length === 1 ? 0 : 2,
-    scale: winners.length === 1 ? 2.15 : winners.length <= 4 ? 1.55 : 1.2,
-    z: 8.2,
-    dimOpacity: 0.025,
+    gap: winners.length === 1 ? 0 : 1.72,
+    scale: winners.length === 1 ? 1.72 : winners.length <= 4 ? 1.28 : 1.02,
+    z: 6.7,
+    dimOpacity: 0.018,
   })
 }
 
@@ -245,6 +334,12 @@ function selectPrize(prize: Prize): void {
   drawCount.value = Math.min(prize.defaultCount, Math.max(1, eligibleParticipants.value.length))
 }
 
+function selectDrawEffect(effect: DrawEffectOption): void {
+  if (phase.value === 'drawing') return
+  selectedDrawEffectId.value = effect.id
+  message.value = `已选择${effect.name}效果 · 按空格开始`
+}
+
 function prizeWinnerCount(prizeId: string): number {
   return history.value.filter((record) => record.prizeId === prizeId).length
 }
@@ -265,7 +360,40 @@ function persistState(): void {
     selectedPrizeId: selectedPrizeId.value,
     drawCount: drawCount.value,
   }
-  localStorage.setItem(storageKey, JSON.stringify(state))
+  autoSaveAvailable.value = saveLotteryState(storageKey, state)
+}
+
+function exportWinnerHistory(): void {
+  if (!history.value.length) return
+  const csv = createWinnerHistoryCsv(history.value.map((record) => {
+    const participant = participantById(record.participantId)
+    return {
+      round: record.round,
+      prize: prizeById(record.prizeId)?.name ?? '未知奖项',
+      name: participant?.name ?? '未知参与者',
+      department: participant?.department ?? '',
+      drawnAt: new Intl.DateTimeFormat('zh-CN', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      }).format(new Date(record.drawnAt)),
+    }
+  }))
+  downloadCsv(csv, `中奖记录-${new Date().toISOString().slice(0, 10)}.csv`)
+  message.value = `已导出 ${history.value.length} 条中奖记录`
+}
+
+function downloadParticipantTemplate(): void {
+  downloadCsv(createParticipantTemplateCsv(), '参与者名单模板.csv')
+  message.value = '名单模板已下载'
+}
+
+function downloadCsv(content: string, filename: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 function updatePerformance(): void {
@@ -291,7 +419,7 @@ function handleFullscreenChange(): void {
 
 function handleKeyboard(event: KeyboardEvent): void {
   const target = event.target as HTMLElement | null
-  if (target?.matches('input, select, textarea, button')) return
+  if (target?.closest('input, select, textarea, button, a, summary, [contenteditable]:not([contenteditable="false"])')) return
   if (event.code === 'Space') {
     event.preventDefault()
     toggleDraw()
@@ -304,32 +432,68 @@ function handleKeyboard(event: KeyboardEvent): void {
   }
 }
 
-function drawParticipantCard(
+async function drawParticipantCard(
+  context: CanvasRenderingContext2D,
+  item: MotionItem,
+  bounds: { x: number; y: number; width: number; height: number },
+): Promise<void> {
+  const meta = item.meta as { department?: string; prizeName?: string; prizeColor?: string } | undefined
+  const winner = Boolean(meta?.prizeName)
+  const image = await avatarAtlas
+  if (image) {
+    const columns = 6
+    const tile = hash(item.id) % (columns * columns)
+    const sourceWidth = image.naturalWidth / columns
+    const sourceHeight = image.naturalHeight / columns
+    context.drawImage(
+      image,
+      (tile % columns) * sourceWidth,
+      Math.floor(tile / columns) * sourceHeight,
+      sourceWidth,
+      sourceHeight,
+      bounds.x,
+      bounds.y,
+      bounds.width,
+      bounds.height,
+    )
+  } else {
+    drawFallbackAvatar(context, item, bounds)
+  }
+
+  if (winner) {
+    context.fillStyle = 'rgba(255, 194, 80, .2)'
+    context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height)
+    context.strokeStyle = meta?.prizeColor ?? '#ffe6a3'
+    context.lineWidth = Math.max(2, bounds.width * .045)
+    context.strokeRect(3, 3, bounds.width - 6, bounds.height - 6)
+  }
+}
+
+function drawFallbackAvatar(
   context: CanvasRenderingContext2D,
   item: MotionItem,
   bounds: { x: number; y: number; width: number; height: number },
 ): void {
-  const meta = item.meta as { department?: string; prizeName?: string; prizeColor?: string } | undefined
-  const winner = Boolean(meta?.prizeName)
   const hue = hash(item.id) % 360
-  const gradient = context.createLinearGradient(0, 0, bounds.width, bounds.height)
-  gradient.addColorStop(0, winner ? '#fff0bd' : `hsl(${hue} 66% 56%)`)
-  gradient.addColorStop(1, winner ? '#b46d1c' : `hsl(${(hue + 42) % 360} 58% 25%)`)
+  const gradient = context.createLinearGradient(bounds.x, bounds.y, bounds.width, bounds.height)
+  gradient.addColorStop(0, `hsl(${hue} 58% 49%)`)
+  gradient.addColorStop(1, `hsl(${(hue + 48) % 360} 56% 18%)`)
   context.fillStyle = gradient
   context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height)
-  context.fillStyle = winner ? '#211305' : 'rgba(255,255,255,.96)'
+  context.fillStyle = 'rgba(255,255,255,.92)'
   context.textAlign = 'center'
   context.textBaseline = 'middle'
-  context.font = `800 ${bounds.width * 0.24}px system-ui, sans-serif`
-  context.fillText((item.title ?? item.id).slice(-2), bounds.width / 2, bounds.height * 0.49)
-  context.font = `700 ${bounds.width * 0.09}px system-ui, sans-serif`
-  context.fillStyle = winner ? '#56320d' : 'rgba(255,255,255,.76)'
-  context.fillText(winner ? 'WINNER' : (meta?.department ?? 'GUEST').slice(0, 6), bounds.width / 2, bounds.height * 0.72)
-  if (winner) {
-    context.strokeStyle = meta?.prizeColor ?? '#ffe6a3'
-    context.lineWidth = Math.max(2, bounds.width * 0.055)
-    context.strokeRect(3, 3, bounds.width - 6, bounds.height - 6)
-  }
+  context.font = `800 ${bounds.width * .22}px system-ui, sans-serif`
+  context.fillText((item.title ?? item.id).slice(-2), bounds.width / 2, bounds.height / 2)
+}
+
+function loadAvatarAtlas(source: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const image = new Image()
+    image.addEventListener('load', () => resolve(image), { once: true })
+    image.addEventListener('error', () => resolve(null), { once: true })
+    image.src = source
+  })
 }
 
 function hash(value: string): number {
@@ -369,7 +533,12 @@ function destroyStage(): void {
 </script>
 
 <template>
-  <main class="lottery-shell" :data-phase="phase">
+  <main
+    class="lottery-shell"
+    :data-phase="phase"
+    :data-effect="selectedDrawEffectId"
+    :style="{ '--active-prize': selectedPrize.color }"
+  >
     <div class="ambient ambient-one"></div>
     <div class="ambient ambient-two"></div>
 
@@ -418,6 +587,24 @@ function destroyStage(): void {
           </div>
         </section>
 
+        <section class="control-section effect-section">
+          <div class="section-title"><span>抽取效果</span><small>{{ selectedDrawEffect.label }}</small></div>
+          <div class="effect-picker">
+            <button
+              v-for="effect in drawEffects"
+              :key="effect.id"
+              type="button"
+              :class="{ active: selectedDrawEffectId === effect.id }"
+              :disabled="phase === 'drawing'"
+              :aria-pressed="selectedDrawEffectId === effect.id"
+              @click="selectDrawEffect(effect)"
+            >
+              <i>{{ effect.icon }}</i>
+              <span>{{ effect.name }}</span>
+            </button>
+          </div>
+        </section>
+
         <section class="control-section draw-settings">
           <div class="section-title"><span>本轮人数</span><small>剩余 {{ eligibleParticipants.length }}</small></div>
           <div class="number-control">
@@ -443,9 +630,10 @@ function destroyStage(): void {
           <div class="data-tools-body">
             <label>生成示例人数<input v-model.number="generatedCount" type="number" min="10" max="2000" /></label>
             <button type="button" :disabled="phase === 'drawing'" @click="regenerateParticipants">重新生成</button>
-            <button type="button" :disabled="phase === 'drawing'" @click="fileInput?.click()">导入 CSV / TXT</button>
-            <input ref="fileInput" class="visually-hidden" type="file" accept=".csv,.txt,text/csv,text/plain" @change="importParticipantFile" />
-            <p>每行格式：姓名,部门；最多 2000 人。</p>
+            <button type="button" :disabled="phase === 'drawing'" @click="fileInput?.click()">导入 CSV / TSV</button>
+            <button class="template-button" type="button" :disabled="phase === 'drawing'" @click="downloadParticipantTemplate">下载名单模板</button>
+            <input ref="fileInput" class="visually-hidden" type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" @change="importParticipantFile" />
+            <p>支持逗号或制表符分隔、标准 CSV 引号；最多 2000 人。</p>
           </div>
         </details>
       </aside>
@@ -454,21 +642,45 @@ function destroyStage(): void {
         <div class="stage-grid"></div>
         <div ref="stageElement" class="motion-stage"></div>
         <div class="stage-vignette"></div>
+        <div class="stage-ceremony" aria-hidden="true">
+          <div class="ceremony-halo"></div>
+          <div class="ceremony-ring ceremony-ring-one"></div>
+          <div class="ceremony-ring ceremony-ring-two"></div>
+          <div class="ceremony-scan"></div>
+          <span
+            v-for="particle in effectParticles"
+            :key="particle"
+            class="ceremony-particle"
+            :style="{
+              '--particle-index': particle,
+              '--particle-angle': `${particle * 15}deg`,
+              '--particle-delay': `${(particle % 8) * -0.17}s`,
+            }"
+          ></span>
+        </div>
+        <div class="reveal-flash" aria-hidden="true"></div>
+        <div class="stage-status" aria-hidden="true">
+          <span>R{{ nextRound.toString().padStart(2, '0') }}</span>
+          <i></i>
+          <span>{{ selectedPrize.label }} · {{ selectedDrawEffect.label }}</span>
+        </div>
         <div class="stage-copy" :class="{ compact: phase !== 'idle' }">
           <p>{{ selectedPrize.label }}</p>
           <h2 v-if="phase === 'idle'">{{ selectedPrize.name }}</h2>
-          <h2 v-else-if="phase === 'drawing'" class="drawing-title">LUCK IS MOVING</h2>
+          <h2 v-else-if="phase === 'drawing'" class="drawing-title">{{ drawingHeadline }}</h2>
           <h2 v-else>CONGRATULATIONS</h2>
-          <span>{{ message }}</span>
+          <span role="status" aria-live="polite">{{ message }}</span>
         </div>
 
         <Transition name="winner">
           <div v-if="phase === 'revealing' && currentWinners.length" class="winner-overlay" aria-live="polite">
             <p class="winner-kicker">{{ selectedPrize.name }} · WINNER</p>
             <div class="winner-names" :class="{ multiple: currentWinners.length > 1 }">
-              <article v-for="participant in currentWinners" :key="participant.id">
+              <article v-for="(participant, index) in currentWinners" :key="participant.id">
+                <i>{{ String(index + 1).padStart(2, '0') }}</i>
                 <span>{{ participant.department }}</span>
                 <strong>{{ participant.name }}</strong>
+                <small>{{ selectedPrize.label }}</small>
               </article>
             </div>
             <button type="button" @click="dismissWinners">继续下一轮 <span>↗</span></button>
@@ -484,9 +696,12 @@ function destroyStage(): void {
       </section>
 
       <aside class="history-panel glass-panel">
-        <div class="panel-heading">
+        <div class="panel-heading history-heading">
           <div><p class="eyebrow">WINNER LOG</p><h2>中奖记录</h2></div>
-          <span class="history-count">{{ history.length }}</span>
+          <div class="history-actions">
+            <button type="button" :disabled="!history.length" @click="exportWinnerHistory">导出 CSV</button>
+            <span class="history-count">{{ history.length }}</span>
+          </div>
         </div>
         <div v-if="historyNewestFirst.length" class="history-list">
           <article v-for="record in historyNewestFirst" :key="record.id" class="history-item">
@@ -507,7 +722,7 @@ function destroyStage(): void {
           <p>中奖记录会自动保存在本机</p>
         </div>
         <footer>
-          <span>本地自动保存</span>
+          <span>{{ autoSaveAvailable ? '本地自动保存' : '本地存储不可用' }}</span>
           <i></i>
           <span>设备随机源</span>
         </footer>

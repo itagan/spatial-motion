@@ -290,21 +290,23 @@ export class MotionStage {
     this.camera.position.z = options.cameraZ ?? 18
     this.renderer = new WebGLRenderer({ alpha: true, antialias: profile.antialias, powerPreference: 'high-performance' })
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
-    this.options.container.appendChild(this.renderer.domElement)
-    this.renderer.domElement.addEventListener('webglcontextlost', this.handleContextLost)
-    this.renderer.domElement.addEventListener('webglcontextrestored', this.handleContextRestored)
-    this.renderer.domElement.addEventListener('pointerup', this.handlePointerUp)
+    const canvas = this.renderer.domElement
+    canvas.style.width = canvas.style.height = '100%'
+    this.options.container.appendChild(canvas)
+    canvas.addEventListener('webglcontextlost', this.handleContextLost)
+    canvas.addEventListener('webglcontextrestored', this.handleContextRestored)
+    canvas.addEventListener('pointerup', this.handlePointerUp)
     if (this.keyboardNavigation) {
-      this.renderer.domElement.tabIndex = 0
-      this.renderer.domElement.setAttribute('role', 'region')
-      this.renderer.domElement.setAttribute('aria-label', this.baseAriaLabel)
-      this.renderer.domElement.addEventListener('keydown', this.handleKeyDown)
-      this.renderer.domElement.addEventListener('focus', this.handleCanvasFocus)
-      this.renderer.domElement.addEventListener('blur', this.handleCanvasBlur)
+      canvas.tabIndex = 0
+      canvas.setAttribute('role', 'region')
+      canvas.setAttribute('aria-label', this.baseAriaLabel)
+      canvas.addEventListener('keydown', this.handleKeyDown)
+      canvas.addEventListener('focus', this.handleCanvasFocus)
+      canvas.addEventListener('blur', this.handleCanvasBlur)
     }
     if (this.hoverEnabled) {
-      this.renderer.domElement.addEventListener('pointermove', this.handlePointerMove)
-      this.renderer.domElement.addEventListener('pointerleave', this.handlePointerLeave)
+      canvas.addEventListener('pointermove', this.handlePointerMove)
+      canvas.addEventListener('pointerleave', this.handlePointerLeave)
     }
     if (this.motionPreference === 'auto') {
       this.motionQuery?.addEventListener('change', this.handleMotionPreferenceChange)

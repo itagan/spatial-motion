@@ -30,6 +30,14 @@ export interface PersistedLotteryState {
   drawCount: number
 }
 
+export interface WinnerExportRow {
+  round: number
+  prize: string
+  name: string
+  department: string
+  drawnAt: string
+}
+
 export const prizes: Prize[] = [
   { id: 'grand', name: '特等奖', label: 'GRAND PRIZE', color: '#ffe6a3', defaultCount: 1 },
   { id: 'first', name: '一等奖', label: 'FIRST PRIZE', color: '#ffbd73', defaultCount: 1 },
@@ -51,12 +59,9 @@ export function createParticipants(count: number): LotteryParticipant[] {
 }
 
 export function parseParticipants(text: string): LotteryParticipant[] {
-  const rows = text
-    .replace(/^\uFEFF/, '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.split(/[,\t，]/).map((cell) => cell.trim()))
+  const rows = parseDelimitedRows(text.replace(/^\uFEFF/, ''))
+    .map((row) => row.map((cell) => cell.trim()))
+    .filter((row) => row.some(Boolean))
 
   if (rows[0]?.[0] && /^(姓名|name)$/i.test(rows[0][0])) rows.shift()
   const participants = rows
@@ -70,6 +75,10 @@ export function parseParticipants(text: string): LotteryParticipant[] {
 
   if (participants.length < 2) throw new Error('名单至少需要两位参与者')
   return participants
+}
+
+export function createParticipantTemplateCsv(): string {
+  return '\uFEFF姓名,部门\r\n示例姓名,示例部门'
 }
 
 export function pickParticipants(
@@ -107,16 +116,29 @@ export function loadLotteryState(key: string): PersistedLotteryState | null {
     if (!value || typeof value !== 'object') return null
     const state = value as Partial<PersistedLotteryState>
     if (state.version !== 1 || !Array.isArray(state.participants) || !Array.isArray(state.history)) return null
-    const participants = state.participants.filter(isParticipant).slice(0, 2_000)
+    const participants = uniqueBy(
+      state.participants.filter(isParticipant),
+      ({ id }) => id,
+    ).slice(0, 2_000)
     if (participants.length < 2) return null
     const participantIds = new Set(participants.map(({ id }) => id))
     const prizeIds = new Set(prizes.map(({ id }) => id))
+    const seenRecordIds = new Set<string>()
+    const seenWinnerIds = new Set<string>()
+    const history = state.history.filter((record): record is WinnerRecord => {
+      if (!isWinnerRecord(record)
+        || !participantIds.has(record.participantId)
+        || !prizeIds.has(record.prizeId)
+        || seenRecordIds.has(record.id)
+        || seenWinnerIds.has(record.participantId)) return false
+      seenRecordIds.add(record.id)
+      seenWinnerIds.add(record.participantId)
+      return true
+    })
     return {
       version: 1,
       participants,
-      history: state.history.filter((record) => isWinnerRecord(record)
-        && participantIds.has(record.participantId)
-        && prizeIds.has(record.prizeId)),
+      history,
       selectedPrizeId: typeof state.selectedPrizeId === 'string' && prizeIds.has(state.selectedPrizeId)
         ? state.selectedPrizeId
         : prizes[0].id,
@@ -127,6 +149,27 @@ export function loadLotteryState(key: string): PersistedLotteryState | null {
   } catch {
     return null
   }
+}
+
+export function saveLotteryState(key: string, state: PersistedLotteryState): boolean {
+  try {
+    localStorage.setItem(key, JSON.stringify(state))
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function createWinnerHistoryCsv(rows: WinnerExportRow[]): string {
+  const header = ['轮次', '奖项', '姓名', '部门', '抽取时间']
+  const records = rows.map(({ round, prize, name, department, drawnAt }) => [
+    String(round),
+    prize,
+    name,
+    department,
+    drawnAt,
+  ])
+  return `\uFEFF${[header, ...records].map((row) => row.map(escapeCsvCell).join(',')).join('\r\n')}`
 }
 
 function isParticipant(value: unknown): value is LotteryParticipant {
@@ -143,10 +186,74 @@ function isWinnerRecord(value: unknown): value is WinnerRecord {
   if (!value || typeof value !== 'object') return false
   const record = value as Partial<WinnerRecord>
   return typeof record.id === 'string'
+    && record.id.length > 0
     && typeof record.participantId === 'string'
     && typeof record.prizeId === 'string'
     && Number.isInteger(record.round)
+    && (record.round as number) > 0
     && typeof record.drawnAt === 'string'
+    && Number.isFinite(Date.parse(record.drawnAt))
+}
+
+function uniqueBy<T>(values: T[], key: (value: T) => string): T[] {
+  const seen = new Set<string>()
+  return values.filter((value) => {
+    const id = key(value)
+    if (seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
+}
+
+function escapeCsvCell(value: string): string {
+  return /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value
+}
+
+function parseDelimitedRows(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ''
+  let quoted = false
+
+  const pushCell = () => {
+    row.push(cell)
+    cell = ''
+  }
+  const pushRow = () => {
+    pushCell()
+    rows.push(row)
+    row = []
+  }
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]
+    if (quoted) {
+      if (character === '"' && text[index + 1] === '"') {
+        cell += '"'
+        index += 1
+      } else if (character === '"') {
+        quoted = false
+      } else {
+        cell += character
+      }
+      continue
+    }
+
+    if (character === '"' && cell.trim().length === 0) {
+      cell = ''
+      quoted = true
+    } else if (character === ',' || character === '，' || character === '\t') {
+      pushCell()
+    } else if (character === '\n') {
+      pushRow()
+    } else if (character !== '\r') {
+      cell += character
+    }
+  }
+
+  if (quoted) throw new Error('名单文件存在未闭合的引号')
+  if (cell.length > 0 || row.length > 0) pushRow()
+  return rows
 }
 
 function secureRandomInt(max: number): number {

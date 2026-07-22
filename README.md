@@ -96,7 +96,7 @@ npm run pack:check
 - [`vanilla`](./examples/vanilla/)：最小 Stage、数据、布局和暂停/恢复。
 - [`three-extension`](./examples/three-extension/)：原生 Three.js Object3D 挂载、逐帧更新与资源释放。
 - [`gsap-extension`](./examples/gsap-extension/)：使用 Stage elapsed 推进 paused GSAP timeline。
-- [`lottery-screen`](./examples/lottery-screen/)：Vue 3 抽奖大屏，把奖项、轮次、名单、中奖历史和本地恢复保留在应用层，使用 Stage 编排滚动与揭晓。
+- [`lottery-screen`](./examples/lottery-screen/)：Vue 3 抽奖大屏，把奖项、轮次、名单、中奖历史、本地恢复和 CSV 导出保留在应用层，使用 Stage 编排滚动与揭晓。
 
 ```bash
 npm run dev:examples
