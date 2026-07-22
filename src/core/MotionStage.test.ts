@@ -423,6 +423,17 @@ describe('MotionStage', () => {
     expect(finalStep).not.toHaveBeenCalled()
   })
 
+  it('keeps the canvas CSS size pinned to its container at high pixel ratios', () => {
+    const stage = createStage()
+    const canvas = document.querySelector('canvas')!
+    const renderer = stageMocks.webglRenderers.at(-1) as { setSize: ReturnType<typeof vi.fn> }
+
+    expect(canvas.style.width).toBe('100%')
+    expect(canvas.style.height).toBe('100%')
+    expect(renderer.setSize).toHaveBeenCalledWith(100, 100, false)
+    stage.destroy()
+  })
+
   it('mounts extensions on isolated roots and updates them in the Stage frame loop', async () => {
     let frame: FrameRequestCallback | null = null
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {

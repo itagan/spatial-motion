@@ -113,7 +113,16 @@ button { color: inherit; }
   backdrop-filter: blur(22px);
 }
 
-.control-panel { display: flex; flex-direction: column; padding: 18px; overflow-y: auto; }
+.control-panel {
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  overflow-y: auto;
+  scrollbar-color: rgba(247, 199, 107, .2) transparent;
+  scrollbar-width: thin;
+}
+.control-panel::-webkit-scrollbar { width: 5px; }
+.control-panel::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(247, 199, 107, .2); }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .panel-heading h2 { font-size: 17px; }
 .round-chip, .history-count {
@@ -126,6 +135,19 @@ button { color: inherit; }
 }
 .round-chip { padding: 7px 9px; }
 .history-count { display: grid; min-width: 29px; height: 29px; place-items: center; }
+.history-actions { display: flex; align-items: center; gap: 6px; }
+.history-actions button {
+  min-height: 29px;
+  padding: 0 8px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 8px;
+  color: #8f94a2;
+  background: rgba(255,255,255,.025);
+  font-size: 7px;
+  cursor: pointer;
+}
+.history-actions button:hover:not(:disabled) { color: #fff0c9; border-color: rgba(247,199,107,.25); }
+.history-actions button:disabled { opacity: .32; cursor: not-allowed; }
 
 .control-section { margin-top: 22px; }
 .section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 11px; font-weight: 600; }
@@ -154,6 +176,28 @@ button { color: inherit; }
 .prize-option small { color: #686d7c; font-size: 7px; letter-spacing: .12em; }
 .prize-option b { font: 10px/1 ui-monospace, monospace; }
 .prize-option:disabled { cursor: not-allowed; opacity: .65; }
+
+.effect-section { margin-top: 16px; }
+.effect-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.effect-picker button {
+  display: grid;
+  min-width: 0;
+  min-height: 52px;
+  place-items: center;
+  gap: 3px;
+  padding: 7px 4px;
+  border: 1px solid rgba(255,255,255,.075);
+  border-radius: 9px;
+  color: #737988;
+  background: rgba(255,255,255,.025);
+  cursor: pointer;
+  transition: border-color .2s ease, color .2s ease, background .2s ease, transform .2s ease;
+}
+.effect-picker button:hover:not(:disabled) { color: #e8e2d8; border-color: rgba(255,255,255,.18); transform: translateY(-1px); }
+.effect-picker button.active { color: #fff0c9; border-color: color-mix(in srgb, var(--active-prize), transparent 58%); background: color-mix(in srgb, var(--active-prize), transparent 91%); box-shadow: inset 0 0 18px color-mix(in srgb, var(--active-prize), transparent 92%); }
+.effect-picker button:disabled { opacity: .42; cursor: not-allowed; }
+.effect-picker i { font-style: normal; font-size: 13px; line-height: 1; text-shadow: 0 0 10px currentColor; }
+.effect-picker span { overflow: hidden; max-width: 100%; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 
 .draw-settings { margin-top: 17px; }
 .number-control { display: grid; grid-template-columns: 36px 1fr 36px; gap: 6px; }
@@ -214,6 +258,7 @@ button { color: inherit; }
 .data-tools label { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 72px; align-items: center; gap: 8px; }
 .data-tools input { width: 100%; padding: 6px; border: 1px solid rgba(255,255,255,.09); border-radius: 7px; color: #fff; background: rgba(255,255,255,.04); }
 .data-tools p { grid-column: 1 / -1; margin: 2px 0 0; color: #555b68; font-size: 8px; }
+.data-tools .template-button { grid-column: 1 / -1; }
 
 .stage-frame {
   position: relative;
@@ -230,6 +275,117 @@ button { color: inherit; }
 .stage-grid { position: absolute; right: -12%; bottom: -43%; left: -12%; height: 68%; background-image: linear-gradient(rgba(236,190,112,.09) 1px, transparent 1px), linear-gradient(90deg, rgba(236,190,112,.09) 1px, transparent 1px); background-size: 42px 42px; mask-image: linear-gradient(to bottom, transparent, #000); transform: perspective(420px) rotateX(63deg); transform-origin: center bottom; }
 .stage-vignette { position: absolute; inset: 0; box-shadow: inset 0 0 110px 35px rgba(2,3,9,.82); pointer-events: none; }
 
+.stage-ceremony,
+.reveal-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.stage-ceremony {
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity .45s ease;
+}
+
+.ceremony-halo {
+  position: absolute;
+  width: min(52vw, 660px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--active-prize), transparent 80%), transparent 66%);
+  filter: blur(18px);
+  transform: scale(.7);
+}
+
+.ceremony-ring {
+  position: absolute;
+  width: min(32vw, 410px);
+  aspect-ratio: 1;
+  border: 1px solid color-mix(in srgb, var(--active-prize), transparent 42%);
+  border-radius: 50%;
+  box-shadow: 0 0 28px color-mix(in srgb, var(--active-prize), transparent 82%), inset 0 0 28px color-mix(in srgb, var(--active-prize), transparent 88%);
+}
+
+.ceremony-ring::before,
+.ceremony-ring::after {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--active-prize);
+  box-shadow: 0 0 16px var(--active-prize);
+  content: "";
+}
+
+.ceremony-ring::before { top: -4px; left: 50%; }
+.ceremony-ring::after { right: 8%; bottom: 20%; }
+.ceremony-ring-two { width: min(23vw, 290px); border-style: dashed; opacity: .56; }
+
+.ceremony-scan {
+  position: absolute;
+  width: min(54vw, 680px);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--active-prize), transparent);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--active-prize), transparent 30%);
+  opacity: .75;
+}
+
+.ceremony-particle {
+  --particle-radius: min(20vw, 260px);
+  position: absolute;
+  width: 3px;
+  height: 18px;
+  border-radius: 999px;
+  background: linear-gradient(to bottom, var(--active-prize), transparent);
+  opacity: 0;
+  transform: rotate(var(--particle-angle)) translateY(calc(var(--particle-radius) * -1));
+  transform-origin: 50% var(--particle-radius);
+}
+
+.reveal-flash {
+  opacity: 0;
+  background: radial-gradient(circle at center, rgba(255,255,255,.82), color-mix(in srgb, var(--active-prize), transparent 42%) 9%, transparent 42%);
+}
+
+.lottery-shell[data-phase="drawing"] .stage-ceremony,
+.lottery-shell[data-phase="revealing"] .stage-ceremony { opacity: 1; }
+.lottery-shell[data-phase="drawing"] .ceremony-halo { animation: haloBreathe 1.4s ease-in-out infinite alternate; }
+.lottery-shell[data-phase="drawing"] .ceremony-ring-one { animation: ringSpin 5s linear infinite; }
+.lottery-shell[data-phase="drawing"] .ceremony-ring-two { animation: ringSpinReverse 3.2s linear infinite; }
+.lottery-shell[data-phase="drawing"] .ceremony-scan { animation: scanLine 1.8s ease-in-out infinite; }
+.lottery-shell[data-phase="drawing"] .draw-button.stop { animation: stopPulse 1.3s ease-in-out infinite; }
+.lottery-shell[data-phase="drawing"][data-effect="sphere"] .ceremony-ring-one { animation-duration: 2.8s; }
+.lottery-shell[data-phase="drawing"][data-effect="sphere"] .ceremony-ring-two { animation-duration: 1.9s; }
+.lottery-shell[data-phase="drawing"][data-effect="tunnel"] .ceremony-ring-one { animation: tunnelRing 2.8s linear infinite; }
+.lottery-shell[data-phase="drawing"][data-effect="tunnel"] .ceremony-ring-two { animation: tunnelRingReverse 1.9s linear infinite; }
+.lottery-shell[data-phase="drawing"][data-effect="tunnel"] .ceremony-scan { animation-name: tunnelScan; }
+.lottery-shell[data-phase="revealing"] .ceremony-halo { opacity: .55; transform: scale(1.25); transition: transform 1s cubic-bezier(.16,.84,.3,1); }
+.lottery-shell[data-phase="revealing"] .ceremony-ring { opacity: .18; transform: scale(1.6); transition: transform 1s ease-out, opacity .8s ease; }
+.lottery-shell[data-phase="revealing"] .reveal-flash { animation: revealFlash .8s ease-out both; }
+.lottery-shell[data-phase="revealing"] .ceremony-particle {
+  animation: particleBurst 1.2s cubic-bezier(.12,.7,.22,1) both;
+  animation-delay: var(--particle-delay);
+}
+
+.stage-status {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255,255,255,.28);
+  font: 8px/1 ui-monospace, monospace;
+  letter-spacing: .13em;
+  pointer-events: none;
+}
+.stage-status i { width: 18px; height: 1px; background: color-mix(in srgb, var(--active-prize), transparent 58%); }
+
 .stage-copy { position: absolute; top: 42px; right: 0; left: 0; z-index: 4; text-align: center; pointer-events: none; transition: .35s ease; }
 .stage-copy.compact { transform: translateY(-12px); opacity: .52; }
 .stage-copy p { margin: 0 0 7px; color: rgba(255,218,146,.55); font: 700 9px/1 ui-monospace, monospace; letter-spacing: .35em; }
@@ -240,10 +396,13 @@ button { color: inherit; }
 .winner-overlay { position: absolute; right: 8%; bottom: 78px; left: 8%; z-index: 7; display: grid; justify-items: center; pointer-events: none; }
 .winner-kicker { margin: 0 0 13px; color: #f4c976; font: 700 9px/1 ui-monospace, monospace; letter-spacing: .35em; }
 .winner-names { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
-.winner-names article { min-width: 240px; padding: 14px 24px 17px; border: 1px solid rgba(255,218,144,.32); border-radius: 12px; background: linear-gradient(110deg, rgba(80,46,18,.82), rgba(20,16,20,.78)); box-shadow: 0 18px 50px rgba(0,0,0,.28); text-align: center; backdrop-filter: blur(16px); }
-.winner-names.multiple article { min-width: 150px; padding: 10px 16px 12px; }
+.winner-names article { position: relative; min-width: 240px; padding: 16px 24px 18px; border: 1px solid color-mix(in srgb, var(--active-prize), transparent 63%); border-radius: 12px; background: linear-gradient(115deg, color-mix(in srgb, var(--active-prize), transparent 78%), rgba(16,14,21,.84)); box-shadow: 0 18px 50px rgba(0,0,0,.28), inset 0 1px rgba(255,255,255,.08); text-align: center; backdrop-filter: blur(16px); overflow: hidden; }
+.winner-names article::after { position: absolute; inset: 0; background: linear-gradient(110deg, transparent 20%, rgba(255,255,255,.12), transparent 62%); transform: translateX(-110%); animation: winnerSheen 1.1s .3s ease-out both; content: ""; }
+.winner-names.multiple article { min-width: 150px; padding: 12px 16px 14px; }
+.winner-names article > i { position: absolute; top: 8px; left: 10px; color: color-mix(in srgb, var(--active-prize), transparent 44%); font: 7px/1 ui-monospace, monospace; letter-spacing: .08em; }
 .winner-names span { display: block; color: rgba(255,235,195,.52); font-size: 8px; letter-spacing: .15em; }
 .winner-names strong { display: block; margin-top: 3px; color: #fff1cf; font-family: Georgia, "Songti SC", serif; font-size: clamp(20px, 2.2vw, 34px); font-weight: 500; letter-spacing: .12em; }
+.winner-names small { display: block; margin-top: 5px; color: color-mix(in srgb, var(--active-prize), transparent 40%); font: 6px/1 ui-monospace, monospace; letter-spacing: .19em; }
 .winner-overlay > button { margin-top: 12px; padding: 8px 16px; border: 1px solid rgba(255,255,255,.16); border-radius: 999px; color: rgba(255,255,255,.72); background: rgba(10,10,16,.58); font-size: 9px; pointer-events: auto; cursor: pointer; }
 .winner-overlay > button span { margin-left: 6px; color: #f4c976; }
 
@@ -273,6 +432,17 @@ button { color: inherit; }
 
 @keyframes pulse { 50% { opacity: .35; } }
 @keyframes titleGlow { from { opacity: .55; text-shadow: 0 0 25px rgba(255,191,95,.12); } to { opacity: 1; text-shadow: 0 0 45px rgba(255,191,95,.42); } }
+@keyframes haloBreathe { from { opacity: .3; transform: scale(.7); } to { opacity: .75; transform: scale(1.05); } }
+@keyframes ringSpin { to { transform: rotate(360deg); } }
+@keyframes ringSpinReverse { to { transform: rotate(-360deg); } }
+@keyframes tunnelRing { from { transform: perspective(500px) rotateX(68deg) rotate(0) scale(1.45); } to { transform: perspective(500px) rotateX(68deg) rotate(360deg) scale(1.45); } }
+@keyframes tunnelRingReverse { from { transform: perspective(500px) rotateX(68deg) rotate(0) scale(1.45); } to { transform: perspective(500px) rotateX(68deg) rotate(-360deg) scale(1.45); } }
+@keyframes scanLine { 0%, 100% { opacity: 0; transform: translateY(-180px) scaleX(.35); } 45%, 55% { opacity: .8; transform: translateY(170px) scaleX(1); } }
+@keyframes tunnelScan { 0% { opacity: 0; transform: scale(.15); } 38% { opacity: .8; } 100% { opacity: 0; transform: scale(1.45); } }
+@keyframes stopPulse { 50% { box-shadow: 0 12px 42px rgba(171,49,37,.38), 0 0 0 4px rgba(255,176,112,.06), inset 0 1px rgba(255,255,255,.4); } }
+@keyframes revealFlash { 0% { opacity: 0; transform: scale(.2); } 18% { opacity: .72; } 100% { opacity: 0; transform: scale(1.65); } }
+@keyframes particleBurst { 0% { opacity: 0; transform: rotate(var(--particle-angle)) translateY(-45px) scaleY(.2); } 24% { opacity: .9; } 100% { opacity: 0; transform: rotate(var(--particle-angle)) translateY(calc(var(--particle-radius) * -1.55)) scaleY(1.7); } }
+@keyframes winnerSheen { to { transform: translateX(130%); } }
 
 @media (max-width: 1320px) {
   .workspace { grid-template-columns: 250px minmax(430px, 1fr) 240px; }
@@ -284,9 +454,19 @@ button { color: inherit; }
 @media (max-height: 760px) {
   .lottery-shell { grid-template-rows: 64px minmax(0,1fr); }
   .control-section { margin-top: 14px; }
+  .effect-section { margin-top: 10px; }
+  .effect-picker button { min-height: 42px; padding: 5px 3px; }
   .prize-option { padding: 7px 9px; }
   .draw-button { min-height: 54px; margin-top: 11px; }
   .data-tools { padding-top: 8px; }
   .stage-copy { top: 28px; }
   .history-item { padding: 7px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lottery-shell *,
+  .lottery-shell *::before,
+  .lottery-shell *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+  .ceremony-scan,
+  .ceremony-particle { display: none; }
 }
