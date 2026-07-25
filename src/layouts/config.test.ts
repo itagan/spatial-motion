@@ -14,8 +14,8 @@ const context = { width: 1600, height: 900, viewportWidth: 16, viewportHeight: 9
 
 const cases: Array<{ config: LayoutConfig; direct: Layout }> = [
   {
-    config: { version: 1, type: 'sphere', options: { radius: 6, distribution: 'latitude', minLatitude: -1, maxLatitude: 1.2, poleMode: 'exclude', rings: 12, stagger: true, density: 0.7, orientation: 'surface' } },
-    direct: sphere({ radius: 6, distribution: 'latitude', minLatitude: -1, maxLatitude: 1.2, poleMode: 'exclude', rings: 12, stagger: true, density: 0.7, orientation: 'surface' }),
+    config: { version: 1, type: 'sphere', options: { radius: 6, fit: 'contain', viewportPadding: 0.08, startAngle: 0.3, edgeFade: 0.1, distribution: 'latitude', minLatitude: -1, maxLatitude: 1.2, poleMode: 'exclude', rings: 12, stagger: true, density: 0.7, orientation: 'surface' } },
+    direct: sphere({ radius: 6, fit: 'contain', viewportPadding: 0.08, startAngle: 0.3, edgeFade: 0.1, distribution: 'latitude', minLatitude: -1, maxLatitude: 1.2, poleMode: 'exclude', rings: 12, stagger: true, density: 0.7, orientation: 'surface' }),
   },
   {
     config: { version: 1, type: 'box', options: { width: 9, height: 7, depth: 5, density: 0.75, orientation: 'camera', faces: ['front', 'right'], edgePadding: 0.2, faceWeights: { front: 2, right: 1 } } },
@@ -77,6 +77,9 @@ describe('layout configuration', () => {
     [{ version: 1, type: 'toString' }, 'type'],
     [{ version: 1, type: 'sphere', extra: true }, 'extra'],
     [{ version: 1, type: 'sphere', options: { radius: 0 } }, 'options.radius'],
+    [{ version: 1, type: 'sphere', options: { fit: 'cover' } }, 'options.fit'],
+    [{ version: 1, type: 'sphere', options: { viewportPadding: 0.5 } }, 'options.viewportPadding'],
+    [{ version: 1, type: 'sphere', options: { edgeFade: 0.6 } }, 'options.edgeFade'],
     [{ version: 1, type: 'sphere', options: { minLatitude: 1, maxLatitude: 0 } }, 'options.minLatitude'],
     [{ version: 1, type: 'sphere', options: { distribution: 'fibonacci', rings: 12 } }, 'options.rings'],
     [{ version: 1, type: 'box', options: { width: -1 } }, 'options.width'],

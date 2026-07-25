@@ -56,6 +56,16 @@ const opacity: Validator = (value, path) => {
   if ((value as number) < 0 || (value as number) > 1) fail(path, 'must be between 0 and 1')
 }
 
+const halfFraction: Validator = (value, path) => {
+  nonNegative(value, path)
+  if ((value as number) > 0.5) fail(path, 'must be less than or equal to 0.5')
+}
+
+const viewportPadding: Validator = (value, path) => {
+  nonNegative(value, path)
+  if ((value as number) > 0.45) fail(path, 'must be less than or equal to 0.45')
+}
+
 const latitude: Validator = (value, path) => {
   finite(value, path)
   if ((value as number) < -Math.PI / 2 || (value as number) > Math.PI / 2) {
@@ -89,6 +99,10 @@ const boxFaceWeights: Validator = (value, path) => {
 const schemas: Record<LayoutConfigType, Record<string, Validator>> = {
   sphere: {
     radius: positive,
+    fit: enumOf(['fixed', 'contain']),
+    viewportPadding,
+    startAngle: finite,
+    edgeFade: halfFraction,
     distribution: enumOf(['latitude', 'fibonacci']),
     minLatitude: latitude,
     maxLatitude: latitude,

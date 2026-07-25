@@ -4,11 +4,20 @@
 
 ## Unreleased
 
+### Added
+
+- Sphere 新增 `fit: 'contain'`、`viewportPadding`、`startAngle` 和 `edgeFade`，参数实验室的经典头像球体默认完整适配视口、避开精确极点并启用轻量轮廓淡出。
+
 ### Fixed
 
 - Canvas 的 CSS 尺寸现在始终跟随 Stage 容器，避免高 DPR 设备把内部像素尺寸当作布局尺寸，导致画面放大、偏移和裁切。
 - Sphere `surface` 朝向现在让每张卡片的法线精确对齐球面外法线；默认球体与经典 Demo 预设也改用完整球面贴合朝向，`upright-surface` 仍可显式选用。
 - Sphere `surface` 卡片的顶部统一朝向球面北极，避免头像随经纬度发生无规则滚转或倒置。
+- 质量切换现在异步协调 2000/1000/500 实例容量并从完整输入恢复升级数据，不再把实例上限与固定可见比例重复削减；等待缩容的实例会在顶点着色阶段提前裁剪。
+
+### Compatibility
+
+- 发布构建改用 Terser 保持既有 40 KB gzip 预算；本地继续生成隐藏 JavaScript source map，但 npm tarball 不再携带 `.js.map`，类型声明和运行时导出不变。
 
 ## 1.15.0 - 2026-07-19
 

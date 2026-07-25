@@ -115,3 +115,15 @@ v1.15 的过渡、流式特效、Stage Timeline 和 extension 继续共享单个
 真实 Chromium/WebGL 2 验收中，500 items / high / cold-start / 3 秒保持平均 59.1 FPS、P95 18.20ms、1 Draw Call，完整图集构建 85.1ms；1000 items / high / atlas-update / 3 秒保持平均 60.0 FPS、P95 18.30ms、0 个 33ms 长帧、1 Draw Call，17 次局部更新累计 45.6ms、估算上传 272 KB。页面键盘实测可从首项移动到第 2/1000 项并同步无障碍标签，控制台无 error 日志。
 
 2026-07-20 加入不随 npm 发布的 Vue Lottery Screen 示例后复验：Library JavaScript gzip 40,939 bytes、npm tarball 151,507 bytes、layout-only 3,572 bytes，仍满足 40 KB / 150 KB / 8 KB 硬预算。npm 包排除 `.d.ts.map`，但保留类型声明和 JavaScript source map；Three.js 继续保持 peer dependency。
+
+## Sphere 容量与轮廓优化
+
+质量档位不再叠加固定可见比例：当前池严格按 high/medium/low 的 2000/1000/500 上限异步协调，升级从 `sourceItems` 恢复数据，降级等待图集期间先在顶点着色阶段提前裁剪。连续质量切换、数据更新和 destroy 使用代次保护，旧异步结果不能覆盖最新状态。
+
+Sphere 的响应式半径、起始经度和轮廓淡出仍只在布局计算或现有 Shader 中完成，不增加 Mesh、纹理或 Draw Call。库构建改用 Terser 并保留本地隐藏 source map，npm tarball 排除 `.js.map` 以同时守住 JavaScript gzip 与发布包预算。最终性能与包体积数值以本次完整验收结果为准。
+
+2026-07-25 Chromium 150 / Apple M4 / 1265×633 / DPR 1 验收：500、1000、2000 输入在 high 下分别提交 500、1000、2000 个实例；2000 输入切换 medium/low 后分别提交 1000/500，恢复 high 后回到 2000。全部场景保持主体 1 Draw Call，图集容量随质量回收，不叠加第二层可见比例。
+
+2000 items / high / steady / 3 秒为 60.00 FPS、P95 18.10ms、P99 18.60ms、0 个 33ms 长帧；2000 items / high / transition-stress / 3 秒为 60.00 FPS、P95 18.55ms、P99 18.70ms、0 个 33ms 长帧、1 Draw Call、4 次中断/patch。相对 v1.11 的 18.40ms P95 增加 0.8%，低于 10% 门槛。390×844、1600×600 与默认桌面视口均完成 contain 边界、轮廓淡出、约 360° 旋转和快速布局中断检查；Canvas 脱离 Grid 的内在尺寸计算后，连续横竖屏切换不再反向撑大舞台，头像顶部朝北且控制台无 error 日志。
+
+最终包验证为 Library JavaScript gzip 36,057 bytes、npm tarball 65,495 bytes、layout-only 消费者 3,947 bytes，满足既有 40 KB / 150 KB / 8 KB 硬预算。

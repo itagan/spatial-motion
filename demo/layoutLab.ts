@@ -32,7 +32,7 @@ interface Definition {
 }
 
 const initialConfigs: Record<LayoutConfigType, LayoutConfig> = {
-  sphere: { version: 1, type: 'sphere', options: { radius: 5.2 } },
+  sphere: { version: 1, type: 'sphere', options: { fit: 'contain', poleMode: 'exclude', edgeFade: 0.08 } },
   box: { version: 1, type: 'box', options: { width: 8, height: 7, depth: 6 } },
   cylinder: { version: 1, type: 'cylinder', options: { radius: 5 } },
   grid: { version: 1, type: 'grid', options: { fit: 'contain' } },
@@ -43,7 +43,7 @@ const initialConfigs: Record<LayoutConfigType, LayoutConfig> = {
 }
 
 const resolvedDefaults: Record<LayoutConfigType, Record<string, unknown>> = {
-  sphere: { radius: 5, distribution: 'latitude', minLatitude: -Math.PI / 2, maxLatitude: Math.PI / 2, poleMode: 'include', rings: 2, stagger: false, density: 0.86, orientation: 'surface' },
+  sphere: { radius: 5, fit: 'fixed', viewportPadding: 0.06, startAngle: 0, edgeFade: 0, distribution: 'latitude', minLatitude: -Math.PI / 2, maxLatitude: Math.PI / 2, poleMode: 'include', rings: 2, stagger: false, density: 0.86, orientation: 'surface' },
   box: { width: 8, height: 8, depth: 8, density: 0.82, orientation: 'surface', faces: ['front', 'back', 'right', 'left', 'top', 'bottom'], edgePadding: 0, faceWeights: {} },
   cylinder: { radius: 5, spacing: 0.1, columns: 3, rows: 2, startAngle: 0, arcAngle: Math.PI * 2, density: 0.78, orientation: 'surface' },
   grid: { columns: 1, gap: 1.3, fit: 'fixed' },
@@ -75,6 +75,13 @@ const definitions: Record<LayoutConfigType, Definition> = {
     label: '球体',
     controls: [
       { key: 'radius', label: '半径', kind: 'number', min: 0.5, max: 12, step: 0.1 },
+      { key: 'fit', label: '适配方式', kind: 'select', values: [
+        { value: 'fixed', label: '固定半径' },
+        { value: 'contain', label: '完整显示' },
+      ] },
+      { key: 'viewportPadding', label: '视口留白', kind: 'number', min: 0, max: 0.45, step: 0.01 },
+      { key: 'startAngle', label: '起始经度', kind: 'number', ...angle },
+      { key: 'edgeFade', label: '轮廓淡出', kind: 'number', min: 0, max: 0.5, step: 0.01 },
       { key: 'distribution', label: '分布模式', kind: 'select', values: [
         { value: 'latitude', label: '纬度圆环' },
         { value: 'fibonacci', label: 'Fibonacci 等面积' },
@@ -571,8 +578,10 @@ function controlHidden(
   key: string,
   options: Record<string, unknown>,
 ): boolean {
-  return type === 'sphere'
-    && options.distribution === 'fibonacci'
+  if (type !== 'sphere') return false
+  if (options.fit === 'contain' && key === 'radius') return true
+  if (options.fit !== 'contain' && key === 'viewportPadding') return true
+  return options.distribution === 'fibonacci'
     && ['rings', 'stagger', 'poleMode'].includes(key)
 }
 

@@ -125,6 +125,47 @@ describe('layouts', () => {
     expect(Math.max(...steps) - Math.min(...steps)).toBeLessThan(1e-10)
   })
 
+  it.each(['latitude', 'fibonacci'] as const)(
+    'sphere %s distribution applies a deterministic longitude offset',
+    (distribution) => {
+      const base = sphere({
+        distribution,
+        poleMode: distribution === 'latitude' ? 'exclude' : undefined,
+        startAngle: 0,
+      }).calculate(120, context)
+      const offset = Math.PI / 3
+      const shifted = sphere({
+        distribution,
+        poleMode: distribution === 'latitude' ? 'exclude' : undefined,
+        startAngle: offset,
+      }).calculate(120, context)
+
+      base.forEach((transform, index) => {
+        const expectedX = transform.x * Math.cos(offset) - transform.z * Math.sin(offset)
+        const expectedZ = transform.z * Math.cos(offset) + transform.x * Math.sin(offset)
+        expect(shifted[index].x).toBeCloseTo(expectedX, 6)
+        expect(shifted[index].z).toBeCloseTo(expectedZ, 6)
+      })
+    },
+  )
+
+  it('sphere contain mode fits card extents inside the padded short viewport edge', () => {
+    const viewport = { width: 1600, height: 900, viewportWidth: 16, viewportHeight: 9 }
+    const padding = 0.1
+    const result = sphere({ fit: 'contain', viewportPadding: padding }).calculate(120, viewport)
+    const radius = Math.hypot(result[0].x, result[0].y, result[0].z)
+
+    expect(radius).toBeCloseTo(3.1)
+    expect(radius + 0.5).toBeLessThanOrEqual(viewport.viewportHeight / 2 * (1 - padding * 2))
+    expect(sphere({ radius: 7, fit: 'contain' }).calculate(10, context)[0].y).toBeCloseTo(7)
+  })
+
+  it('sphere exposes a clamped optional hemisphere edge fade', () => {
+    expect(sphere().hemisphereEdgeFade).toBe(0)
+    expect(sphere({ edgeFade: 0.08 }).hemisphereEdgeFade).toBe(0.08)
+    expect(sphere({ edgeFade: 1 }).hemisphereEdgeFade).toBe(0.5)
+  })
+
   it('grid creates unique positions', () => {
     const result = grid({ columns: 10 }).calculate(100, context)
     expect(new Set(result.map(({ x, y }) => `${x},${y}`)).size).toBe(100)

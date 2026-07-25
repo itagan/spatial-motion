@@ -47,7 +47,7 @@ button:hover { color: white; border-color: #55cfff; transform: translateY(-1px);
 button.primary { color: #071018; background: #65d6ff; border-color: #65d6ff; }
 footer p { color: #68809d; font-size: 11px; letter-spacing: .08em; }
 #stage { position: relative; min-height: 0; overflow: hidden; }
-#stage canvas { display: block; width: 100%; height: 100%; }
+#stage canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 #pick-debug {
   position: absolute;
   z-index: 2;

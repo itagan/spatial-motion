@@ -212,7 +212,7 @@ describe('InstancedCardRenderer item loading', () => {
       opacity: 1,
     }
 
-    renderer.prepareTransition([transform], [transform], 0, 1, 0, 1)
+    renderer.prepareTransition([transform], [transform], 0, 1, 0, 1, 0.05, 0.1)
     renderer.setProgress(0.5)
 
     const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
@@ -222,8 +222,12 @@ describe('InstancedCardRenderer item loading', () => {
       toBillboard: { value: 1 },
       fromHideBackHemisphere: { value: 0 },
       toHideBackHemisphere: { value: 1 },
+      fromHemisphereEdgeFade: { value: 0.05 },
+      toHemisphereEdgeFade: { value: 0.1 },
     })
     expect(mesh.material.vertexShader).toContain('mix(surfaceView, billboardView, billboardAmount)')
+    expect(mesh.material.vertexShader).toContain('visibilityRank > visibleRatio')
+    expect(mesh.material.vertexShader).toContain('smoothstep(0.0, edgeFade, facing)')
     renderer.dispose()
   })
 
