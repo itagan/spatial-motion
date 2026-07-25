@@ -200,7 +200,8 @@ function createTransform(
 ): Transform {
   // InstancedCardRenderer converts these XYZ Euler angles to a quaternion.
   // Solving the transformed local +Z normal against the radial direction keeps
-  // every card plane tangent to the sphere, including off-axis positions.
+  // every card plane tangent to the sphere. The Z roll then aligns local +Y
+  // with world-up projected onto that tangent plane, so images share one north.
   return {
     x: x * radius,
     y: y * radius,
@@ -208,7 +209,7 @@ function createTransform(
     scale,
     rotationX: orientation === 'surface' ? Math.atan2(-y, z) : 0,
     rotationY: orientation === 'surface' ? Math.asin(x) : Math.atan2(x, z),
-    rotationZ: 0,
+    rotationZ: orientation === 'surface' ? Math.atan2(x * y, z) : 0,
     opacity: 1,
   }
 }
@@ -220,11 +221,11 @@ function latitudeRange(minimum: number | undefined, maximum: number | undefined)
 }
 
 function positive(value: number | undefined, fallback: number): number {
-  return Number.isFinite(value) && (value ?? 0) > 0 ? value as number : fallback
+  return Number.isFinite(value) && value! > 0 ? value! : fallback
 }
 
 function positiveInteger(value: number | undefined): number | undefined {
-  return Number.isInteger(value) && (value ?? 0) > 0 ? value : undefined
+  return Number.isInteger(value) && value! > 0 ? value : undefined
 }
 
 function finite(value: number | undefined, fallback: number): number {

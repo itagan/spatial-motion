@@ -37,6 +37,8 @@ describe('layouts', () => {
     const result = sphere({ radius: 7, rings: 14, orientation: 'surface' }).calculate(240, context)
     const quaternion = new Quaternion()
     const normal = new Vector3()
+    const cardUp = new Vector3()
+    const surfaceUp = new Vector3()
 
     result.forEach((transform) => {
       quaternion.setFromEuler(new Euler(
@@ -48,6 +50,12 @@ describe('layouts', () => {
       normal.set(0, 0, 1).applyQuaternion(quaternion)
       const radial = new Vector3(transform.x, transform.y, transform.z).normalize()
       expect(normal.dot(radial)).toBeCloseTo(1, 6)
+
+      if (Math.abs(radial.y) < 1 - 1e-8) {
+        cardUp.set(0, 1, 0).applyQuaternion(quaternion)
+        surfaceUp.set(0, 1, 0).addScaledVector(radial, -radial.y).normalize()
+        expect(cardUp.dot(surfaceUp)).toBeCloseTo(1, 6)
+      }
     })
   })
 
