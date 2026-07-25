@@ -11,6 +11,28 @@ export interface CardStyle {
   borderWidth?: number
   borderColor?: string
   backgroundColor?: string
+  imageFit?: 'cover' | 'contain' | 'fill'
+  imagePosition?: {
+    x?: number
+    y?: number
+  }
+  /** Padding as a fraction of the card's shorter edge. */
+  contentPadding?: number
+  overlayColor?: string
+  titleStyle?: CardTitleStyle
+}
+
+export interface CardTitleStyle {
+  color?: string
+  backgroundColor?: string
+  fontFamily?: string
+  fontWeight?: number | string
+  /** Font size as a fraction of the card height. */
+  fontSizeRatio?: number
+  position?: 'top' | 'center' | 'bottom'
+  align?: 'left' | 'center' | 'right'
+  lineHeight?: number
+  maxLines?: 1 | 2 | 3
 }
 
 export interface CardDrawBounds {
@@ -24,7 +46,10 @@ export type DrawCard = (
   context: CanvasRenderingContext2D,
   item: MotionItem,
   bounds: CardDrawBounds,
+  resolvedStyle: Readonly<CardStyle>,
 ) => void | Promise<void>
+
+export type ResolveCardStyle = (item: Readonly<MotionItem>) => CardStyle | undefined
 
 export interface Transform {
   x: number
@@ -44,6 +69,10 @@ export interface LayoutContext {
   viewportWidth?: number
   /** Camera-visible height in world units at the default layout plane. */
   viewportHeight?: number
+  /** Normalized shared card width. The longest card edge is 1. */
+  cardWidth?: number
+  /** Normalized shared card height. The longest card edge is 1. */
+  cardHeight?: number
 }
 
 export interface Layout {

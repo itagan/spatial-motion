@@ -160,13 +160,21 @@ function resolveRadius(
   fallback: number,
   fit: NonNullable<SphereOptions['fit']>,
   padding: number,
-  context: { viewportWidth?: number; viewportHeight?: number },
+  context: {
+    viewportWidth?: number
+    viewportHeight?: number
+    cardWidth?: number
+    cardHeight?: number
+  },
 ): number {
   const width = context.viewportWidth
   const height = context.viewportHeight
   if (fit !== 'contain' || !positiveFinite(width) || !positiveFinite(height)) return fallback
   const availableDiameter = Math.min(width, height) * (1 - padding * 2)
-  return Math.max(0.1, availableDiameter / 2 - 0.5)
+  const cardWidth = positive(context.cardWidth, 1)
+  const cardHeight = positive(context.cardHeight, 1)
+  const halfDiagonal = Math.hypot(cardWidth, cardHeight) / 2
+  return Math.max(0.1, availableDiameter / 2 - halfDiagonal)
 }
 
 function createLatitudeTransform(

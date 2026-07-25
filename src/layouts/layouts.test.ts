@@ -155,8 +155,16 @@ describe('layouts', () => {
     const result = sphere({ fit: 'contain', viewportPadding: padding }).calculate(120, viewport)
     const radius = Math.hypot(result[0].x, result[0].y, result[0].z)
 
-    expect(radius).toBeCloseTo(3.1)
-    expect(radius + 0.5).toBeLessThanOrEqual(viewport.viewportHeight / 2 * (1 - padding * 2))
+    const squareHalfDiagonal = Math.SQRT2 / 2
+    expect(radius).toBeCloseTo(3.6 - squareHalfDiagonal)
+    expect(radius + squareHalfDiagonal)
+      .toBeLessThanOrEqual(viewport.viewportHeight / 2 * (1 - padding * 2))
+    const portraitContext = { ...viewport, cardWidth: 0.5, cardHeight: 1 }
+    const portrait = sphere({ fit: 'contain', viewportPadding: padding })
+      .calculate(120, portraitContext)
+    const portraitRadius = Math.hypot(portrait[0].x, portrait[0].y, portrait[0].z)
+    expect(portraitRadius + Math.hypot(0.5, 1) / 2)
+      .toBeLessThanOrEqual(viewport.viewportHeight / 2 * (1 - padding * 2))
     expect(sphere({ radius: 7, fit: 'contain' }).calculate(10, context)[0].y).toBeCloseTo(7)
   })
 

@@ -169,11 +169,13 @@ try {
   await writeFile(join(consumer, 'consumer.ts'), `
     import {
       type CardStyle,
+      type CardTitleStyle,
       type MotionItem,
       type MotionItemUpdate,
       type MotionPreference,
       type MotionStage,
       type MotionStageOptions,
+      type ResolveCardStyle,
       type StagePerformanceEnvironment,
       type StageTransitionHandle,
       type StageTransitionResult,
@@ -194,8 +196,23 @@ try {
     declare const stage: MotionStage | undefined
     const emission: EmissionOptions = { mode: 'wave' }
     const motion: MotionPreference = 'auto'
-    const cardStyle: CardStyle = { shape: 'rounded', cornerRadius: 8 }
+    const titleStyle: CardTitleStyle = { position: 'bottom', fontSizeRatio: 0.12, maxLines: 2 }
+    const cardStyle: CardStyle = {
+      shape: 'rounded',
+      cornerRadius: 8,
+      imageFit: 'cover',
+      imagePosition: { x: 0.5, y: 0.25 },
+      titleStyle,
+    }
+    const resolveCardStyle: ResolveCardStyle = (item) =>
+      item.meta ? { borderColor: '#ffd700' } : undefined
     const stageOptions: Omit<MotionStageOptions, 'container'> = {
+      cardAspectRatio: 0.75,
+      cardStyle,
+      resolveCardStyle,
+      drawCard(context, item, bounds, resolvedStyle) {
+        void [context, item, bounds, resolvedStyle]
+      },
       cardResolution: 96,
       imageTimeout: 5000,
       imageConcurrency: 4,
@@ -238,7 +255,7 @@ try {
     const configuredLayouts = [createLayout(layoutConfig), createLayoutFromSubpath(subpathConfig)]
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
-    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, stageOptions]
+    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, stageOptions]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {

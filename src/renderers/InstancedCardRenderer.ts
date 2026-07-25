@@ -74,7 +74,7 @@ export class InstancedCardRenderer {
   }
 
   async setItems(items: MotionItem[]): Promise<boolean> {
-    const fingerprint = createItemsFingerprint(items)
+    const fingerprint = createItemsFingerprint(items, this.atlasOptions)
     if (this.mesh && fingerprint === this.itemsFingerprint && !this.atlasAbortController) return true
     const { controller, generation, options } = this.beginAtlasOperation()
     let atlas: TextureAtlasResult
@@ -92,7 +92,11 @@ export class InstancedCardRenderer {
       return false
     }
     this.disposeCurrent()
-    const plane = new PlaneGeometry(1, 1)
+    const aspectRatio = resolveAspectRatio(this.atlasOptions.aspectRatio)
+    const plane = new PlaneGeometry(
+      aspectRatio >= 1 ? 1 : aspectRatio,
+      aspectRatio >= 1 ? 1 / aspectRatio : 1,
+    )
     const geometry = new InstancedBufferGeometry()
     geometry.index = plane.index
     geometry.setAttribute('position', plane.getAttribute('position'))
@@ -333,7 +337,7 @@ export class InstancedCardRenderer {
     if (!this.mesh || !this.atlas || items.length !== this.instanceCapacity) {
       return this.setItems(items)
     }
-    const fingerprint = createItemsFingerprint(items)
+    const fingerprint = createItemsFingerprint(items, this.atlasOptions)
     if (fingerprint === this.itemsFingerprint && !this.atlasAbortController) return true
     const { controller, generation, options } = this.beginAtlasOperation()
     let patch: TextureAtlasPatch
@@ -593,18 +597,28 @@ function setVector4(target: Vector4, values: Float32Array, offset: number): void
   target.set(values[offset], values[offset + 1], values[offset + 2], values[offset + 3])
 }
 
-function createItemsFingerprint(items: MotionItem[]): string {
+function createItemsFingerprint(items: MotionItem[], options: TextureAtlasOptions): string {
   return items
     .map((item) => {
       let meta = ''
+      let style = ''
       try {
         meta = JSON.stringify(item.meta) ?? ''
       } catch {
         meta = String(item.meta ?? '')
       }
-      return `${item.id.length}:${item.id}|${item.image?.length ?? 0}:${item.image ?? ''}|${item.title?.length ?? 0}:${item.title ?? ''}|${meta.length}:${meta}`
+      try {
+        style = JSON.stringify(options.resolveCardStyle?.(item)) ?? ''
+      } catch {
+        style = ''
+      }
+      return `${item.id.length}:${item.id}|${item.image?.length ?? 0}:${item.image ?? ''}|${item.title?.length ?? 0}:${item.title ?? ''}|${meta.length}:${meta}|${style.length}:${style}`
     })
     .join('\n')
+}
+
+function resolveAspectRatio(value: number | undefined): number {
+  return Number.isFinite(value) ? Math.min(4, Math.max(0.25, value as number)) : 1
 }
 
 function createVisibilityRanks(count: number): Float32Array {

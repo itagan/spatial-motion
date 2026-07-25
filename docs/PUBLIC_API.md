@@ -24,6 +24,8 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 - `MotionItem.id` 必须是非空、唯一、稳定的字符串；依赖数组索引维持身份从来不是受支持行为。
 - Three.js 是 peer dependency，支持范围记录在 `package.json`；升级到超出范围的 Three.js 不在兼容保证内。
 - `LayoutConfig` 当前格式版本为 `1`；新增可选配置字段兼容，未来不兼容的序列化格式使用新的版本号并提供迁移说明。
+- `cardAspectRatio` 是 Stage 级固定宽高比，限制在 `0.25–4`，最长边归一为一个世界单位；现有方形默认值为 `1`。
+- `resolveCardStyle(item)` 在 Stage `cardStyle` 之上按字段合并，嵌套标题与图片位置按字段覆盖；业务状态应通过稳定 `MotionItem.meta` 更新。
 
 ## 可序列化布局配置
 

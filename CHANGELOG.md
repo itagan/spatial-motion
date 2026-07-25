@@ -7,6 +7,7 @@
 ### Added
 
 - Sphere 新增 `fit: 'contain'`、`viewportPadding`、`startAngle` 和 `edgeFade`，参数实验室的经典头像球体默认完整适配视口、避开精确极点并启用轻量轮廓淡出。
+- 卡片增加 `imageFit`、焦点定位、内容留白、覆盖层、多行标题、逐卡 `resolveCardStyle()` 和 Stage 级 `cardAspectRatio`；矩形卡片继续使用同一图集、实例 Mesh 和 Draw Call。
 
 ### Fixed
 

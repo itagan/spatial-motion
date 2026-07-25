@@ -11,6 +11,7 @@ import type { StreamingEffect } from '../effects/types'
 
 const stageMocks = vi.hoisted(() => ({
   cards: [] as Array<Record<string, ReturnType<typeof vi.fn>>>,
+  cardOptions: [] as unknown[],
   webglRenderers: [] as Array<Record<string, unknown>>,
 }))
 
@@ -50,8 +51,9 @@ vi.mock('../renderers/InstancedCardRenderer', () => ({
     }))
     dispose = vi.fn()
 
-    constructor() {
+    constructor(_scene: unknown, options: unknown) {
       stageMocks.cards.push(this as unknown as Record<string, ReturnType<typeof vi.fn>>)
+      stageMocks.cardOptions.push(options)
     }
   },
 }))
@@ -156,6 +158,7 @@ function currentRenderer() {
 describe('MotionStage', () => {
   beforeEach(() => {
     stageMocks.cards.length = 0
+    stageMocks.cardOptions.length = 0
     stageMocks.webglRenderers.length = 0
     vi.stubGlobal('ResizeObserver', MockResizeObserver)
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
@@ -1204,7 +1207,8 @@ describe('MotionStage', () => {
 
   it('passes camera-visible world dimensions to layouts', async () => {
     let received: LayoutContext | undefined
-    const stage = createStage({ cameraZ: 18 })
+    const resolveCardStyle = vi.fn(() => ({ borderColor: '#ffd700' }))
+    const stage = createStage({ cameraZ: 18, cardAspectRatio: 0.75, resolveCardStyle })
     await stage.setItems([{ id: 'a' }])
     await stage.to({
       name: 'context-reader',
@@ -1218,7 +1222,43 @@ describe('MotionStage', () => {
     expect(received.viewportWidth).toBeGreaterThan(0)
     expect(received.viewportHeight).toBeGreaterThan(0)
     expect(received.viewportWidth).toBeCloseTo(received.viewportHeight ?? 0)
+    expect(received.cardWidth).toBe(0.75)
+    expect(received.cardHeight).toBe(1)
+    expect(stageMocks.cardOptions.at(-1)).toMatchObject({
+      aspectRatio: 0.75,
+      resolveCardStyle,
+    })
     stage.destroy()
+  })
+
+  it('uses the normalized card aspect ratio for billboard and surface picking', async () => {
+    const billboard = createStage({ cardAspectRatio: 0.25 })
+    await billboard.setItems([{ id: 'portrait' }])
+    await billboard.to(layout(() => [transform()]), { duration: 0 })
+
+    expect(billboard.pick(52, 50)).toBeNull()
+    expect(billboard.pick(50, 52)?.item.id).toBe('portrait')
+    billboard.destroy()
+
+    const surface = createStage({ cardAspectRatio: 0.25 })
+    await surface.setItems([{ id: 'portrait' }])
+    await surface.to({
+      name: 'surface',
+      orientation: 'surface',
+      calculate: () => [transform()],
+    }, { duration: 0 })
+    expect(surface.pick(52, 50)).toBeNull()
+    expect(surface.pick(50, 52)?.item.id).toBe('portrait')
+    surface.destroy()
+  })
+
+  it('clamps invalid and extreme Stage card aspect ratios', () => {
+    const wide = createStage({ cardAspectRatio: 10 })
+    expect(stageMocks.cardOptions.at(-1)).toMatchObject({ aspectRatio: 4 })
+    wide.destroy()
+    const fallback = createStage({ cardAspectRatio: Number.NaN })
+    expect(stageMocks.cardOptions.at(-1)).toMatchObject({ aspectRatio: 1 })
+    fallback.destroy()
   })
 
   it('uses the projected card quad and optional padding instead of a center radius', async () => {

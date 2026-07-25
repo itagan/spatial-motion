@@ -297,23 +297,48 @@ await stage.updateItemsById([
 ```ts
 const stage = new MotionStage({
   container,
+  cardAspectRatio: 3 / 4, // Stage 内所有卡片共用，最长边仍为 1
   cardStyle: {
     shape: 'rounded', // square | rounded | circle
     cornerRadius: 10,
     borderWidth: 2,
     borderColor: '#f5d77a',
     backgroundColor: '#111827',
+    imageFit: 'cover', // cover | contain | fill
+    imagePosition: { x: 0.5, y: 0.25 },
+    contentPadding: 0.04,
+    overlayColor: 'rgba(0, 0, 0, .18)',
+    titleStyle: {
+      position: 'bottom',
+      align: 'center',
+      color: '#ffffff',
+      backgroundColor: 'rgba(0, 0, 0, .62)',
+      fontSizeRatio: 0.12,
+      maxLines: 2,
+    },
   },
-  async drawCard(context, item, bounds) {
+  resolveCardStyle(item) {
+    return (item.meta as { winner?: boolean }).winner
+      ? { borderColor: '#ffd700', borderWidth: 4 }
+      : undefined
+  },
+  async drawCard(context, item, bounds, resolvedStyle) {
     context.fillStyle = '#16213e'
     context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height)
     context.fillStyle = '#fff'
-    context.fillText(item.title ?? item.id, bounds.width / 2, bounds.height / 2)
+    context.fillText(
+      item.title ?? item.id,
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2,
+    )
+    console.log(resolvedStyle.borderColor)
   },
 })
 ```
 
-绘制回调会在隔离的 Canvas 状态和卡片裁剪区域内执行；抛错时回退为内置卡片。异步绘制同样受更新 token 保护，旧请求完成后不会覆盖新内容。核心库不会执行 HTML 模板或挂载框架组件。
+不提供 `drawCard` 时，内置绘制器负责图片裁切、焦点定位、覆盖层和最多三行的标题排版；未设置新增字段时保持旧的方形卡片视觉。`resolveCardStyle()` 在 Stage 样式之上按卡片合并，嵌套 `imagePosition` 和 `titleStyle` 也按字段覆盖，异常时回退 Stage 样式。
+
+绘制回调会在隔离的 Canvas 状态和卡片裁剪区域内执行；它替换内置内容，但仍沿用已解析的形状裁剪、背景和边框。抛错时回退为内置卡片。异步绘制同样受更新 token 保护，旧请求完成后不会覆盖新内容。核心库不会执行 HTML 模板或挂载框架组件。
 
 拾取与聚焦：
 
@@ -407,9 +432,9 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 40.0 KB（40,939 bytes） |
-| npm tarball | ≤ 150 KB | 148.0 KB（151,507 bytes） |
-| 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 3.5 KB |
+| Library JavaScript gzip 合计 | ≤ 40 KB | 36.4 KB（37,283 bytes） |
+| npm tarball | ≤ 150 KB | 66.2 KB（67,759 bytes） |
+| 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 3.9 KB（4,012 bytes） |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。
 
