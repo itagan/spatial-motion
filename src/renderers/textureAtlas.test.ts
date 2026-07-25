@@ -37,6 +37,9 @@ function createContext() {
     fillRect: vi.fn(),
     fillText: vi.fn(),
     measureText: vi.fn((text: string) => ({ width: text.length * 6 })),
+    roundRect: vi.fn(),
+    createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+    globalAlpha: 1,
     fillStyle: '',
     strokeStyle: '',
     lineWidth: 0,
@@ -275,6 +278,45 @@ describe('texture atlas card rendering', () => {
     expect(context.fillRect).toHaveBeenCalledWith(0, 0, 32, 32)
     expect(context.fillText).toHaveBeenCalledWith('Fa', 16, 16)
     expect(context.restore).toHaveBeenCalledOnce()
+  })
+
+  it('loads all card content images once and falls back when preparation or drawing fails', async () => {
+    class ImmediateImage {
+      crossOrigin = ''
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      naturalWidth = 32
+      naturalHeight = 32
+      private value = ''
+      get src() { return this.value }
+      set src(value: string) {
+        this.value = value
+        if (value) queueMicrotask(() => this.onload?.())
+      }
+    }
+    vi.stubGlobal('Image', ImmediateImage)
+    const draw = vi.fn(({ images }: { images: ReadonlyMap<string, HTMLImageElement | null> }) => {
+      expect(images.get('https://example.test/shared.png')).toBeInstanceOf(ImmediateImage)
+    })
+    const cardContent = {
+      prepare: vi.fn((item: { id: string }) => {
+        if (item.id === 'prepare-failure') throw new Error('prepare failed')
+        return {
+          imageSources: ['https://example.test/shared.png', 'https://example.test/shared.png'],
+          draw: item.id === 'draw-failure' ? () => { throw new Error('draw failed') } : draw,
+        }
+      }),
+    }
+    const patch = await createTextureAtlasPatch([
+      { id: 'ok' },
+      { id: 'prepare-failure', title: 'Prepare' },
+      { id: 'draw-failure', title: 'Draw' },
+    ], [0, 1, 2], 32, { cardContent })
+
+    expect(patch.metrics).toMatchObject({ imageRequests: 1, imageFailures: 0, cells: 3 })
+    expect(draw).toHaveBeenCalledOnce()
+    expect(contexts.get(patch.cells[1].canvas)!.fillText).toHaveBeenCalledWith('Pr', 16, 16)
+    expect(contexts.get(patch.cells[2].canvas)!.fillText).toHaveBeenCalledWith('Dr', 16, 16)
   })
 
   it('packs rectangular atlas cells and UVs by aspect ratio while respecting texture limits', async () => {

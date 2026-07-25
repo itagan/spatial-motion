@@ -1,5 +1,6 @@
 import { Euler, Group, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three'
 import type {
+  CardContentRenderer,
   CardStyle,
   DrawCard,
   Layout,
@@ -45,6 +46,7 @@ export interface MotionStageOptions {
   cardStyle?: CardStyle
   resolveCardStyle?: ResolveCardStyle
   drawCard?: DrawCard
+  cardContent?: CardContentRenderer
   /** Shared card width divided by height. The longest edge remains one world unit. */
   cardAspectRatio?: number
   /** Atlas pixels per card before GPU texture-size clamping. */
@@ -283,6 +285,9 @@ export class MotionStage {
   private extensionSequence = 0
 
   constructor(private readonly options: MotionStageOptions) {
+    if (options.cardContent && options.drawCard) {
+      throw new TypeError('cardContent and drawCard cannot be used together')
+    }
     this.motionPreference = options.motionPreference ?? 'auto'
     this.motionQuery = typeof matchMedia === 'function'
       ? matchMedia('(prefers-reduced-motion: reduce)')
@@ -329,6 +334,7 @@ export class MotionStage {
       cardStyle: options.cardStyle,
       resolveCardStyle: options.resolveCardStyle,
       drawCard: options.drawCard,
+      cardContent: options.cardContent,
       aspectRatio: cardAspectRatio,
       cellSize: options.cardResolution,
       imageTimeout: options.imageTimeout,

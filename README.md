@@ -29,6 +29,7 @@
 - 聚焦后恢复最近一次业务布局
 - ResizeObserver 响应式画布及完整资源释放
 - 圆角、圆形、边框与背景卡片样式，以及安全的 Canvas 自定义绘制
+- 按需 ES6 tagged template 卡片内容，使用受控 HTML/CSS 子集并继续写入同一纹理图集
 - 按稳定 `id` 局部重绘单张或多张图集卡片
 - 统一的平滑特效运动曲线、mipmap 图集采样和 GPU 纹理尺寸保护
 - WebGL context loss 暂停/恢复、图片超时回退和长时间压力基准
@@ -340,6 +341,41 @@ const stage = new MotionStage({
 
 绘制回调会在隔离的 Canvas 状态和卡片裁剪区域内执行；它替换内置内容，但仍沿用已解析的形状裁剪、背景和边框。抛错时回退为内置卡片。异步绘制同样受更新 token 保护，旧请求完成后不会覆盖新内容。核心库不会执行 HTML 模板或挂载框架组件。
 
+不希望直接编写 Canvas 时，可按需导入安全的 ES6 模板子入口：
+
+```ts
+import { MotionStage } from '@itagan/spatial-motion'
+import { defineCardTemplate, html } from '@itagan/spatial-motion/card-template'
+
+const cardContent = defineCardTemplate<{ price: number }>(
+  (item, { formatNumber, when }) => html`
+    <div class="product">
+      ${when(item.image, () => html`
+        <img src=${item.image} style="height:65%;object-fit:cover" />
+      `)}
+      <span class="title">${item.title}</span>
+      <span>¥${formatNumber(item.meta?.price ?? 0)}</span>
+    </div>
+  `,
+  {
+    styles: {
+      product: {
+        display: 'flex',
+        flexDirection: 'column',
+        padding: 8,
+        gap: 4,
+        background: 'linear-gradient(135deg, #3b1029, #be123c)',
+      },
+      title: { fontSize: 14, fontWeight: 700, lineClamp: 1 },
+    },
+  },
+)
+
+const stage = new MotionStage({ container, cardContent })
+```
+
+模板支持 `div`、`span`、`img`、`br`、嵌套条件/数组、scoped class、inline style 与常用 flex/定位/图文样式。它不会创建 DOM、执行脚本或解析任意 HTML；未知标签或样式会回退内置卡片。模板图片继续使用 Stage 的去重、并发、超时、LRU 与取消机制。`cardContent` 和 `drawCard` 是互斥的静态 Stage 配置。
+
 拾取与聚焦：
 
 ```ts
@@ -432,8 +468,9 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| Library JavaScript gzip 合计 | ≤ 40 KB | 36.4 KB（37,283 bytes） |
-| npm tarball | ≤ 150 KB | 66.2 KB（67,759 bytes） |
+| 主库 JavaScript gzip | ≤ 40 KB | 36.7 KB（37,537 bytes） |
+| 按需 card-template gzip | ≤ 12 KB | 5.7 KB（5,820 bytes） |
+| npm tarball | ≤ 150 KB | 74.6 KB（76,365 bytes） |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 3.9 KB（4,012 bytes） |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

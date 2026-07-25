@@ -67,6 +67,9 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 - [ ] 2000 张且模拟较小 `MAX_TEXTURE_SIZE` 时自动降低单元分辨率，不创建超限 Canvas。
 - [ ] CORS 失败、图片加载超时和 drawCard 抛错都显示稳定占位图。
 - [ ] 快速更新同一 id，仅最后一次局部图集 patch 生效。
+- [ ] 产品、人物和指标 ES6 模板在 1:1、3:4、16:9 下布局正确，flex、绝对定位、渐变、裁剪和文字省略无越界。
+- [ ] 模板的嵌套条件/数组、scoped class、动态 style 和多图片加载正确；非法标签/样式回退内置占位且不创建 DOM 卡片。
+- [ ] 模板模式 500/1000/2000 输入保持主体 1 Draw Call，局部数据更新只增加对应 Atlas patch，模板资源不会随更新持续增长。
 
 ## 生命周期和压力测试
 
@@ -110,3 +113,5 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 2026-07-25 已完成 Sphere 容量与轮廓验收：390×844、1600×600 和默认桌面视口下 contain 均完整显示，经典头像预设避开极点并启用 0.08 轮廓淡出；约 360° 横向旋转及快速布局中断后头像仍顶部朝北。500/1000/2000 high 与 2000 输入下的 medium/low 容量分别稳定为 500/1000/2000、1000/500，主体保持 1 Draw Call。2000 high transition-stress / 3 秒为 P95 18.55ms、0 个 33ms 长帧，控制台无 error 日志。
 
 2026-07-25 已完成卡片内容与统一宽高比验收：500 个 1:1 圆形头像、1000 个 3:4 人物卡和 2000 个 16:9 信息卡均保持 60 FPS、1 Draw Call，图片不拉伸，标题和逐卡边框正确；390×844 竖屏 contain 与矩形拾取通过。2000 high steady / transition-stress 的 P95 分别为 17.80/18.20ms，均为 0 个 33ms 长帧，控制台无 error 日志。
+
+2026-07-26 已完成 ES6 模板桌面浏览器验收：500 个 1:1 产品模板、1000 个 3:4 人物模板和 2000 个 16:9 指标模板均正确绘制，保持 60 FPS、1 Draw Call；球体/圆柱快速中断与整卡拾取通过。2000 项模板单卡数据更新只产生 1 个 Atlas patch，舞台内只有 1 个 Canvas 子节点，没有逐卡 DOM。

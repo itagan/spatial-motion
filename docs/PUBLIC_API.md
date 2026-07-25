@@ -10,6 +10,7 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 - `@itagan/spatial-motion/layouts`
 - `@itagan/spatial-motion/effects`
 - `@itagan/spatial-motion/performance`
+- `@itagan/spatial-motion/card-template`
 - `@itagan/spatial-motion/package.json`
 
 `src`、`core`、`renderers` 及 `dist` 中其他文件是内部实现。即使文件存在，也不能通过未声明的深层路径导入；`pack:check` 会验证这条边界。
@@ -26,6 +27,15 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 - `LayoutConfig` 当前格式版本为 `1`；新增可选配置字段兼容，未来不兼容的序列化格式使用新的版本号并提供迁移说明。
 - `cardAspectRatio` 是 Stage 级固定宽高比，限制在 `0.25–4`，最长边归一为一个世界单位；现有方形默认值为 `1`。
 - `resolveCardStyle(item)` 在 Stage `cardStyle` 之上按字段合并，嵌套标题与图片位置按字段覆盖；业务状态应通过稳定 `MotionItem.meta` 更新。
+- `cardContent` 接受同步准备、异步绘制的 `CardContentRenderer`，与旧 `drawCard` 互斥；模板适配器从独立 `card-template` 入口按需导入。
+
+## ES6 卡片模板
+
+- `defineCardTemplate(render, options)` 返回 `CardContentRenderer`；`render` 必须是 `MotionItem` 的纯函数，动态业务状态通过 `meta` 更新。
+- `html` 是安全 tagged template，不创建 DOM、不使用 `eval`/`new Function`，动态字符串只作为文本或属性值。
+- 首版标签限定为 `div`、`span`、`img`、`br`，支持 scoped class、inline style、嵌套模板、条件和数组。
+- 模板只定义静态图集视觉，整卡 hover/click/focus 继续由 Stage 处理；内部事件、HTML 组件、视频和逐帧刷新不属于该契约。
+- 模板异常回退内置卡片；图片加载失败只留空对应图片节点，并继续绘制其他模板内容。
 
 ## 可序列化布局配置
 
@@ -43,7 +53,7 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 - 主体卡片场景使用一个实例 Mesh，正常布局、过渡、悬停和内置流式特效不为每张卡片增加 Draw Call。
 - 布局过渡使用 GPU 插值；内置流式特效使用固定实例池，不使用 CPU 定时器生成卡片。
 - 数据量、渲染上限和特效活跃数量受质量档位约束。
-- 40 KB gzip、150 KB tarball 和 8 KB layout-only 是自动化预算，不是运行时网络大小承诺；调整预算需要单独评审。
+- 主库 40 KB gzip、按需模板 12 KB gzip、150 KB tarball 和 8 KB layout-only 是自动化预算，不是运行时网络大小承诺；调整预算需要单独评审。
 
 ## Stage extension
 

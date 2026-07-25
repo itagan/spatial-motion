@@ -1,10 +1,12 @@
 import { DataTexture, LinearFilter, LinearMipmapLinearFilter, SRGBColorSpace } from 'three'
 import type {
+  CardContentRenderer,
   CardDrawBounds,
   CardStyle,
   CardTitleStyle,
   DrawCard,
   MotionItem,
+  PreparedCardContent,
   ResolveCardStyle,
 } from '../core/types.js'
 
@@ -12,6 +14,7 @@ export interface TextureAtlasOptions {
   cardStyle?: CardStyle
   resolveCardStyle?: ResolveCardStyle
   drawCard?: DrawCard
+  cardContent?: CardContentRenderer
   aspectRatio?: number
   imageTimeout?: number
   maxTextureSize?: number
@@ -235,9 +238,33 @@ export async function createTextureAtlasPatch(
   const startedAt = now()
   const uniqueIndices = [...new Set(indices)].filter((index) => index >= 0 && index < items.length)
   throwIfAborted(options.signal)
+  const prepared = options.cardContent ? new Map<number, {
+    content?: PreparedCardContent
+    failed: boolean
+    style: CardStyle
+  }>() : undefined
+  uniqueIndices.forEach((index) => {
+    if (!options.cardContent || !prepared) return
+    const style = resolveCardStyle(items[index], options)
+    try {
+      prepared.set(index, {
+        content: options.cardContent.prepare(items[index], style),
+        failed: false,
+        style,
+      })
+    } catch {
+      prepared.set(index, { failed: true, style })
+    }
+  })
   const imageTimeout = resolveImageTimeout(options.imageTimeout)
   const imageUrls = [...new Set(uniqueIndices
-    .map((index) => !options.drawCard ? items[index].image : undefined)
+    .flatMap((index) => {
+      const entry = prepared?.get(index)
+      if (entry?.content) return [...(entry.content.imageSources ?? [])]
+      return !options.drawCard && !options.cardContent && items[index].image
+        ? [items[index].image]
+        : []
+    })
     .filter((url): url is string => Boolean(url)))]
   const imageResults = await mapWithConcurrency(
     imageUrls,
@@ -246,15 +273,22 @@ export async function createTextureAtlasPatch(
     options.signal,
   )
   const images = new Map(imageUrls.map((url, index) => [url, imageResults[index]]))
+  const resolvedImages = new Map(imageUrls.map((url, index) => [url, imageResults[index].image]))
   const { width: cellWidth, height: cellHeight } = resolveCellDimensions(
     cellSize,
     options.aspectRatio,
   )
   const renderedCells = await Promise.all(uniqueIndices.map(async (index) => ({
     index,
-    rendered: await renderCell(items[index], cellWidth, cellHeight, options, items[index].image
-      ? images.get(items[index].image) ?? null
-      : null),
+    rendered: await renderCell(
+      items[index],
+      cellWidth,
+      cellHeight,
+      options,
+      items[index].image ? images.get(items[index].image) ?? null : null,
+      prepared?.get(index),
+      resolvedImages,
+    ),
   })))
   throwIfAborted(options.signal)
   return {
@@ -324,13 +358,19 @@ async function renderCell(
   cellHeight: number,
   options: TextureAtlasOptions,
   imageResult: ImageLoadResult | null,
+  prepared: {
+    content?: PreparedCardContent
+    failed: boolean
+    style: CardStyle
+  } | undefined,
+  images: ReadonlyMap<string, HTMLImageElement | null>,
 ): Promise<RenderedCell> {
   const canvas = document.createElement('canvas')
   canvas.width = cellWidth
   canvas.height = cellHeight
   const context = canvas.getContext('2d')
   if (!context) throw new Error('Canvas 2D context is unavailable')
-  const style = resolveCardStyle(item, options)
+  const style = prepared?.style ?? resolveCardStyle(item, options)
   const bounds = { x: 0, y: 0, width: cellWidth, height: cellHeight }
   const image = imageResult?.image ?? null
 
@@ -342,7 +382,16 @@ async function renderCell(
   }
   context.clip()
   try {
-    if (options.drawCard) {
+    if (prepared?.content && !prepared.failed) {
+      await prepared.content.draw({
+        context,
+        bounds,
+        resolvedStyle: style,
+        images,
+        signal: options.signal,
+      })
+      throwIfAborted(options.signal)
+    } else if (options.drawCard) {
       await options.drawCard(context, item, bounds, style)
       throwIfAborted(options.signal)
     } else {

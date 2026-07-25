@@ -170,6 +170,21 @@ describe('MotionStage', () => {
     vi.unstubAllGlobals()
   })
 
+  it('rejects ambiguous card content configuration before allocating WebGL resources', () => {
+    expect(() => createStage({
+      drawCard: () => {},
+      cardContent: { prepare: () => ({ draw: () => {} }) },
+    })).toThrow('cardContent and drawCard cannot be used together')
+    expect(stageMocks.webglRenderers).toHaveLength(0)
+  })
+
+  it('passes a card content renderer to the shared Atlas renderer', () => {
+    const cardContent = { prepare: vi.fn(() => ({ draw: vi.fn() })) }
+    const stage = createStage({ cardContent })
+    expect(stageMocks.cardOptions.at(-1)).toMatchObject({ cardContent })
+    stage.destroy()
+  })
+
   it('validates every item before changing renderer state', () => {
     const stage = createStage()
     const cards = currentCards()

@@ -49,6 +49,26 @@ export type DrawCard = (
   resolvedStyle: Readonly<CardStyle>,
 ) => void | Promise<void>
 
+export interface CardContentDrawContext {
+  context: CanvasRenderingContext2D
+  bounds: Readonly<CardDrawBounds>
+  resolvedStyle: Readonly<CardStyle>
+  images: ReadonlyMap<string, HTMLImageElement | null>
+  signal?: AbortSignal
+}
+
+export interface PreparedCardContent {
+  imageSources?: readonly string[]
+  draw(context: CardContentDrawContext): void | Promise<void>
+}
+
+export interface CardContentRenderer {
+  prepare(
+    item: Readonly<MotionItem>,
+    resolvedStyle: Readonly<CardStyle>,
+  ): PreparedCardContent
+}
+
 export type ResolveCardStyle = (item: Readonly<MotionItem>) => CardStyle | undefined
 
 export interface Transform {
