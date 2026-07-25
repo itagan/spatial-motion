@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { Euler, Quaternion, Vector3 } from 'three'
 import {
   box,
   calculateBoxFaceDistribution,
@@ -30,6 +31,40 @@ describe('layouts', () => {
     result.forEach(({ x, y, z }) => {
       expect(Math.hypot(x, y, z)).toBeCloseTo(radius, 5)
     })
+  })
+
+  it('sphere surface orientation keeps every card tangent to the sphere', () => {
+    const result = sphere({ radius: 7, rings: 14, orientation: 'surface' }).calculate(240, context)
+    const quaternion = new Quaternion()
+    const normal = new Vector3()
+
+    result.forEach((transform) => {
+      quaternion.setFromEuler(new Euler(
+        transform.rotationX,
+        transform.rotationY,
+        transform.rotationZ,
+        'XYZ',
+      ))
+      normal.set(0, 0, 1).applyQuaternion(quaternion)
+      const radial = new Vector3(transform.x, transform.y, transform.z).normalize()
+      expect(normal.dot(radial)).toBeCloseTo(1, 6)
+    })
+  })
+
+  it('sphere uses surface orientation by default while retaining upright mode', () => {
+    const defaultTransforms = sphere({ radius: 5, rings: 7 }).calculate(60, context)
+    const defaultTransform = defaultTransforms.find(
+      ({ x, y, z }) => Math.abs(x) > 0.1 && Math.abs(y) > 0.1 && Math.abs(z) > 0.1,
+    )!
+    const defaultIndex = defaultTransforms.indexOf(defaultTransform)
+    const uprightTransform = sphere({
+      radius: 5,
+      rings: 7,
+      orientation: 'upright-surface',
+    }).calculate(60, context)[defaultIndex]
+
+    expect(defaultTransform.rotationX).not.toBe(0)
+    expect(uprightTransform.rotationX).toBe(0)
   })
 
   it('sphere arranges items into explicit latitude rings', () => {

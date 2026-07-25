@@ -171,7 +171,7 @@ const config = parseLayoutConfig({
     rings: 18,
     stagger: true,
     density: 0.82,
-    orientation: 'upright-surface',
+    orientation: 'surface',
   },
 }) satisfies LayoutConfig
 
@@ -494,9 +494,9 @@ await stage.enterEffect(radialBurst({
 球体头像朝向：
 
 ```ts
-sphere({ orientation: 'upright-surface' }) // 默认，像圆柱一样竖直包裹球面
+sphere({ orientation: 'surface' })         // 默认，严格贴合球面切线
 sphere({ orientation: 'camera' })          // 始终正对相机
-sphere({ orientation: 'surface' })         // 严格贴合球面切线
+sphere({ orientation: 'upright-surface' }) // 像圆柱一样竖直包裹球面
 
 sphere({
   distribution: 'fibonacci', // 等面积分布，自动避开精确极点

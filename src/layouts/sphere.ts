@@ -26,7 +26,7 @@ export interface SphereOptions {
 
 export function sphere(options: SphereOptions = {}): Layout {
   const radius = positive(options.radius, 5)
-  const orientation = options.orientation ?? 'upright-surface'
+  const orientation = options.orientation ?? 'surface'
   const distributionMode = options.distribution ?? 'latitude'
   const [minLatitude, maxLatitude] = latitudeRange(options.minLatitude, options.maxLatitude)
   const poleMode = options.poleMode ?? 'include'
@@ -198,13 +198,16 @@ function createTransform(
   scale: number,
   orientation: NonNullable<SphereOptions['orientation']>,
 ): Transform {
+  // InstancedCardRenderer converts these XYZ Euler angles to a quaternion.
+  // Solving the transformed local +Z normal against the radial direction keeps
+  // every card plane tangent to the sphere, including off-axis positions.
   return {
     x: x * radius,
     y: y * radius,
     z: z * radius,
     scale,
-    rotationX: orientation === 'surface' ? Math.asin(-y) : 0,
-    rotationY: Math.atan2(x, z),
+    rotationX: orientation === 'surface' ? Math.atan2(-y, z) : 0,
+    rotationY: orientation === 'surface' ? Math.asin(x) : Math.atan2(x, z),
     rotationZ: 0,
     opacity: 1,
   }

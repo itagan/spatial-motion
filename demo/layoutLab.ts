@@ -43,7 +43,7 @@ const initialConfigs: Record<LayoutConfigType, LayoutConfig> = {
 }
 
 const resolvedDefaults: Record<LayoutConfigType, Record<string, unknown>> = {
-  sphere: { radius: 5, distribution: 'latitude', minLatitude: -Math.PI / 2, maxLatitude: Math.PI / 2, poleMode: 'include', rings: 2, stagger: false, density: 0.86, orientation: 'upright-surface' },
+  sphere: { radius: 5, distribution: 'latitude', minLatitude: -Math.PI / 2, maxLatitude: Math.PI / 2, poleMode: 'include', rings: 2, stagger: false, density: 0.86, orientation: 'surface' },
   box: { width: 8, height: 8, depth: 8, density: 0.82, orientation: 'surface', faces: ['front', 'back', 'right', 'left', 'top', 'bottom'], edgePadding: 0, faceWeights: {} },
   cylinder: { radius: 5, spacing: 0.1, columns: 3, rows: 2, startAngle: 0, arcAngle: Math.PI * 2, density: 0.78, orientation: 'surface' },
   grid: { columns: 1, gap: 1.3, fit: 'fixed' },
@@ -92,7 +92,7 @@ const definitions: Record<LayoutConfigType, Definition> = {
     ],
     presets: [
       { label: '经典球体', config: initialConfigs.sphere },
-      { label: '密集交错', config: { version: 1, type: 'sphere', options: { radius: 5.5, rings: 22, density: 0.76, stagger: true, orientation: 'upright-surface' } } },
+      { label: '密集交错', config: { version: 1, type: 'sphere', options: { radius: 5.5, rings: 22, density: 0.76, stagger: true, orientation: 'surface' } } },
       { label: '相机朝向', config: { version: 1, type: 'sphere', options: { radius: 5.2, rings: 16, density: 0.82, orientation: 'camera' } } },
       { label: 'Fibonacci 球体', config: { version: 1, type: 'sphere', options: { radius: 5.2, distribution: 'fibonacci', density: 0.82, orientation: 'surface' } } },
       { label: '北半球冠', config: { version: 1, type: 'sphere', options: { radius: 5.5, minLatitude: 0.2, maxLatitude: Math.PI / 2, poleMode: 'exclude', rings: 14, orientation: 'upright-surface' } } },
