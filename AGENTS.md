@@ -47,6 +47,7 @@ scripts/           包发布形态与消费者验证脚本
 - `@itagan/spatial-motion/layouts`
 - `@itagan/spatial-motion/effects`
 - `@itagan/spatial-motion/performance`
+- `@itagan/spatial-motion/card-template`
 - `@itagan/spatial-motion/package.json`
 
 不要把 `renderers` 或其他内部目录暴露为公共子路径。新增公共 API 时，同时检查 `src/index.ts` 或对应子入口、类型声明、`package.json#exports`、README 示例和包消费者验证。

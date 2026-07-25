@@ -36,6 +36,10 @@ function createContext() {
     })),
     fillRect: vi.fn(),
     fillText: vi.fn(),
+    measureText: vi.fn((text: string) => ({ width: text.length * 6 })),
+    roundRect: vi.fn(),
+    createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+    globalAlpha: 1,
     fillStyle: '',
     strokeStyle: '',
     lineWidth: 0,
@@ -68,8 +72,12 @@ describe('texture atlas card rendering', () => {
       columns: 45,
       rows: 45,
       cellSize: 37,
+      cellWidth: 37,
+      cellHeight: 37,
       padding: 4,
       stride: 45,
+      strideX: 45,
+      strideY: 45,
     })
 
     const atlas = await createTextureAtlas([{ id: 'one' }], 96, {
@@ -196,6 +204,16 @@ describe('texture atlas card rendering', () => {
       y: 0,
       width: 32,
       height: 32,
+    }, {
+      shape: 'rounded',
+      cornerRadius: 6,
+      borderWidth: 2,
+      borderColor: '#fedcba',
+      backgroundColor: '#101820',
+      imageFit: 'cover',
+      imagePosition: { x: 0.5, y: 0.5 },
+      contentPadding: 0,
+      titleStyle: undefined,
     })
     expect(context.quadraticCurveTo).toHaveBeenCalled()
     expect(context.clip).toHaveBeenCalledOnce()
@@ -224,9 +242,14 @@ describe('texture atlas card rendering', () => {
       width: 40,
       height: 40,
       columns: 2,
+      rows: 2,
       cellSize: 16,
+      cellWidth: 16,
+      cellHeight: 16,
       padding: 2,
       stride: 20,
+      strideX: 20,
+      strideY: 20,
       texture,
       initialized: true,
     } as unknown as TextureAtlasResult
@@ -255,5 +278,218 @@ describe('texture atlas card rendering', () => {
     expect(context.fillRect).toHaveBeenCalledWith(0, 0, 32, 32)
     expect(context.fillText).toHaveBeenCalledWith('Fa', 16, 16)
     expect(context.restore).toHaveBeenCalledOnce()
+  })
+
+  it('loads all card content images once and falls back when preparation or drawing fails', async () => {
+    class ImmediateImage {
+      crossOrigin = ''
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      naturalWidth = 32
+      naturalHeight = 32
+      private value = ''
+      get src() { return this.value }
+      set src(value: string) {
+        this.value = value
+        if (value) queueMicrotask(() => this.onload?.())
+      }
+    }
+    vi.stubGlobal('Image', ImmediateImage)
+    const draw = vi.fn(({ images }: { images: ReadonlyMap<string, HTMLImageElement | null> }) => {
+      expect(images.get('https://example.test/shared.png')).toBeInstanceOf(ImmediateImage)
+    })
+    const cardContent = {
+      prepare: vi.fn((item: { id: string }) => {
+        if (item.id === 'prepare-failure') throw new Error('prepare failed')
+        return {
+          imageSources: ['https://example.test/shared.png', 'https://example.test/shared.png'],
+          draw: item.id === 'draw-failure' ? () => { throw new Error('draw failed') } : draw,
+        }
+      }),
+    }
+    const patch = await createTextureAtlasPatch([
+      { id: 'ok' },
+      { id: 'prepare-failure', title: 'Prepare' },
+      { id: 'draw-failure', title: 'Draw' },
+    ], [0, 1, 2], 32, { cardContent })
+
+    expect(patch.metrics).toMatchObject({ imageRequests: 1, imageFailures: 0, cells: 3 })
+    expect(draw).toHaveBeenCalledOnce()
+    expect(contexts.get(patch.cells[1].canvas)!.fillText).toHaveBeenCalledWith('Pr', 16, 16)
+    expect(contexts.get(patch.cells[2].canvas)!.fillText).toHaveBeenCalledWith('Dr', 16, 16)
+  })
+
+  it('packs rectangular atlas cells and UVs by aspect ratio while respecting texture limits', async () => {
+    expect(resolveAtlasMetrics(12, 96, 4096, 4)).toMatchObject({
+      columns: 2,
+      rows: 6,
+      cellSize: 96,
+      cellWidth: 96,
+      cellHeight: 24,
+      strideX: 104,
+      strideY: 32,
+    })
+    expect(resolveAtlasMetrics(12, 96, 4096, 0.25)).toMatchObject({
+      columns: 7,
+      rows: 2,
+      cellSize: 96,
+      cellWidth: 24,
+      cellHeight: 96,
+    })
+    const constrained = resolveAtlasMetrics(2000, 128, 2048, 4)
+    expect(constrained.columns * constrained.strideX).toBeLessThanOrEqual(2048)
+    expect(constrained.rows * constrained.strideY).toBeLessThanOrEqual(2048)
+    expect(resolveAtlasMetrics(1, 64, 4096, Number.NaN)).toMatchObject({
+      cellWidth: 64,
+      cellHeight: 64,
+    })
+    const atlas = await createTextureAtlas([{ id: 'a' }, { id: 'b' }], 64, {
+      aspectRatio: 4,
+      maxTextureSize: 4096,
+    })
+    expect(atlas).toMatchObject({
+      columns: 1,
+      rows: 2,
+      cellWidth: 64,
+      cellHeight: 16,
+      width: 72,
+      height: 48,
+    })
+    Array.from(atlas.rects.slice(0, 4)).forEach((value, index) => expect(value).toBeCloseTo([
+      4 / 72,
+      1 - 20 / 48,
+      64 / 72,
+      16 / 48,
+    ][index]))
+    atlas.texture.dispose()
+  })
+
+  it('draws images with cover, contain, and fill positioning', async () => {
+    class ImmediateImage {
+      crossOrigin = ''
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      naturalWidth = 200
+      naturalHeight = 100
+      private value = ''
+      get src() { return this.value }
+      set src(value: string) {
+        this.value = value
+        if (value) queueMicrotask(() => this.onload?.())
+      }
+    }
+    vi.stubGlobal('Image', ImmediateImage)
+    const item = { id: 'image', image: 'https://example.test/image.png' }
+
+    const cover = await createTextureAtlasPatch([item], [0], 32, {
+      cardStyle: { imageFit: 'cover', imagePosition: { x: 1, y: 0 } },
+    })
+    expect(contexts.get(cover.cells[0].canvas)!.drawImage).toHaveBeenCalledWith(
+      expect.any(ImmediateImage),
+      100,
+      0,
+      100,
+      100,
+      0,
+      0,
+      32,
+      32,
+    )
+
+    const contain = await createTextureAtlasPatch([item], [0], 32, {
+      cardStyle: { imageFit: 'contain', imagePosition: { x: 0, y: 1 } },
+    })
+    expect(contexts.get(contain.cells[0].canvas)!.drawImage).toHaveBeenCalledWith(
+      expect.any(ImmediateImage),
+      0,
+      16,
+      32,
+      16,
+    )
+
+    const fill = await createTextureAtlasPatch([item], [0], 32, {
+      cardStyle: { imageFit: 'fill' },
+    })
+    expect(contexts.get(fill.cells[0].canvas)!.drawImage).toHaveBeenCalledWith(
+      expect.any(ImmediateImage),
+      0,
+      0,
+      32,
+      32,
+    )
+  })
+
+  it('merges per-item styles and falls back to the Stage style when resolution fails', async () => {
+    const drawCard = vi.fn()
+    const item = { id: 'styled', title: 'Styled', meta: { winner: true } }
+    await createTextureAtlasPatch([item], [0], 32, {
+      cardStyle: {
+        borderColor: '#ffffff',
+        imagePosition: { x: 0.2, y: 0.3 },
+        titleStyle: { color: '#eeeeee', maxLines: 1 },
+      },
+      resolveCardStyle: () => ({
+        borderColor: '#ffd700',
+        imagePosition: { x: 0.8 },
+        titleStyle: { maxLines: 2, position: 'top' },
+      }),
+      drawCard,
+    })
+    expect(drawCard.mock.calls[0][3]).toEqual({
+      borderColor: '#ffd700',
+      contentPadding: 0,
+      imageFit: 'cover',
+      imagePosition: { x: 0.8, y: 0.3 },
+      titleStyle: {
+        align: 'center',
+        color: '#eeeeee',
+        backgroundColor: undefined,
+        fontFamily: 'sans-serif',
+        fontSizeRatio: 0.14,
+        fontWeight: 600,
+        lineHeight: 1.2,
+        maxLines: 2,
+        position: 'top',
+      },
+    })
+
+    drawCard.mockClear()
+    await createTextureAtlasPatch([item], [0], 32, {
+      cardStyle: { borderColor: '#ffffff' },
+      resolveCardStyle: () => { throw new Error('style failed') },
+      drawCard,
+    })
+    expect(drawCard.mock.calls[0][3]).toEqual({
+      borderColor: '#ffffff',
+      contentPadding: 0,
+      imageFit: 'cover',
+      imagePosition: { x: 0.5, y: 0.5 },
+      titleStyle: undefined,
+    })
+  })
+
+  it('applies normalized padding, overlay, and ellipsized multi-line titles', async () => {
+    const patch = await createTextureAtlasPatch(
+      [{ id: 'title', title: 'abcdefghijkl' }],
+      [0],
+      40,
+      {
+        aspectRatio: 0.75,
+        cardStyle: {
+          contentPadding: 0.1,
+          overlayColor: 'rgba(0,0,0,.3)',
+          titleStyle: {
+            fontSizeRatio: 0.2,
+            maxLines: 2,
+            position: 'bottom',
+            align: 'left',
+          },
+        },
+      },
+    )
+    const context = contexts.get(patch.cells[0].canvas)!
+    expect(patch.cells[0].canvas).toMatchObject({ width: 30, height: 40 })
+    expect(context.fillRect).toHaveBeenCalledWith(3, 3, 24, 34)
+    expect(context.fillText.mock.calls.at(-1)?.[0]).toMatch(/…$/)
   })
 })

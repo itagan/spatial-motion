@@ -110,7 +110,7 @@ npm tarball 只携带运行时 `dist`、README、CHANGELOG、LICENSE、PUBLIC_AP
 
 本地 `dist` 会生成声明映射便于源码跳转，但 npm tarball 排除 `.d.ts.map`；类型声明和 JavaScript source map 仍随包提供。该发布裁剪属于包体积控制，不应通过提高 150 KB 预算替代。
 
-v1.x 的稳定入口和 SemVer 规则记录在 `docs/PUBLIC_API.md`。正式发布严格按照 `docs/RELEASE.md` 执行；准备发布的代码变更不自动授权 npm publish、tag 或 GitHub Release。
+v1.x 的稳定入口和 SemVer 规则记录在 `docs/PUBLIC_API.md`。`card-template` 是按需入口，模板代码不得被主入口运行时代码引用；包检查分别执行 40 KB 主库与 12 KB 模板 gzip 门禁。正式发布严格按照 `docs/RELEASE.md` 执行；准备发布的代码变更不自动授权 npm publish、tag 或 GitHub Release。
 
 ## 测试策略
 

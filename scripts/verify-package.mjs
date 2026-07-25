@@ -9,6 +9,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
 const packageName = packageJson.name
 const jsGzipBudget = 40 * 1024
+const cardTemplateGzipBudget = 12 * 1024
 const tarballBudget = 150 * 1024
 const treeShakenBudget = 8 * 1024
 const keepConsumer = process.env.KEEP_PACKAGE_CONSUMER === '1'
@@ -18,7 +19,7 @@ assert(packageJson.sideEffects === false, 'Package must declare sideEffects: fal
 assert(packageJson.peerDependencies?.three, 'Three.js must be a peer dependency')
 assert(!packageJson.dependencies?.three, 'Three.js must not be a runtime dependency')
 
-const requiredExports = ['.', './layouts', './effects', './performance']
+const requiredExports = ['.', './layouts', './effects', './performance', './card-template']
 for (const exportPath of requiredExports) {
   const declaration = packageJson.exports?.[exportPath]
   assert(declaration?.types && declaration?.import, `Missing typed ESM export: ${exportPath}`)
@@ -29,10 +30,20 @@ for (const exportPath of requiredExports) {
 const distFiles = await listFiles(join(root, 'dist'))
 const jsFiles = distFiles.filter((path) => path.endsWith('.js'))
 const jsContents = await Promise.all(jsFiles.map((path) => readFile(path)))
+const cardTemplateJsFiles = jsFiles.filter((path) => path.includes(`${join('dist', 'card-template')}/`))
+const coreJsFiles = jsFiles.filter((path) => !cardTemplateJsFiles.includes(path))
+const coreJsContents = await Promise.all(coreJsFiles.map((path) => readFile(path)))
+const cardTemplateJsContents = await Promise.all(cardTemplateJsFiles.map((path) => readFile(path)))
 const jsBytes = jsContents.reduce((total, contents) => total + contents.byteLength, 0)
-const jsGzipBytes = jsContents.reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
+const jsGzipBytes = coreJsContents.reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
+const cardTemplateJsGzipBytes = cardTemplateJsContents
+  .reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
 assert(jsBytes < 150 * 1024, `Library JS suggests Three.js was bundled: ${jsBytes} bytes`)
 assert(jsGzipBytes <= jsGzipBudget, `Library JS gzip budget exceeded: ${jsGzipBytes} > ${jsGzipBudget}`)
+assert(
+  cardTemplateJsGzipBytes <= cardTemplateGzipBudget,
+  `Card template JS gzip budget exceeded: ${cardTemplateJsGzipBytes} > ${cardTemplateGzipBudget}`,
+)
 assert(jsContents.some((contents) => /from\s*["']three["']/.test(contents.toString('utf8'))), 'Library should retain an external Three.js import')
 
 const dryRun = parsePackResult(run('npm', ['pack', '--dry-run', '--json', '--ignore-scripts']))
@@ -82,6 +93,7 @@ try {
     const layouts = await import('${packageName}/layouts')
     const effects = await import('${packageName}/effects')
     const performance = await import('${packageName}/performance')
+    const cardTemplate = await import('${packageName}/card-template')
     assert.equal(typeof main.MotionStage, 'function')
     assert.equal(typeof layouts.sphere, 'function')
     assert.equal(typeof layouts.box, 'function')
@@ -95,6 +107,9 @@ try {
     assert.equal(typeof performance.compareBenchmarkResults, 'function')
     assert.equal(typeof performance.parseBenchmarkResult, 'function')
     assert.equal(typeof performance.evaluateBenchmarkRegression, 'function')
+    assert.equal(typeof cardTemplate.html, 'function')
+    assert.equal(typeof cardTemplate.defineCardTemplate, 'function')
+    assert.equal(typeof main.html, 'undefined')
     assert.equal(typeof main.MotionStage.prototype.updateItem, 'function')
     assert.equal(typeof main.MotionStage.prototype.updateItemsById, 'function')
     assert.equal(typeof main.MotionStage.prototype.addExtension, 'function')
@@ -169,11 +184,14 @@ try {
   await writeFile(join(consumer, 'consumer.ts'), `
     import {
       type CardStyle,
+      type CardTitleStyle,
+      type CardContentRenderer,
       type MotionItem,
       type MotionItemUpdate,
       type MotionPreference,
       type MotionStage,
       type MotionStageOptions,
+      type ResolveCardStyle,
       type StagePerformanceEnvironment,
       type StageTransitionHandle,
       type StageTransitionResult,
@@ -190,12 +208,33 @@ try {
     import { box, createLayout as createLayoutFromSubpath, parseLayoutConfig as parseLayoutConfigFromSubpath, ring, scatter, type LayoutConfig as SubpathLayoutConfig } from '${packageName}/layouts'
     import { vortex, type EmissionOptions } from '${packageName}/effects'
     import { BenchmarkSession, compareBenchmarkResults, evaluateBenchmarkRegression, parseBenchmarkResult, type BenchmarkRegressionThresholds, type BenchmarkResult } from '${packageName}/performance'
+    import { defineCardTemplate, html, type CardTemplateStyle } from '${packageName}/card-template'
     const items: MotionItem[] = [{ id: 'one' }]
     declare const stage: MotionStage | undefined
     const emission: EmissionOptions = { mode: 'wave' }
     const motion: MotionPreference = 'auto'
-    const cardStyle: CardStyle = { shape: 'rounded', cornerRadius: 8 }
+    const titleStyle: CardTitleStyle = { position: 'bottom', fontSizeRatio: 0.12, maxLines: 2 }
+    const cardStyle: CardStyle = {
+      shape: 'rounded',
+      cornerRadius: 8,
+      imageFit: 'cover',
+      imagePosition: { x: 0.5, y: 0.25 },
+      titleStyle,
+    }
+    const resolveCardStyle: ResolveCardStyle = (item) =>
+      item.meta ? { borderColor: '#ffd700' } : undefined
+    const templateStyle: CardTemplateStyle = { display: 'flex', flexDirection: 'column', gap: 4 }
+    const cardContent: CardContentRenderer = defineCardTemplate((item) => html\`
+      <div style=\${templateStyle}>
+        <img src=\${item.image} style="height:70%;object-fit:cover" />
+        <span style="font-size:12px;line-clamp:1">\${item.title}</span>
+      </div>
+    \`)
     const stageOptions: Omit<MotionStageOptions, 'container'> = {
+      cardAspectRatio: 0.75,
+      cardStyle,
+      resolveCardStyle,
+      cardContent,
       cardResolution: 96,
       imageTimeout: 5000,
       imageConcurrency: 4,
@@ -238,7 +277,7 @@ try {
     const configuredLayouts = [createLayout(layoutConfig), createLayoutFromSubpath(subpathConfig)]
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
-    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, stageOptions]
+    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
@@ -276,6 +315,7 @@ try {
   `)
   await writeFile(join(consumer, 'stage.ts'), `
     import { MotionStage, sphere, type MotionItem, type StageExtension } from '${packageName}'
+    import { defineCardTemplate, html } from '${packageName}/card-template'
     import { Object3D } from 'three'
     const container = document.querySelector<HTMLElement>('#stage')!
     const result = document.querySelector<HTMLElement>('#result')!
@@ -285,6 +325,11 @@ try {
       quality: 'low',
       adaptivePerformance: false,
       cardStyle: { shape: 'rounded', cornerRadius: 8 },
+      cardContent: defineCardTemplate((item) => html\`
+        <div style="display:flex;flex-direction:column">
+          <span>\${item.title}</span>
+        </div>
+      \`),
       cardResolution: 64,
       imageTimeout: 1000,
       transition: { duration: 0 },
@@ -327,6 +372,7 @@ try {
     tarballBytes: dryRun.size,
     libraryJsBytes: jsBytes,
     libraryJsGzipBytes: jsGzipBytes,
+    cardTemplateJsGzipBytes,
     layoutConsumerBytes: Buffer.byteLength(consumerJs),
     consumerRuntime: 'passed',
     consumerTypes: 'passed',

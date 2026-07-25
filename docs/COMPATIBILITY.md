@@ -16,6 +16,8 @@ Spatial Motion 的 `MotionStage` 面向支持 WebGL2、ES2022、Canvas 2D、Resi
 - 远程图片以匿名 CORS 请求加载；源站必须返回允许当前页面读取图片的响应头。
 - 每个 Stage 默认最多并发 6 个图片请求，完成图片保存在 Stage 私有有界 LRU 中；destroy 会中止请求并释放缓存引用。
 - 加载失败、CORS 拒绝、超过 `imageTimeout` 或自定义 `drawCard` 抛错时，卡片会回退到基于 id/title 的内置占位图。
+- `card-template` 使用 Canvas 2D 受控布局，不依赖 DOM、`innerHTML` 或 `unsafe-eval`；模板图片遵守相同的 CORS、超时、缓存和中止规则。
+- 模板不是完整 HTML/CSS 实现，不支持事件属性、选择器、外部样式表、脚本、CSS 动画、transform/filter 或框架组件。
 - 自定义绘制回调接收 Canvas 2D 上下文，不接收 HTML；异步回调应自行处理业务请求的超时和取消。
 - 图集使用固定 64px 单元，适合大量缩略卡片，不是高清近景图片管线。
 

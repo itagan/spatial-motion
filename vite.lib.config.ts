@@ -17,6 +17,7 @@ export default defineConfig({
         'layouts/index': new URL('./src/layouts/index.ts', import.meta.url).pathname,
         'effects/index': new URL('./src/effects/index.ts', import.meta.url).pathname,
         'performance/index': new URL('./src/performance/index.ts', import.meta.url).pathname,
+        'card-template/index': new URL('./src/card-template/index.ts', import.meta.url).pathname,
       },
       formats: ['es'],
     },

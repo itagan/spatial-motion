@@ -1,10 +1,12 @@
 import { Euler, Group, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three'
 import type {
+  CardContentRenderer,
   CardStyle,
   DrawCard,
   Layout,
   MotionItem,
   QualityLevel,
+  ResolveCardStyle,
   Transform,
   TransitionOptions,
 } from './types.js'
@@ -42,7 +44,11 @@ export interface MotionStageOptions {
   keyboardNavigation?: boolean
   ariaLabel?: string
   cardStyle?: CardStyle
+  resolveCardStyle?: ResolveCardStyle
   drawCard?: DrawCard
+  cardContent?: CardContentRenderer
+  /** Shared card width divided by height. The longest edge remains one world unit. */
+  cardAspectRatio?: number
   /** Atlas pixels per card before GPU texture-size clamping. */
   cardResolution?: number
   /** Maximum time to wait for each image before drawing the fallback card. */
@@ -217,6 +223,8 @@ export class MotionStage {
   private readonly camera: PerspectiveCamera
   private readonly renderer: WebGLRenderer
   private readonly cards: InstancedCardRenderer
+  private readonly cardWidth: number
+  private readonly cardHeight: number
   private readonly resizeObserver: ResizeObserver
   private readonly projectionVector = new Vector3()
   private readonly groupEuler = new Euler()
@@ -277,6 +285,9 @@ export class MotionStage {
   private extensionSequence = 0
 
   constructor(private readonly options: MotionStageOptions) {
+    if (options.cardContent && options.drawCard) {
+      throw new TypeError('cardContent and drawCard cannot be used together')
+    }
     this.motionPreference = options.motionPreference ?? 'auto'
     this.motionQuery = typeof matchMedia === 'function'
       ? matchMedia('(prefers-reduced-motion: reduce)')
@@ -289,6 +300,9 @@ export class MotionStage {
     this.qualityMode = options.quality ?? 'auto'
     this.quality = this.qualityMode === 'auto' ? detectQuality() : this.qualityMode
     this.performanceManager = new AdaptivePerformanceManager(this.quality)
+    const cardAspectRatio = resolveCardAspectRatio(options.cardAspectRatio)
+    this.cardWidth = cardAspectRatio >= 1 ? 1 : cardAspectRatio
+    this.cardHeight = cardAspectRatio >= 1 ? 1 / cardAspectRatio : 1
     const profile = qualityProfiles[this.quality]
     this.camera = new PerspectiveCamera(45, 1, 0.1, 100)
     this.camera.position.z = options.cameraZ ?? 18
@@ -318,7 +332,10 @@ export class MotionStage {
     document.addEventListener('visibilitychange', this.handleVisibilityChange)
     this.cards = new InstancedCardRenderer(this.scene, {
       cardStyle: options.cardStyle,
+      resolveCardStyle: options.resolveCardStyle,
       drawCard: options.drawCard,
+      cardContent: options.cardContent,
+      aspectRatio: cardAspectRatio,
       cellSize: options.cardResolution,
       imageTimeout: options.imageTimeout,
       imageConcurrency: options.imageConcurrency,
@@ -828,10 +845,11 @@ export class MotionStage {
         return
       }
 
-      const halfScale = Math.max(0, transform.scale) / 2
+      const halfWidth = Math.max(0, transform.scale) * this.cardWidth / 2
+      const halfHeight = Math.max(0, transform.scale) * this.cardHeight / 2
       const corners = billboard
-        ? this.billboardCorners(center, halfScale)
-        : this.surfaceCorners(center, halfScale, transform)
+        ? this.billboardCorners(center, halfWidth, halfHeight)
+        : this.surfaceCorners(center, halfWidth, halfHeight, transform)
       if (!billboard && !isFrontFacing(corners, center, this.camera.position)) return
       const screenCorners = corners.map((corner) => this.projectToScreen(corner, rect))
       if (screenCorners.some((corner) => !corner)) return
@@ -1126,6 +1144,8 @@ export class MotionStage {
       height,
       viewportWidth: viewportHeight * (width / Math.max(1, height)),
       viewportHeight,
+      cardWidth: this.cardWidth,
+      cardHeight: this.cardHeight,
     }
   }
 
@@ -1622,24 +1642,29 @@ export class MotionStage {
     }
   }
 
-  private billboardCorners(center: Vector3, halfScale: number): Vector3[] {
+  private billboardCorners(center: Vector3, halfWidth: number, halfHeight: number): Vector3[] {
     const right = new Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion)
     const up = new Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion)
     return [
-      center.clone().addScaledVector(right, -halfScale).addScaledVector(up, -halfScale),
-      center.clone().addScaledVector(right, halfScale).addScaledVector(up, -halfScale),
-      center.clone().addScaledVector(right, halfScale).addScaledVector(up, halfScale),
-      center.clone().addScaledVector(right, -halfScale).addScaledVector(up, halfScale),
+      center.clone().addScaledVector(right, -halfWidth).addScaledVector(up, -halfHeight),
+      center.clone().addScaledVector(right, halfWidth).addScaledVector(up, -halfHeight),
+      center.clone().addScaledVector(right, halfWidth).addScaledVector(up, halfHeight),
+      center.clone().addScaledVector(right, -halfWidth).addScaledVector(up, halfHeight),
     ]
   }
 
-  private surfaceCorners(center: Vector3, halfScale: number, transform: Transform): Vector3[] {
+  private surfaceCorners(
+    center: Vector3,
+    halfWidth: number,
+    halfHeight: number,
+    transform: Transform,
+  ): Vector3[] {
     const itemEuler = new Euler(transform.rotationX, transform.rotationY, transform.rotationZ, 'XYZ')
     return [
-      [-halfScale, -halfScale],
-      [halfScale, -halfScale],
-      [halfScale, halfScale],
-      [-halfScale, halfScale],
+      [-halfWidth, -halfHeight],
+      [halfWidth, -halfHeight],
+      [halfWidth, halfHeight],
+      [-halfWidth, halfHeight],
     ].map(([x, y]) => new Vector3(x, y, 0)
       .applyEuler(itemEuler)
       .applyEuler(this.groupEuler)
@@ -1650,6 +1675,10 @@ export class MotionStage {
 interface ScreenPoint {
   x: number
   y: number
+}
+
+function resolveCardAspectRatio(value: number | undefined): number {
+  return Number.isFinite(value) ? Math.min(4, Math.max(0.25, value as number)) : 1
 }
 
 const EXTENSION_SAMPLE_LIMIT = 120

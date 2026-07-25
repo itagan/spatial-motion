@@ -127,3 +127,27 @@ Sphere 的响应式半径、起始经度和轮廓淡出仍只在布局计算或�
 2000 items / high / steady / 3 秒为 60.00 FPS、P95 18.10ms、P99 18.60ms、0 个 33ms 长帧；2000 items / high / transition-stress / 3 秒为 60.00 FPS、P95 18.55ms、P99 18.70ms、0 个 33ms 长帧、1 Draw Call、4 次中断/patch。相对 v1.11 的 18.40ms P95 增加 0.8%，低于 10% 门槛。390×844、1600×600 与默认桌面视口均完成 contain 边界、轮廓淡出、约 360° 旋转和快速布局中断检查；Canvas 脱离 Grid 的内在尺寸计算后，连续横竖屏切换不再反向撑大舞台，头像顶部朝北且控制台无 error 日志。
 
 最终包验证为 Library JavaScript gzip 36,057 bytes、npm tarball 65,495 bytes、layout-only 消费者 3,947 bytes，满足既有 40 KB / 150 KB / 8 KB 硬预算。
+
+## 卡片内容与统一宽高比
+
+卡片宽高比在 Stage 初始化时归一化到最长边为 1；矩形 PlaneGeometry、Atlas 单元、UV、局部行上传和拾取四边形共享同一宽高，不增加实例属性、Mesh 或 Draw Call。`cardResolution` 继续代表最长像素边，图集按单元比例选择行列并同时遵守最大纹理宽高。
+
+内置 Canvas 绘制增加图片 fit/焦点、相对留白、覆盖层和多行标题；逐卡样式只在图集生成或 patch 阶段解析，不进入 Stage RAF。最终浏览器性能和包体积数值以本次完整验收结果为准。
+
+2026-07-25 Chromium 150 / Apple M4 / 1265×633 / DPR 1 验收：500 个 1:1 圆形头像、1000 个 3:4 人物卡和 2000 个 16:9 信息卡均保持 60 FPS、主体 1 Draw Call，图片比例、标题覆盖层和逐卡金色边框正确；390×844 竖屏 contain 完整显示，矩形卡片点击命中正确，控制台无 error 日志。
+
+2000 items / high / steady / 3 秒为 59.55 FPS、P95 17.80ms、P99 18.40ms、0 个 33ms 长帧；transition-stress / 3 秒为 60.00 FPS、P95 18.20ms、P99 18.50ms、0 个 33ms 长帧、1 Draw Call、4 次局部 patch。相对 Sphere 优化阶段的 18.55ms 压力 P95 降低约 1.9%。
+
+最终包验证为 Library JavaScript gzip 37,283 bytes、npm tarball 67,759 bytes、layout-only 消费者 4,012 bytes，满足既有 40,960 / 153,600 / 8,192 bytes 硬预算。
+
+## ES6 卡片模板引擎
+
+`card-template` 将稳定的 tagged template 字符串结构编译并缓存在 `WeakMap`，动态值只参与节点绑定和 Canvas 布局。模板不创建 DOM，不进入 Stage RAF；准备阶段声明的图片 URL 由 Atlas 统一去重、限流、缓存和取消，随后只绘制对应的初始或局部 patch 单元。
+
+主入口只新增擦除后的类型协议，不引用模板运行时代码。包门禁改为分别统计主库与按需模板：当前主库 37,537 bytes gzip、模板 5,820 bytes gzip、npm tarball 76,365 bytes、layout-only 4,012 bytes，分别低于 40,960 / 12,288 / 153,600 / 8,192 bytes 限制。
+
+模板稳态仍复用一个 Atlas、一个实例 Mesh 和一个 Draw Call。性能验收重点放在 cold-start、atlas-update 和 transition-stress，避免仅凭稳态 FPS 掩盖模板布局或批量重绘成本。
+
+2026-07-26 Chromium 150 / Apple M4 实测：等价 2000 项指标卡的三次 Atlas build 中位数，模板为 410.9ms、手写 Canvas 为 380.2ms，模板层增加约 8.1%，低于 15% 门槛。模板单卡更新产生 1 个 patch、约 7.5ms patch 累计耗时，Stage 内只有一个 Canvas 子节点。
+
+默认 Cards 的 2000/high/3 秒 steady 为 60.0 FPS、P95 18.50ms；transition-stress 为 60.0 FPS、P95 18.60ms、4 次 patch、0 个 24/33/50ms 长帧和 1 Draw Call。相对卡片宽高比阶段的 17.80/18.20ms 基线分别回退约 3.9%/2.2%，均低于 10% 门槛。

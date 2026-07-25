@@ -46,9 +46,14 @@ function atlas(count: number) {
       height,
       data: new Uint8Array(width * height * 4),
       columns: Math.ceil(Math.sqrt(count || 1)),
+      rows: Math.ceil(Math.sqrt(count || 1)),
       cellSize: 64,
+      cellWidth: 64,
+      cellHeight: 64,
       padding: 2,
       stride: 68,
+      strideX: 68,
+      strideY: 68,
       initialized: true,
       metrics: {
         cells: count,
@@ -134,6 +139,25 @@ describe('InstancedCardRenderer item loading', () => {
     })
     renderer.refreshTexture()
     expect(currentAtlas.texture.needsUpdate).toBe(true)
+    renderer.dispose()
+  })
+
+  it('normalizes shared plane geometry to the configured card aspect ratio', async () => {
+    const currentAtlas = atlas(1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene, { aspectRatio: 4 })
+
+    await renderer.setItems([{ id: 'wide' }])
+
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+    const positions = Array.from(mesh.geometry.getAttribute('position').array)
+    const xs = positions.filter((_value, index) => index % 3 === 0)
+    const ys = positions.filter((_value, index) => index % 3 === 1)
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(1)
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(0.25)
+    expect(atlasMock.create.mock.calls[0][2]).toMatchObject({ aspectRatio: 4 })
+    expect(scene.children).toHaveLength(1)
     renderer.dispose()
   })
 
@@ -268,6 +292,36 @@ describe('InstancedCardRenderer item loading', () => {
       atlasDiscardedPatches: 1,
     })
     expect(scene.children[0]).toBe(mesh)
+    renderer.dispose()
+  })
+
+  it('patches resolved per-item style changes once and then reuses the fingerprint', async () => {
+    const currentAtlas = atlas(1)
+    const patch = {
+      cells: [],
+      metrics: {
+        cells: 1,
+        renderMs: 1,
+        applyMs: 0,
+        imageLoadMs: 0,
+        imageRequests: 0,
+        imageFailures: 0,
+        uploadBytes: 0,
+      },
+    }
+    const resolveCardStyle = vi.fn((item: { meta?: unknown }) =>
+      item.meta ? { borderColor: '#ffd700' } : undefined)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    atlasMock.createPatch.mockResolvedValueOnce(patch)
+    const renderer = new InstancedCardRenderer(new Scene(), { resolveCardStyle })
+    await renderer.setItems([{ id: 'a' }])
+    const updated = [{ id: 'a', meta: { winner: true } }]
+
+    expect(await renderer.updateItems(updated, [0])).toBe(true)
+    expect(await renderer.updateItems(updated.map((item) => ({ ...item })), [0])).toBe(true)
+
+    expect(atlasMock.createPatch).toHaveBeenCalledOnce()
+    expect(atlasMock.createPatch.mock.calls[0][3]).toMatchObject({ resolveCardStyle })
     renderer.dispose()
   })
 })

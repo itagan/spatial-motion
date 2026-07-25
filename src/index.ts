@@ -28,8 +28,12 @@ export type {
 } from './core/extensions.js'
 export { easing, identityTransform, interpolateTransform } from './core/math.js'
 export type {
+  CardContentDrawContext,
+  CardContentRenderer,
   CardDrawBounds,
+  PreparedCardContent,
   CardStyle,
+  CardTitleStyle,
   DrawCard,
   EasingFunction,
   Layout,
@@ -37,6 +41,7 @@ export type {
   MotionItem,
   QualityLevel,
   QualityProfile,
+  ResolveCardStyle,
   Transform,
   TransitionOptions,
 } from './core/types.js'
