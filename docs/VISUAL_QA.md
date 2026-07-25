@@ -26,6 +26,7 @@ Sphere、Box、Cylinder、Grid contain/cover、Ring、Helix、Cone 分别检查�
 - [ ] 布局互切中途连续点击，旧动画不会在稍后覆盖新布局。
 - [ ] 主体场景 `CALLS = 1`，质量切换不创建额外 Mesh。
 - [ ] Sphere latitude/Fibonacci、完整球/球冠/球带切换时密度均匀，exclude 模式没有极点重叠。
+- [ ] Sphere surface 在完整横向旋转和上下倾斜中头像顶部持续朝北；contain 在横屏、竖屏、超宽屏下不裁切，edgeFade 不产生轮廓闪烁。
 - [ ] Cylinder 完整闭环与部分圆弧首尾正确，显式 rows 下各行分配均衡且不越过圆弧范围。
 - [ ] Ring area/equal、stagger 与 clockwise 组合只改变预期分配和顺序。
 - [ ] Box 单面/多面、边缘留白和面权重不产生未选面卡片；Cone 在尖锥、圆台和等半径极限间连续。
@@ -39,7 +40,7 @@ Sphere、Box、Cylinder、Grid contain/cover、Ring、Helix、Cone 分别检查�
 - [ ] 连续拖动数值控件只应用防抖后的最终值，旧过渡不会覆盖最终配置。
 - [ ] 预设、恢复默认、复制 JSON、复制 TypeScript 和合法 JSON 导入均与画面一致。
 - [ ] URL 刷新恢复当前布局；无效 URL/导入显示字段路径、恢复默认且清除无效参数。
-- [ ] 500/2000 实例快速调整时 Stage、Mesh 与图集构建数不增加，主体保持单 Draw Call。
+- [ ] 500/2000 实例快速调整时 Stage、Mesh 与图集构建数不增加，主体保持单 Draw Call；high/medium/low 连续切换最终容量稳定在 2000/1000/500，过期图集不覆盖最新质量。
 - [ ] 高级预设、Sphere 模式互斥、Cylinder rows/columns 互斥、Box 面多选及权重控件都能生成可再次导入的合法 JSON。
 
 ## 流式特效矩阵
@@ -101,3 +102,5 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 2026-07-16 已完成 v1.9 桌面浏览器验收：原生 Three.js 与 GSAP 扩展可单独/同时挂载，BOTH 模式为 2 个扩展、4 Draw Calls，移除后恢复 0 扩展、主体 1 Draw Call；Stage pause/resume 控件和动画恢复通过，控制台无错误。500 steady 与 2000 transition-stress 均保持约 60 FPS、扩展 update 最大 0.10ms，且为 0 个 24/33/50ms 长帧。
 
 2026-07-16 已完成 v1.11 桌面浏览器验收：主 Demo、原生 Three.js 示例和 GSAP 示例均可在不 dispose 的情况下停用/启用扩展；主 Demo 从 2/2 EXT、4 Draw Calls 降至 0/2 EXT、1 Draw Call，再恢复至 2/2 EXT、4 Draw Calls，暂停/恢复、质量切换与最终移除正常，控制台无错误。500 steady 与复测的 2000 transition-stress 均为 0 个 24/33/50ms 长帧；回调顺序、Reduced Motion、同名 id、历史上限和故障隔离由自动化测试覆盖。
+
+2026-07-25 已完成 Sphere 容量与轮廓验收：390×844、1600×600 和默认桌面视口下 contain 均完整显示，经典头像预设避开极点并启用 0.08 轮廓淡出；约 360° 横向旋转及快速布局中断后头像仍顶部朝北。500/1000/2000 high 与 2000 输入下的 medium/low 容量分别稳定为 500/1000/2000、1000/500，主体保持 1 Draw Call。2000 high transition-stress / 3 秒为 P95 18.55ms、0 个 33ms 长帧，控制台无 error 日志。

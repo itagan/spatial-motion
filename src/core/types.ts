@@ -50,6 +50,7 @@ export interface Layout {
   readonly name: string
   readonly orientation?: 'surface' | 'camera'
   readonly hideBackHemisphere?: boolean
+  readonly hemisphereEdgeFade?: number
   calculate(count: number, context: LayoutContext): Transform[]
 }
 

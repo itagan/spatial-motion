@@ -10,7 +10,7 @@ import type {
 } from './types.js'
 import { easing, identityTransform, interpolateTransform } from './math.js'
 import { InstancedCardRenderer } from '../renderers/InstancedCardRenderer.js'
-import { detectQuality, qualityProfiles, visibleRatios } from '../performance/quality.js'
+import { detectQuality, qualityProfiles } from '../performance/quality.js'
 import {
   AdaptivePerformanceManager,
   type PerformanceStats,
@@ -197,6 +197,9 @@ interface ActiveTransition {
   toBillboard: number
   fromHideBackHemisphere: number
   toHideBackHemisphere: number
+  fromHemisphereEdgeFade: number
+  toHemisphereEdgeFade: number
+  targetLayout: Layout
   layout: string
   resolve: (result: StageTransitionResult) => void
   removeAbortListener: () => void
@@ -235,6 +238,7 @@ export class MotionStage {
   private visibleRatio = 1
   private currentOrientation: 'surface' | 'camera' = 'surface'
   private hideBackHemisphere = false
+  private hemisphereEdgeFade = 0
   private inputItemCount = 0
   private itemsToken = 0
   private destroyed = false
@@ -360,8 +364,9 @@ export class MotionStage {
     this.transforms = nextTransforms
     this.cards.setOrientation(this.currentOrientation)
     this.cards.setHideBackHemisphere(this.hideBackHemisphere)
+    this.cards.setHemisphereEdgeFade(this.hemisphereEdgeFade)
     this.cards.setTransforms(nextTransforms)
-    this.visibleRatio = visibleRatios[this.quality]
+    this.visibleRatio = 1
     this.cards.setVisibleRatio(this.visibleRatio)
     this.syncFocusedItem()
   }
@@ -444,10 +449,12 @@ export class MotionStage {
     this.transformCalculations += 1
     const targetOrientation = layout.orientation ?? 'surface'
     const targetHideBackHemisphere = layout.hideBackHemisphere ?? false
+    const targetHemisphereEdgeFade = layout.hemisphereEdgeFade ?? 0
     const targetBillboard = targetOrientation === 'camera' ? 1 : 0
     const targetHideBack = targetHideBackHemisphere ? 1 : 0
     this.currentOrientation = targetOrientation
     this.hideBackHemisphere = targetHideBackHemisphere
+    this.hemisphereEdgeFade = targetHemisphereEdgeFade
     const duration = this.reducedMotion
       ? 0
       : Math.max(0, options.duration ?? this.options.transition?.duration ?? 1200)
@@ -457,6 +464,7 @@ export class MotionStage {
       this.activeTransition = null
       this.cards.setOrientation(targetOrientation)
       this.cards.setHideBackHemisphere(targetHideBackHemisphere)
+      this.cards.setHemisphereEdgeFade(targetHemisphereEdgeFade)
       this.cards.setTransforms(target)
       this.lastTransitionStatus = 'completed'
       this.lastTransitionLayout = layout.name
@@ -469,6 +477,8 @@ export class MotionStage {
       targetBillboard,
       visualState.hideBackHemisphere,
       targetHideBack,
+      visualState.hemisphereEdgeFade,
+      targetHemisphereEdgeFade,
     )
     return new Promise<StageTransitionResult>((resolve) => {
       const transition: ActiveTransition = {
@@ -482,6 +492,9 @@ export class MotionStage {
         toBillboard: targetBillboard,
         fromHideBackHemisphere: visualState.hideBackHemisphere,
         toHideBackHemisphere: targetHideBack,
+        fromHemisphereEdgeFade: visualState.hemisphereEdgeFade,
+        toHemisphereEdgeFade: targetHemisphereEdgeFade,
+        targetLayout: layout,
         layout: layout.name,
         resolve,
         removeAbortListener: () => {},
@@ -519,6 +532,7 @@ export class MotionStage {
         name: `${effect.name}-entry`,
         orientation: 'camera',
         hideBackHemisphere: false,
+        hemisphereEdgeFade: 0,
         calculate: () => target,
       },
       options,
@@ -631,6 +645,8 @@ export class MotionStage {
     this.sourceItems = nextSource
     this.items = nextItems
     this.inputItemCount = nextSource.length
+    this.visibleRatio = 1
+    this.cards.setVisibleRatio(this.visibleRatio)
     this.syncFocusedItem()
 
     if (!options.layout) return true
@@ -642,14 +658,21 @@ export class MotionStage {
     return completed
   }
 
-  private async updateItemsInternal(items: MotionItem[], options: UpdateItemsOptions): Promise<boolean> {
+  private async updateItemsInternal(
+    items: MotionItem[],
+    options: UpdateItemsOptions,
+    preserveEffect = false,
+  ): Promise<boolean> {
     const now = performance.now()
     const current = this.resolveCurrentTransforms(now)
     const previousById = new Map(this.items.map((item, index) => [item.id, current[index]]))
+    const currentEffect = preserveEffect ? this.activeEffect : null
     const token = ++this.itemsToken
     this.cancelActiveTransition('interrupted')
-    this.activeEffect = null
-    this.cards.disableEffect()
+    if (!preserveEffect) {
+      this.activeEffect = null
+      this.cards.disableEffect()
+    }
     this.transforms = current
     this.cards.setTransforms(current)
 
@@ -667,11 +690,26 @@ export class MotionStage {
     this.transforms = nextTransforms
     this.cards.setOrientation(this.currentOrientation)
     this.cards.setHideBackHemisphere(this.hideBackHemisphere)
+    this.cards.setHemisphereEdgeFade(this.hemisphereEdgeFade)
     this.cards.setTransforms(nextTransforms)
+    this.visibleRatio = 1
     this.cards.setVisibleRatio(this.visibleRatio)
     this.syncFocusedItem()
 
     const targetLayout = options.layout ?? this.lastLayout
+    if (currentEffect && this.activeEffect === currentEffect) {
+      if (targetLayout) {
+        this.transforms = targetLayout.calculate(this.items.length, this.context())
+        this.cards.setTransforms(this.transforms)
+        if (options.layout) this.lastLayout = options.layout
+      }
+      const profile = qualityProfiles[this.quality]
+      currentEffect.effect.prepare(this.items.length, profile.maxActiveEffectItems)
+      currentEffect.gpuData = currentEffect.effect.getGpuData()
+      this.cards.enableEffect(currentEffect.gpuData)
+      this.cards.setEffectTime(currentEffect.elapsedSeconds)
+      return true
+    }
     if (!targetLayout) return true
     const completed = await this.transitionTo(targetLayout, {
       duration: options.duration ?? 800,
@@ -948,6 +986,10 @@ export class MotionStage {
     this.camera.aspect = width / height
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(width, height, false)
+    if (this.lastLayout && this.items.length && !this.activeTransition && !this.activeEffect) {
+      this.transforms = this.lastLayout.calculate(this.items.length, this.context())
+      this.cards.setTransforms(this.transforms)
+    }
     const viewport = this.extensionViewport()
     for (const record of this.orderedExtensions()) {
       if (!record.active || !record.mounted || !record.enabled || !record.extension.resize) continue
@@ -1102,12 +1144,17 @@ export class MotionStage {
     )
   }
 
-  private resolveCurrentVisualState(now: number): { billboard: number; hideBackHemisphere: number } {
-    if (this.activeEffect) return { billboard: 1, hideBackHemisphere: 0 }
+  private resolveCurrentVisualState(now: number): {
+    billboard: number
+    hideBackHemisphere: number
+    hemisphereEdgeFade: number
+  } {
+    if (this.activeEffect) return { billboard: 1, hideBackHemisphere: 0, hemisphereEdgeFade: 0 }
     if (!this.activeTransition) {
       return {
         billboard: this.currentOrientation === 'camera' ? 1 : 0,
         hideBackHemisphere: this.hideBackHemisphere ? 1 : 0,
+        hemisphereEdgeFade: this.hemisphereEdgeFade,
       }
     }
     const transition = this.activeTransition
@@ -1117,6 +1164,8 @@ export class MotionStage {
         + (transition.toBillboard - transition.fromBillboard) * progress,
       hideBackHemisphere: transition.fromHideBackHemisphere
         + (transition.toHideBackHemisphere - transition.fromHideBackHemisphere) * progress,
+      hemisphereEdgeFade: transition.fromHemisphereEdgeFade
+        + (transition.toHemisphereEdgeFade - transition.fromHemisphereEdgeFade) * progress,
     }
   }
 
@@ -1186,11 +1235,15 @@ export class MotionStage {
   }
 
   private applyQuality(quality: QualityLevel): void {
+    const targetLayout = this.activeTransition?.targetLayout ?? this.lastLayout
     this.quality = quality
     const profile = qualityProfiles[quality]
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
-    this.cards.setVisibleRatio(visibleRatios[quality])
-    this.visibleRatio = visibleRatios[quality]
+    const targetCount = Math.min(this.sourceItems.length, profile.maxVisibleItems)
+    this.visibleRatio = this.items.length
+      ? Math.min(1, targetCount / this.items.length)
+      : 1
+    this.cards.setVisibleRatio(this.visibleRatio)
     this.syncFocusedItem()
     if (this.activeEffect) {
       const now = performance.now()
@@ -1204,6 +1257,12 @@ export class MotionStage {
     this.notifyExtensions('qualityChange', quality)
     this.resizeInternal()
     this.options.onQualityChange?.(quality, this.performanceManager.getStats())
+    if (this.sourceItems.length) {
+      void this.updateItemsInternal(this.sourceItems, {
+        layout: targetLayout ?? undefined,
+        duration: 0,
+      }, true).catch((error) => console.error('Spatial Motion quality reconciliation failed', error))
+    }
   }
 
   private readonly handleVisibilityChange = () => {

@@ -32,7 +32,7 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 - `createLayout(config)` 在运行时再次验证配置，再委托给对应布局函数；外部 JSON 不能绕过字段检查。
 - 自动计算参数通过省略属性表达。解析与序列化不会根据当前实例数写入 `rings`、`columns` 或 `turns`。
 - 配置 API 的严格验证不改变直接布局函数对已有合法调用和默认值的兼容承诺。
-- v1.8 的高级字段继续使用配置版本 `1`：Sphere 分布/纬度范围、Cylinder 圆弧/行数、Ring 分配方向、Box 面选择/权重及 Cone 顶部半径均为可选字段。
+- 版本 `1` 的高级字段保持向后兼容：Sphere 支持分布/纬度范围、响应式 contain、视口留白、起始经度和轮廓淡出；Cylinder 支持圆弧/行数，Ring 支持分配方向，Box 支持面选择/权重，Cone 支持顶部半径。
 - `BoxFace` 与 `boxFaces` 从主入口和 `layouts` 入口导出；Box 配置中的面数组采用固定 canonical 顺序生成，确保序列化后的布局顺序稳定。
 - 严格解析会拒绝模式冲突与跨字段非法组合；直接布局函数则安全归一化异常数值，避免生成非有限 Transform。
 

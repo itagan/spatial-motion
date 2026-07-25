@@ -2,6 +2,14 @@ import type { Layout, Transform } from '../core/types.js'
 
 export interface SphereOptions {
   radius?: number
+  /** Keep the explicit radius, or fit the complete sphere inside the viewport. */
+  fit?: 'fixed' | 'contain'
+  /** Per-edge viewport fraction reserved by contain mode. */
+  viewportPadding?: number
+  /** Longitude offset in radians. */
+  startAngle?: number
+  /** Soft fade width at the visible hemisphere edge. Zero disables it. */
+  edgeFade?: number
   /** Ring-based latitude rows, or an equal-area Fibonacci distribution. */
   distribution?: 'latitude' | 'fibonacci'
   /** Lower latitude boundary in radians. */
@@ -25,7 +33,11 @@ export interface SphereOptions {
 }
 
 export function sphere(options: SphereOptions = {}): Layout {
-  const radius = positive(options.radius, 5)
+  const fallbackRadius = positive(options.radius, 5)
+  const fit = options.fit ?? 'fixed'
+  const viewportPadding = clamp(finite(options.viewportPadding, 0.06), 0, 0.45)
+  const startAngle = finite(options.startAngle, 0)
+  const edgeFade = clamp(finite(options.edgeFade, 0), 0, 0.5)
   const orientation = options.orientation ?? 'surface'
   const distributionMode = options.distribution ?? 'latitude'
   const [minLatitude, maxLatitude] = latitudeRange(options.minLatitude, options.maxLatitude)
@@ -37,17 +49,27 @@ export function sphere(options: SphereOptions = {}): Layout {
     name: 'sphere',
     orientation: orientation === 'camera' ? 'camera' : 'surface',
     hideBackHemisphere: orientation === 'camera',
-    calculate(count): Transform[] {
+    hemisphereEdgeFade: edgeFade,
+    calculate(count, context): Transform[] {
       if (count <= 0) return []
+      const radius = resolveRadius(fallbackRadius, fit, viewportPadding, context)
       if (distributionMode === 'fibonacci') {
-        return calculateFibonacciSphere(count, radius, minLatitude, maxLatitude, options.density, orientation)
+        return calculateFibonacciSphere(
+          count,
+          radius,
+          minLatitude,
+          maxLatitude,
+          options.density,
+          orientation,
+          startAngle,
+        )
       }
       if (count === 1) {
         const latitude = poleMode === 'include' ? maxLatitude : (minLatitude + maxLatitude) / 2
         if (approximately(latitude, Math.PI / 2)) {
           return [createTransform(0, 1, 0, radius, Math.max(0, finite(options.density, 0.86)), orientation)]
         }
-        return [createLatitudeTransform(latitude, 0, radius, options.density ?? 0.86, orientation)]
+        return [createLatitudeTransform(latitude, startAngle, radius, options.density ?? 0.86, orientation)]
       }
 
       const rings = Math.max(2, Math.min(count, positiveInteger(options.rings) ?? calculateRingCount(count)))
@@ -87,7 +109,9 @@ export function sphere(options: SphereOptions = {}): Layout {
           * polarBreathingRoom
 
         for (let index = 0; index < itemsInRing; index += 1) {
-          const theta = itemsInRing === 1 ? 0 : (2 * Math.PI * index) / itemsInRing + offset
+          const theta = itemsInRing === 1
+            ? startAngle
+            : (2 * Math.PI * index) / itemsInRing + offset + startAngle
           const x = ringRadius * Math.cos(theta)
           const z = ringRadius * Math.sin(theta)
           transforms.push(createTransform(x, y, z, radius, itemScale, orientation))
@@ -106,6 +130,7 @@ function calculateFibonacciSphere(
   maxLatitude: number,
   densityOption: number | undefined,
   orientation: NonNullable<SphereOptions['orientation']>,
+  startAngle: number,
 ): Transform[] {
   if (count <= 0) return []
   const density = Math.max(0, finite(densityOption, 0.86))
@@ -119,7 +144,7 @@ function calculateFibonacciSphere(
     const progress = (index + 0.5) / count
     const y = maxY + (minY - maxY) * progress
     const ringRadius = Math.sqrt(Math.max(0, 1 - y * y))
-    const theta = index * goldenAngle
+    const theta = startAngle + index * goldenAngle
     return createTransform(
       ringRadius * Math.cos(theta),
       y,
@@ -129,6 +154,19 @@ function calculateFibonacciSphere(
       orientation,
     )
   })
+}
+
+function resolveRadius(
+  fallback: number,
+  fit: NonNullable<SphereOptions['fit']>,
+  padding: number,
+  context: { viewportWidth?: number; viewportHeight?: number },
+): number {
+  const width = context.viewportWidth
+  const height = context.viewportHeight
+  if (fit !== 'contain' || !positiveFinite(width) || !positiveFinite(height)) return fallback
+  const availableDiameter = Math.min(width, height) * (1 - padding * 2)
+  return Math.max(0.1, availableDiameter / 2 - 0.5)
 }
 
 function createLatitudeTransform(
@@ -238,4 +276,8 @@ function clamp(value: number, minimum: number, maximum: number): number {
 
 function approximately(left: number, right: number): boolean {
   return Math.abs(left - right) < 1e-8
+}
+
+function positiveFinite(value: number | undefined): value is number {
+  return Number.isFinite(value) && (value ?? 0) > 0
 }

@@ -111,6 +111,8 @@ export class InstancedCardRenderer {
         toBillboard: { value: 0 },
         fromHideBackHemisphere: { value: 0 },
         toHideBackHemisphere: { value: 0 },
+        fromHemisphereEdgeFade: { value: 0 },
+        toHemisphereEdgeFade: { value: 0 },
         effectMode: { value: 0 },
         effectTime: { value: 0 },
         effectParamsA: { value: new Vector4() },
@@ -138,6 +140,8 @@ export class InstancedCardRenderer {
         uniform float toBillboard;
         uniform float fromHideBackHemisphere;
         uniform float toHideBackHemisphere;
+        uniform float fromHemisphereEdgeFade;
+        uniform float toHemisphereEdgeFade;
         uniform float effectMode;
         uniform float effectTime;
         uniform vec4 effectParamsA;
@@ -189,6 +193,13 @@ export class InstancedCardRenderer {
 
         void main() {
           vAtlasUv = atlasRect.xy + uv * atlasRect.zw;
+          if (visibilityRank > visibleRatio) {
+            vOpacity = 0.0;
+            vInstanceVisible = 0.0;
+            vHighlight = 0.0;
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+            return;
+          }
           vOpacity = mix(fromOpacity, toOpacity, progress);
           vec3 center = mix(fromPosition, toPosition, progress);
           float itemScale = mix(fromScale, toScale, progress);
@@ -257,15 +268,14 @@ export class InstancedCardRenderer {
             vOpacity *= emissionEnvelope(effectTime, effectParamsB.w, effectParamsC.x, effectParamsC.y, effectParamsC.z, effectParamsC.w);
           }
 
+          vec4 centerView = modelViewMatrix * vec4(center, 1.0);
           if (effectMode > 0.5) {
-            vec4 centerView = modelViewMatrix * vec4(center, 1.0);
             vInstanceVisible = effectVisible;
             centerView.xy += position.xy * itemScale;
             gl_Position = projectionMatrix * centerView;
           } else {
             vec3 localPosition = rotateByQuaternion(position * itemScale, itemQuaternion);
             vec4 surfaceView = modelViewMatrix * vec4(center + localPosition, 1.0);
-            vec4 centerView = modelViewMatrix * vec4(center, 1.0);
             vec4 billboardView = centerView;
             billboardView.xy += position.xy * itemScale;
             float billboardAmount = mix(fromBillboard, toBillboard, progress);
@@ -275,9 +285,14 @@ export class InstancedCardRenderer {
             float hemisphereVisible = step(sphereCenterView.z, centerView.z);
             float hideBackAmount = mix(fromHideBackHemisphere, toHideBackHemisphere, progress);
             vOpacity *= mix(1.0, hemisphereVisible, hideBackAmount);
+            float edgeFade = mix(fromHemisphereEdgeFade, toHemisphereEdgeFade, progress);
+            if (edgeFade > 0.0) {
+              vec3 radialView = normalize(centerView.xyz - sphereCenterView.xyz);
+              float facing = dot(radialView, normalize(-centerView.xyz));
+              vOpacity *= smoothstep(0.0, edgeFade, facing);
+            }
             vInstanceVisible = 1.0;
           }
-          vInstanceVisible *= step(visibilityRank, visibleRatio);
         }
       `,
       fragmentShader: `
@@ -359,6 +374,8 @@ export class InstancedCardRenderer {
     toBillboard?: number,
     fromHideBackHemisphere?: number,
     toHideBackHemisphere?: number,
+    fromHemisphereEdgeFade?: number,
+    toHemisphereEdgeFade?: number,
   ): void {
     if (!this.mesh) return
     const count = Math.min(from.length, to.length, this.instanceCapacity)
@@ -383,6 +400,8 @@ export class InstancedCardRenderer {
       uniforms.toBillboard.value = toBillboard ?? uniforms.toBillboard.value
       uniforms.fromHideBackHemisphere.value = fromHideBackHemisphere ?? uniforms.toHideBackHemisphere.value
       uniforms.toHideBackHemisphere.value = toHideBackHemisphere ?? uniforms.toHideBackHemisphere.value
+      uniforms.fromHemisphereEdgeFade.value = fromHemisphereEdgeFade ?? uniforms.toHemisphereEdgeFade.value
+      uniforms.toHemisphereEdgeFade.value = toHemisphereEdgeFade ?? uniforms.toHemisphereEdgeFade.value
     }
     geometry.setAttribute('fromPosition', new InstancedBufferAttribute(fromPosition, 3))
     geometry.setAttribute('toPosition', new InstancedBufferAttribute(toPosition, 3))
@@ -418,6 +437,12 @@ export class InstancedCardRenderer {
     this.material.uniforms.toHideBackHemisphere.value = value
   }
 
+  setHemisphereEdgeFade(amount: number): void {
+    if (!this.material) return
+    this.material.uniforms.fromHemisphereEdgeFade.value = amount
+    this.material.uniforms.toHemisphereEdgeFade.value = amount
+  }
+
   enableEffect(data: StreamingEffectGpuData): void {
     if (!this.mesh || !this.material) return
     this.mesh.geometry.setAttribute('effectPath', new InstancedBufferAttribute(data.paths, 4))
@@ -430,6 +455,8 @@ export class InstancedCardRenderer {
     uniforms.effectMode.value = effectMode(data.kind)
     uniforms.fromHideBackHemisphere.value = 0
     uniforms.toHideBackHemisphere.value = 0
+    uniforms.fromHemisphereEdgeFade.value = 0
+    uniforms.toHemisphereEdgeFade.value = 0
     let activeCount = 0
     while (activeCount < data.speedFactors.length && data.speedFactors[activeCount] >= 0) {
       activeCount += 1

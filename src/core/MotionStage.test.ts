@@ -24,6 +24,7 @@ vi.mock('../renderers/InstancedCardRenderer', () => ({
     setGroupRotation = vi.fn()
     setOrientation = vi.fn()
     setHideBackHemisphere = vi.fn()
+    setHemisphereEdgeFade = vi.fn()
     enableEffect = vi.fn()
     disableEffect = vi.fn()
     setEffectTime = vi.fn()
@@ -234,6 +235,99 @@ describe('MotionStage', () => {
     expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
     stage.setQuality('auto')
     expect(stage.getQualityMode()).toBe('auto')
+    stage.destroy()
+  })
+
+  it('reconciles the item pool across quality levels without double reduction', async () => {
+    const stage = createStage({ quality: 'high' })
+    const cards = currentCards()
+    const items = Array.from({ length: 3000 }, (_, index) => ({ id: `item-${index}` }))
+    await stage.setItems(items)
+    await stage.to(layout((count) => Array.from({ length: count }, () => transform())), { duration: 0 })
+
+    expect((cards.setItems.mock.calls[0][0] as MotionItem[])).toHaveLength(2000)
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
+
+    stage.setQuality('medium')
+    await vi.waitFor(() => {
+      expect((cards.setItems.mock.calls.at(-1)?.[0] as MotionItem[])).toHaveLength(1000)
+    })
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
+
+    stage.setQuality('low')
+    await vi.waitFor(() => {
+      expect((cards.setItems.mock.calls.at(-1)?.[0] as MotionItem[])).toHaveLength(500)
+    })
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
+
+    stage.setQuality('high')
+    await vi.waitFor(() => {
+      expect((cards.setItems.mock.calls.at(-1)?.[0] as MotionItem[])).toHaveLength(2000)
+    })
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
+    stage.destroy()
+  })
+
+  it('lets only the newest asynchronous quality reconciliation update transforms', async () => {
+    const stage = createStage({ quality: 'high' })
+    const cards = currentCards()
+    const items = Array.from({ length: 3000 }, (_, index) => ({ id: `item-${index}` }))
+    await stage.setItems(items)
+    await stage.to(layout((count) =>
+      Array.from({ length: count }, (_, index) => transform({ x: index }))), { duration: 0 })
+    const low = deferred<boolean>()
+    const high = deferred<boolean>()
+    cards.setItems.mockReturnValueOnce(low.promise).mockReturnValueOnce(high.promise)
+    stage.setQuality('low')
+    stage.setQuality('high')
+    const transformsBeforeReconcile = cards.setTransforms.mock.calls.length
+    expect((cards.setItems.mock.calls.at(-2)?.[0] as MotionItem[])).toHaveLength(500)
+    expect((cards.setItems.mock.calls.at(-1)?.[0] as MotionItem[])).toHaveLength(2000)
+
+    high.resolve(true)
+    await vi.waitFor(() =>
+      expect(cards.setTransforms.mock.calls.length).toBe(transformsBeforeReconcile + 2))
+    low.resolve(true)
+    await Promise.resolve()
+    expect(cards.setTransforms.mock.calls.length).toBe(transformsBeforeReconcile + 2)
+    expect((cards.setTransforms.mock.calls.at(-1)?.[0] as Transform[])).toHaveLength(2000)
+    stage.destroy()
+  })
+
+  it('ignores a pending quality reconciliation after destroy', async () => {
+    const stage = createStage({ quality: 'high' })
+    const cards = currentCards()
+    await stage.setItems(Array.from({ length: 3000 }, (_, index) => ({ id: `item-${index}` })))
+    const pending = deferred<boolean>()
+    cards.setItems.mockReturnValueOnce(pending.promise)
+    stage.setQuality('low')
+    const transformsBefore = cards.setTransforms.mock.calls.length
+    stage.destroy()
+    pending.resolve(true)
+    await Promise.resolve()
+
+    expect(cards.setTransforms.mock.calls.length).toBe(transformsBefore)
+  })
+
+  it('lets a data patch supersede a pending quality reconciliation without double reduction', async () => {
+    const stage = createStage({ quality: 'high' })
+    const cards = currentCards()
+    await stage.setItems(Array.from({ length: 3000 }, (_, index) => ({
+      id: `item-${index}`,
+      title: `Item ${index}`,
+    })))
+    const pending = deferred<boolean>()
+    cards.setItems.mockReturnValueOnce(pending.promise)
+
+    stage.setQuality('low')
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(0.25)
+    await expect(stage.updateItem('item-0', { title: 'Updated' })).resolves.toBe(true)
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
+
+    const transformsBefore = cards.setTransforms.mock.calls.length
+    pending.resolve(true)
+    await Promise.resolve()
+    expect(cards.setTransforms.mock.calls.length).toBe(transformsBefore)
     stage.destroy()
   })
 
@@ -981,7 +1075,7 @@ describe('MotionStage', () => {
     const secondLayout = layout(() => [transform({ x: 5 })], 'second')
 
     const firstTransition = stage.to(firstLayout, { duration: 100 })
-    expect(cards.prepareTransition.mock.calls.at(-1)?.slice(2)).toEqual([0, 1, 0, 0])
+    expect(cards.prepareTransition.mock.calls.at(-1)?.slice(2)).toEqual([0, 1, 0, 0, 0, 0])
     const secondTransition = stage.to(secondLayout, { duration: 0 })
     callbacks.at(-1)?.(100)
 
@@ -1199,14 +1293,19 @@ describe('MotionStage', () => {
     stage.destroy()
   })
 
-  it('does not pick instances hidden by the low-quality visibility ratio', async () => {
-    const stage = createStage({ quality: 'low' })
-    await stage.setItems([{ id: 'far' }, { id: 'hidden-center' }])
+  it('immediately excludes instances above the pending lower-quality cap from picking', async () => {
+    const stage = createStage({ quality: 'high' })
+    const items = Array.from({ length: 2000 }, (_, index) => ({ id: `item-${index}` }))
+    await stage.setItems(items)
     await stage.to(
-      layout(() => [transform({ x: 100 }), transform()]),
+      layout((count) => Array.from(
+        { length: count },
+        (_, index) => transform({ x: index === 1 ? 0 : 100 }),
+      )),
       { duration: 0 },
     )
 
+    stage.setQuality('low')
     expect(stage.pick(50, 50)).toBeNull()
     stage.destroy()
   })

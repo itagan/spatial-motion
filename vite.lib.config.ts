@@ -5,8 +5,12 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     copyPublicDir: false,
-    sourcemap: true,
-    minify: 'esbuild',
+    sourcemap: 'hidden',
+    minify: 'terser',
+    terserOptions: {
+      compress: { passes: 2 },
+      format: { comments: false },
+    },
     lib: {
       entry: {
         index: new URL('./src/index.ts', import.meta.url).pathname,
