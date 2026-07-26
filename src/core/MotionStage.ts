@@ -29,7 +29,6 @@ import {
 import { Timeline } from './Timeline.js'
 import type {
   StageExtension,
-  StageExtensionContext,
   StageExtensionHandle,
   StageExtensionStats,
   StageViewport,
@@ -41,6 +40,7 @@ import {
 } from './InteractionController.js'
 import { ItemCoordinator } from './ItemCoordinator.js'
 import { MotionController } from './MotionController.js'
+import { ExtensionHost } from './ExtensionHost.js'
 
 export interface MotionStageOptions<TMeta = unknown> {
   container: HTMLElement
@@ -161,30 +161,6 @@ export interface StagePerformanceEnvironment {
   gpuRenderer: string | null
 }
 
-interface StageExtensionRecord {
-  id: number
-  order: number
-  sequence: number
-  extension: StageExtension
-  root: Group
-  abortController: AbortController
-  active: boolean
-  enabled: boolean
-  mounted: boolean
-  disposed: boolean
-  archived: boolean
-  paused: boolean
-  hasUpdated: boolean
-  elapsed: number
-  updateCalls: number
-  updateTotalMs: number
-  updateSamples: number[]
-  maximumUpdateMs: number
-  slowFrames: number
-  errorCount: number
-  lastError: string | null
-}
-
 interface ActiveEffect {
   effect: StreamingEffect
   gpuData: StreamingEffectGpuData
@@ -202,6 +178,7 @@ export class MotionStage<TMeta = unknown> {
   private readonly interaction: InteractionController<TMeta>
   private readonly itemCoordinator: ItemCoordinator<TMeta>
   private readonly motionController = new MotionController()
+  private readonly extensionHost: ExtensionHost
   private readonly contentAbortController = new AbortController()
   private readonly itemWidth: number
   private readonly itemHeight: number
@@ -240,10 +217,6 @@ export class MotionStage<TMeta = unknown> {
   private renderSubmitMs = 0
   private transformCalculationMs = 0
   private transformCalculations = 0
-  private readonly extensions = new Set<StageExtensionRecord>()
-  private readonly extensionHistory: StageExtensionStats[] = []
-  private extensionUpdateMs = 0
-  private extensionSequence = 0
 
   constructor(private readonly options: MotionStageOptions<TMeta>) {
     if (typeof options.renderer !== 'function') {
@@ -335,6 +308,16 @@ export class MotionStage<TMeta = unknown> {
       onItemClick: options.onItemClick,
       onItemHover: options.onItemHover,
       onItemFocus: options.onItemFocus,
+    })
+    this.extensionHost = new ExtensionHost({
+      parent: this.scene,
+      camera: this.camera,
+      getViewport: () => this.extensionViewport(),
+      getQuality: () => this.quality,
+      getReducedMotion: () => this.reducedMotion,
+      isPaused: () => this.isPaused(),
+      isDestroyed: () => this.destroyed,
+      onError: options.onExtensionError,
     })
     this.resizeObserver = new ResizeObserver(() => {
       if (!this.destroyed) this.resizeInternal()
@@ -792,73 +775,7 @@ export class MotionStage<TMeta = unknown> {
 
   async addExtension(extension: StageExtension): Promise<StageExtensionHandle> {
     this.assertActive()
-    if (!extension || typeof extension.mount !== 'function') {
-      throw new TypeError('Stage extension must provide a mount(context) function')
-    }
-
-    const root = new Group()
-    root.name = `SpatialMotionExtension:${extension.name ?? 'anonymous'}`
-    const sequence = this.extensionSequence++
-    const record: StageExtensionRecord = {
-      id: sequence + 1,
-      order: Number.isFinite(extension.order) ? extension.order as number : 0,
-      sequence,
-      extension,
-      root,
-      abortController: new AbortController(),
-      active: true,
-      enabled: true,
-      mounted: false,
-      disposed: false,
-      archived: false,
-      paused: false,
-      hasUpdated: false,
-      elapsed: 0,
-      updateCalls: 0,
-      updateTotalMs: 0,
-      updateSamples: [],
-      maximumUpdateMs: 0,
-      slowFrames: 0,
-      errorCount: 0,
-      lastError: null,
-    }
-    this.extensions.add(record)
-    this.scene.add(root)
-
-    const context: StageExtensionContext = {
-      root,
-      camera: this.camera,
-      signal: record.abortController.signal,
-    }
-
-    try {
-      await extension.mount(context)
-      record.mounted = true
-      if (!record.active || this.destroyed) {
-        this.disposeExtensionRecord(record)
-        throw new Error('MotionStage was destroyed or the extension was removed during mount')
-      }
-      extension.qualityChange?.(this.quality)
-      extension.reducedMotionChange?.(this.reducedMotion)
-      extension.resize?.(this.extensionViewport())
-      this.syncExtensionPaused(record)
-    } catch (error) {
-      const cancelled = !record.active || this.destroyed
-      if (!cancelled) this.recordExtensionError(record, error)
-      record.mounted = true
-      if (record.active) this.removeExtensionRecord(record)
-      else this.disposeExtensionRecord(record)
-      if (!cancelled) this.reportExtensionError(error, extension)
-      throw error
-    }
-
-    return {
-      get active() { return record.active },
-      get enabled() { return record.active && record.enabled },
-      enable: () => this.setExtensionEnabled(record, true),
-      disable: () => this.setExtensionEnabled(record, false),
-      remove: () => this.removeExtensionRecord(record),
-    }
+    return this.extensionHost.add(extension)
   }
 
   resize(): void {
@@ -883,14 +800,7 @@ export class MotionStage<TMeta = unknown> {
     }
     const viewport = this.extensionViewport()
     this.contentRenderer.capabilities.viewport?.resize(viewport)
-    for (const record of this.orderedExtensions()) {
-      if (!record.active || !record.mounted || !record.enabled || !record.extension.resize) continue
-      try {
-        record.extension.resize(viewport)
-      } catch (error) {
-        this.failExtension(record, error)
-      }
-    }
+    this.extensionHost.resize(viewport)
   }
 
   destroy(): void {
@@ -904,7 +814,7 @@ export class MotionStage<TMeta = unknown> {
     this.cleanupCanvasAndListeners()
     for (const wait of this.stageWaits) wait.complete(false)
     this.stageWaits.clear()
-    for (const extension of this.orderedExtensions()) this.removeExtensionRecord(extension)
+    this.extensionHost.dispose()
     this.contentAbortController.abort()
     this.contentRenderer.dispose()
     this.scene.remove(this.contentRoot)
@@ -955,17 +865,14 @@ export class MotionStage<TMeta = unknown> {
       transformCalculations: this.transformCalculations,
       pickingMs: interactionStats.pickingMs,
       pickOperations: interactionStats.pickOperations,
-      extensions: this.extensions.size,
-      extensionUpdateMs: this.extensionUpdateMs,
+      extensions: this.extensionHost.getCount(),
+      extensionUpdateMs: this.extensionHost.getUpdateDuration(),
     }
   }
 
   getExtensionStats(): StageExtensionStats[] {
     this.assertActive()
-    return [
-      ...this.orderedExtensions().map((record) => extensionStats(record)),
-      ...this.extensionHistory.map((stats) => ({ ...stats })),
-    ]
+    return this.extensionHost.getStats()
   }
 
   getPerformanceEnvironment(): StagePerformanceEnvironment {
@@ -1091,7 +998,7 @@ export class MotionStage<TMeta = unknown> {
       this.contentRenderer.capabilities.streamingEffects?.setTime(this.activeEffect.elapsedSeconds)
     }
     this.interaction.flushPendingPointerMove()
-    this.updateExtensions(delta)
+    this.extensionHost.update(delta)
     this.frameCpuMs = performance.now() - frameCpuStartedAt
     const renderStartedAt = performance.now()
     this.renderer.render(this.scene, this.camera)
@@ -1119,7 +1026,7 @@ export class MotionStage<TMeta = unknown> {
       this.contentRenderer.capabilities.streamingEffects?.enable(this.activeEffect.gpuData)
       this.contentRenderer.capabilities.streamingEffects?.setTime(this.activeEffect.elapsedSeconds)
     }
-    this.notifyExtensions('qualityChange', quality)
+    this.extensionHost.qualityChange(quality)
     this.resizeInternal()
     this.options.onQualityChange?.(quality, this.performanceManager.getStats())
     if (this.sourceItems.length) {
@@ -1139,7 +1046,7 @@ export class MotionStage<TMeta = unknown> {
 
   private startRenderLoop(): void {
     if (this.destroyed || this.isPaused() || this.frameId) return
-    this.setExtensionsPaused(false)
+    this.extensionHost.setPaused(false)
     const now = performance.now()
     this.lastFrame = now
     this.motionController.rebaseClock(now)
@@ -1148,7 +1055,7 @@ export class MotionStage<TMeta = unknown> {
   }
 
   private stopRenderLoop(): void {
-    this.setExtensionsPaused(true)
+    this.extensionHost.setPaused(true)
     if (!this.frameId) return
     cancelAnimationFrame(this.frameId)
     this.frameId = 0
@@ -1196,140 +1103,6 @@ export class MotionStage<TMeta = unknown> {
     }
   }
 
-  private orderedExtensions(): StageExtensionRecord[] {
-    return [...this.extensions].sort((left, right) =>
-      left.order - right.order || left.sequence - right.sequence)
-  }
-
-  private setExtensionEnabled(record: StageExtensionRecord, enabled: boolean): void {
-    if (!record.active || record.enabled === enabled) return
-    record.enabled = enabled
-    record.root.visible = enabled
-    if (enabled && record.mounted && record.extension.resize) {
-      try {
-        record.extension.resize(this.extensionViewport())
-      } catch (error) {
-        this.failExtension(record, error)
-        return
-      }
-    }
-    this.syncExtensionPaused(record)
-  }
-
-  private syncExtensionPaused(record: StageExtensionRecord, stagePaused = this.isPaused()): void {
-    if (!record.active || !record.mounted) return
-    const paused = stagePaused || !record.enabled
-    if (record.paused === paused) return
-    record.paused = paused
-    const callback = paused ? record.extension.pause : record.extension.resume
-    if (!callback) return
-    try {
-      callback.call(record.extension)
-    } catch (error) {
-      this.failExtension(record, error)
-    }
-  }
-
-  private notifyExtensions(
-    callbackName: 'qualityChange' | 'reducedMotionChange',
-    value: QualityLevel | boolean,
-  ): void {
-    for (const record of this.orderedExtensions()) {
-      if (!record.active || !record.mounted) continue
-      try {
-        if (callbackName === 'qualityChange') {
-          record.extension.qualityChange?.(value as QualityLevel)
-        } else {
-          record.extension.reducedMotionChange?.(value as boolean)
-        }
-      } catch (error) {
-        this.failExtension(record, error)
-      }
-    }
-  }
-
-  private recordExtensionUpdate(record: StageExtensionRecord, durationMs: number): void {
-    const duration = Math.max(0, durationMs)
-    record.updateCalls += 1
-    record.updateTotalMs += duration
-    record.maximumUpdateMs = Math.max(record.maximumUpdateMs, duration)
-    if (duration > SLOW_EXTENSION_UPDATE_MS) record.slowFrames += 1
-    record.updateSamples.push(duration)
-    if (record.updateSamples.length > EXTENSION_SAMPLE_LIMIT) record.updateSamples.shift()
-  }
-
-  private recordExtensionError(record: StageExtensionRecord, error: unknown): void {
-    record.errorCount += 1
-    record.lastError = error instanceof Error ? error.message : String(error)
-  }
-
-  private updateExtensions(delta: number): void {
-    const startedAt = performance.now()
-    for (const record of this.orderedExtensions()) {
-      if (!record.active || !record.mounted || !record.enabled || !record.extension.update) continue
-      const extensionDelta = record.hasUpdated ? delta : 0
-      record.hasUpdated = true
-      record.elapsed += extensionDelta
-      const extensionStartedAt = performance.now()
-      try {
-        record.extension.update({ elapsed: record.elapsed, delta: extensionDelta })
-      } catch (error) {
-        this.failExtension(record, error)
-      } finally {
-        this.recordExtensionUpdate(record, performance.now() - extensionStartedAt)
-      }
-    }
-    this.extensionUpdateMs = performance.now() - startedAt
-  }
-
-  private setExtensionsPaused(paused: boolean): void {
-    for (const record of this.orderedExtensions()) this.syncExtensionPaused(record, paused)
-  }
-
-  private failExtension(record: StageExtensionRecord, error: unknown): void {
-    this.recordExtensionError(record, error)
-    this.removeExtensionRecord(record)
-    this.reportExtensionError(error, record.extension)
-  }
-
-  private removeExtensionRecord(record: StageExtensionRecord): void {
-    if (!record.active) return
-    record.active = false
-    record.abortController.abort()
-    this.extensions.delete(record)
-    record.root.removeFromParent()
-    if (record.mounted) this.disposeExtensionRecord(record)
-  }
-
-  private disposeExtensionRecord(record: StageExtensionRecord): void {
-    if (record.disposed) return
-    record.disposed = true
-    try {
-      record.extension.dispose?.()
-    } catch (error) {
-      this.recordExtensionError(record, error)
-      this.reportExtensionError(error, record.extension)
-    } finally {
-      record.root.clear()
-      this.archiveExtensionRecord(record)
-    }
-  }
-
-  private archiveExtensionRecord(record: StageExtensionRecord): void {
-    if (record.archived || record.active) return
-    record.archived = true
-    this.extensionHistory.unshift({ ...extensionStats(record), active: false, enabled: false })
-    if (this.extensionHistory.length > EXTENSION_HISTORY_LIMIT) this.extensionHistory.pop()
-  }
-
-  private reportExtensionError(error: unknown, extension: StageExtension): void {
-    try {
-      this.options.onExtensionError?.(error, extension)
-    } catch {
-      // An error observer must not break the Stage render or cleanup path.
-    }
-  }
-
   private readonly handleContextLost = (event: Event) => {
     if (this.destroyed || this.pausedByContext) return
     event.preventDefault()
@@ -1349,7 +1122,7 @@ export class MotionStage<TMeta = unknown> {
   private readonly handleMotionPreferenceChange = (event: MediaQueryListEvent) => {
     if (this.destroyed || this.motionPreference !== 'auto') return
     this.reducedMotion = event.matches
-    this.notifyExtensions('reducedMotionChange', this.reducedMotion)
+    this.extensionHost.reducedMotionChange(this.reducedMotion)
     if (!this.reducedMotion) return
     this.stopRotation()
     if (!this.activeEffect) return
@@ -1488,34 +1261,6 @@ function disposeObjectResources(root: Object3D): void {
   textures.forEach((texture) => texture.dispose())
   materials.forEach((material) => material.dispose())
   geometries.forEach((geometry) => geometry.dispose())
-}
-
-const EXTENSION_SAMPLE_LIMIT = 120
-const EXTENSION_HISTORY_LIMIT = 20
-const SLOW_EXTENSION_UPDATE_MS = 2
-
-function extensionStats(record: StageExtensionRecord): StageExtensionStats {
-  const orderedSamples = [...record.updateSamples].sort((left, right) => left - right)
-  return {
-    id: record.id,
-    name: record.extension.name ?? 'anonymous',
-    order: record.order,
-    active: record.active,
-    enabled: record.active && record.enabled,
-    updateCalls: record.updateCalls,
-    averageUpdateMs: record.updateCalls ? record.updateTotalMs / record.updateCalls : 0,
-    updateTimeP95: percentile(orderedSamples, 0.95),
-    updateTimeP99: percentile(orderedSamples, 0.99),
-    maximumUpdateMs: record.maximumUpdateMs,
-    slowFrames: record.slowFrames,
-    errorCount: record.errorCount,
-    lastError: record.lastError,
-  }
-}
-
-function percentile(orderedValues: number[], fraction: number): number {
-  if (!orderedValues.length) return 0
-  return orderedValues[Math.min(orderedValues.length - 1, Math.floor(orderedValues.length * fraction))]
 }
 
 function countVisibleItems(count: number, ratio: number): number {
