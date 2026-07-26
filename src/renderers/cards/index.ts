@@ -21,6 +21,7 @@ export interface CardsRendererOptions<TMeta = unknown> {
   imageTimeout?: number
   imageConcurrency?: number
   imageCacheSize?: number
+  texturePrewarm?: boolean
 }
 
 export function cardsRenderer<TMeta = unknown>(
@@ -40,11 +41,13 @@ export function cardsRenderer<TMeta = unknown>(
     imageTimeout: options.imageTimeout,
     imageConcurrency: options.imageConcurrency,
     imageCacheSize: options.imageCacheSize,
+    texturePrewarm: options.texturePrewarm,
   }
-  return ({ root, maxTextureSize, maxAnisotropy }) => new InstancedCardRenderer(root, {
+  return ({ root, maxTextureSize, maxAnisotropy, prepareTexture }) => new InstancedCardRenderer(root, {
     ...atlasOptions,
     maxTextureSize,
     anisotropy: Math.min(4, maxAnisotropy),
+    prepareTexture,
   })
 }
 

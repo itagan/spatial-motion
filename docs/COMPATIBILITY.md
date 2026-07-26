@@ -20,7 +20,8 @@ Spatial Motion 的 `MotionStage` 面向支持 WebGL2、ES2022、Canvas 2D、Resi
 - `card-template` 使用 Canvas 2D 受控布局，不依赖 DOM、`innerHTML` 或 `unsafe-eval`；模板图片遵守相同的 CORS、超时、缓存和中止规则。
 - 模板不是完整 HTML/CSS 实现，不支持事件属性、选择器、外部样式表、脚本、CSS 动画、transform/filter 或框架组件。
 - 自定义绘制回调接收 Canvas 2D 上下文，不接收 HTML；异步回调应自行处理业务请求的超时和取消。
-- 图集使用固定 64px 单元，适合大量缩略卡片，不是高清近景图片管线。
+- 图集默认使用 64px 单元，内置默认卡片超过 1024 项时自动使用 48px，并继续受设备最大纹理尺寸约束；它适合大量缩略卡片，不是高清近景图片管线。
+- 图片 Worker 路径依赖 `Worker`、`OffscreenCanvas` 和 `createImageBitmap`；缺少能力、CORS/解码失败或任务中止时回退主线程，不影响正确性。
 
 ## 已知限制
 

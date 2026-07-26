@@ -222,6 +222,7 @@ export async function validateMotionRenderer<TMeta = unknown>(
       maxTextureSize: clampInteger(options.maxTextureSize, 32, 32768, 4096),
       maxAnisotropy: finiteNonNegative(options.maxAnisotropy, 1),
       signal: controller.signal,
+      prepareTexture: () => 0,
     })
     assertDiagnosticRenderer(renderer)
     for (let cycle = 0; cycle < cycles; cycle += 1) {

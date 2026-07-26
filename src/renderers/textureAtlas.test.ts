@@ -13,6 +13,14 @@ import {
 
 const contexts = new WeakMap<HTMLCanvasElement, ReturnType<typeof createContext>>()
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((complete) => {
+    resolve = complete
+  })
+  return { promise, resolve }
+}
+
 function createContext() {
   return {
     save: vi.fn(),
@@ -184,7 +192,7 @@ describe('texture atlas card rendering', () => {
         expect.objectContaining({ id: 'item-0', title: 'Item 0' }),
         expect.objectContaining({ id: 'item-255', title: 'Item 255' }),
       ]),
-    }))
+    }), [])
     expect(workers[0].terminate).toHaveBeenCalledOnce()
     expect(createElement).not.toHaveBeenCalledWith('canvas')
     expect(atlas.data.every((value) => value === 11)).toBe(true)
@@ -195,6 +203,134 @@ describe('texture atlas card rendering', () => {
       imageRequests: 0,
       uploadRanges: 1,
       workerRenders: 1,
+    })
+    atlas.texture.dispose()
+  })
+
+  it('deduplicates image bitmaps and transfers them to the atlas worker', async () => {
+    const images: ImmediateImage[] = []
+    class ImmediateImage {
+      crossOrigin = ''
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      naturalWidth = 64
+      naturalHeight = 64
+      private value = ''
+      constructor() { images.push(this) }
+      get src() { return this.value }
+      set src(value: string) {
+        this.value = value
+        if (value) queueMicrotask(() => this.onload?.())
+      }
+    }
+    const bitmaps: ImageBitmap[] = []
+    const createBitmap = vi.fn(async () => {
+      const bitmap = {
+        width: 64,
+        height: 64,
+        close: vi.fn(),
+      } as unknown as ImageBitmap
+      bitmaps.push(bitmap)
+      return bitmap
+    })
+    const workers: ImageWorker[] = []
+    class ImageWorker {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: (() => void) | null = null
+      terminate = vi.fn()
+      constructor() { workers.push(this) }
+      postMessage = vi.fn((
+        request: { width: number; height: number },
+        _transfer: Transferable[],
+      ) => {
+        const pixels = new Uint8ClampedArray(request.width * request.height * 4)
+        queueMicrotask(() => this.onmessage?.({
+          data: { data: pixels.buffer, cellRenderMs: 4, readbackMs: 2 },
+        } as MessageEvent))
+      })
+    }
+    vi.stubGlobal('Image', ImmediateImage)
+    vi.stubGlobal('createImageBitmap', createBitmap)
+    vi.stubGlobal('Worker', ImageWorker)
+    vi.stubGlobal('OffscreenCanvas', class {})
+    const items = Array.from({ length: 256 }, (_, index) => ({
+      id: `image-${index}`,
+      image: `https://example.test/${index % 2}.png`,
+    }))
+    const cache = new TextureAtlasImageCache(4)
+
+    const atlas = await createTextureAtlas(items, 32, { imageCache: cache })
+    const rebuiltAtlas = await createTextureAtlas(items, 32, { imageCache: cache })
+    const worker = workers[0]
+    const [request, transfer] = worker.postMessage.mock.calls[0] as unknown as [
+      { images: ImageBitmap[]; items: Array<{ imageIndex?: number }> },
+      ImageBitmap[],
+    ]
+
+    expect(images).toHaveLength(2)
+    expect(createBitmap).toHaveBeenCalledTimes(4)
+    expect(request.images).toEqual(bitmaps.slice(0, 2))
+    expect(request.items[0].imageIndex).toBe(0)
+    expect(request.items[1].imageIndex).toBe(1)
+    expect(transfer).toEqual(bitmaps.slice(0, 2))
+    expect(workers[1].postMessage.mock.calls[0]?.[1]).toEqual(bitmaps.slice(2, 4))
+    expect(atlas.metrics).toMatchObject({
+      imageRequests: 2,
+      imageFailures: 0,
+      workerRenders: 1,
+    })
+    expect(rebuiltAtlas.metrics).toMatchObject({
+      imageRequests: 0,
+      imageFailures: 0,
+      workerRenders: 1,
+    })
+    expect(workers).toHaveLength(2)
+    atlas.texture.dispose()
+    rebuiltAtlas.texture.dispose()
+  })
+
+  it('reuses loaded HTML images when ImageBitmap conversion falls back to the main thread', async () => {
+    const images: ImmediateImage[] = []
+    class ImmediateImage {
+      crossOrigin = ''
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      naturalWidth = 64
+      naturalHeight = 64
+      private value = ''
+      constructor() { images.push(this) }
+      get src() { return this.value }
+      set src(value: string) {
+        this.value = value
+        if (value) queueMicrotask(() => this.onload?.())
+      }
+    }
+    const workers: IdleWorker[] = []
+    class IdleWorker {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: (() => void) | null = null
+      terminate = vi.fn()
+      postMessage = vi.fn()
+      constructor() { workers.push(this) }
+    }
+    vi.stubGlobal('Image', ImmediateImage)
+    vi.stubGlobal('createImageBitmap', vi.fn().mockRejectedValue(new Error('decode failed')))
+    vi.stubGlobal('Worker', IdleWorker)
+    vi.stubGlobal('OffscreenCanvas', class {})
+    const items = Array.from({ length: 256 }, (_, index) => ({
+      id: `fallback-image-${index}`,
+      image: 'https://example.test/shared.png',
+    }))
+
+    const atlas = await createTextureAtlas(items, 32)
+
+    expect(images).toHaveLength(1)
+    expect(workers[0].postMessage).not.toHaveBeenCalled()
+    expect(workers[0].terminate).toHaveBeenCalledOnce()
+    expect(atlas.metrics).toMatchObject({
+      imageRequests: 1,
+      imageFailures: 0,
+      workerRenders: 0,
     })
     atlas.texture.dispose()
   })
@@ -246,6 +382,52 @@ describe('texture atlas card rendering', () => {
     controller.abort()
 
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(workers[0].terminate).toHaveBeenCalledOnce()
+  })
+
+  it('closes an ImageBitmap that resolves after atlas work is aborted', async () => {
+    class ImmediateImage {
+      crossOrigin = ''
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      naturalWidth = 64
+      naturalHeight = 64
+      private value = ''
+      get src() { return this.value }
+      set src(value: string) {
+        this.value = value
+        if (value) queueMicrotask(() => this.onload?.())
+      }
+    }
+    const bitmap = { width: 64, height: 64, close: vi.fn() } as unknown as ImageBitmap
+    const decoding = deferred<ImageBitmap>()
+    const workers: WaitingWorker[] = []
+    class WaitingWorker {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: (() => void) | null = null
+      terminate = vi.fn()
+      postMessage = vi.fn()
+      constructor() { workers.push(this) }
+    }
+    vi.stubGlobal('Image', ImmediateImage)
+    vi.stubGlobal('createImageBitmap', vi.fn(() => decoding.promise))
+    vi.stubGlobal('Worker', WaitingWorker)
+    vi.stubGlobal('OffscreenCanvas', class {})
+    const controller = new AbortController()
+    const pending = createTextureAtlas(
+      Array.from({ length: 256 }, (_, index) => ({
+        id: `abort-image-${index}`,
+        image: 'https://example.test/shared.png',
+      })),
+      32,
+      { signal: controller.signal },
+    )
+    await vi.waitFor(() => expect(workers).toHaveLength(1))
+    controller.abort()
+    decoding.resolve(bitmap)
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(bitmap.close).toHaveBeenCalledOnce()
     expect(workers[0].terminate).toHaveBeenCalledOnce()
   })
 

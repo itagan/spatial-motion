@@ -119,6 +119,7 @@ const stage = new MotionStage({
     imageTimeout: 10_000,
     imageConcurrency: 6,
     imageCacheSize: 128,
+    texturePrewarm: undefined, // 自动：仅预热较小 Atlas；也可显式 true/false
   }),
   quality: 'auto',
   adaptivePerformance: true,
@@ -525,10 +526,12 @@ npx spatial-motion-benchmark baseline.json current.json --preset transition-stre
 
 默认阈值覆盖 FPS、最大帧时间、P95/P99、33ms 长帧、Stage CPU、WebGL 提交、Atlas build/patch、纹理内存与估算上传量。配置不兼容或超过阈值时命令返回非零退出码；自定义阈值可对每个指标设置 `maxRegressionPercent`、`maxRegressionAbsolute` 或两者。随包提供的六个 `--preset` 覆盖 100/500/1000/2000 实例、low/medium/high/auto 质量和四类固定场景，CLI 会拒绝与预设不一致的结果。
 
-重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。同一 JavaScript turn 内的稳定 id 更新会合并；已初始化图集只上传变化单元对应的数据行，相邻单元会合并连续上传范围。Cards/Points 的 GPU Attribute 使用容量桶并原位写入，同一容量档内的布局切换不会替换 Geometry、Material 或过渡 Attribute。
+重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。同一 JavaScript turn 内的稳定 id 更新会合并；Cards 按项目保存内容指纹，局部更新只检查去重后的变化索引，不扫描完整名单。已初始化图集只上传变化单元对应的数据行，相邻单元会合并连续上传范围。Cards/Points 的 GPU Attribute 使用容量桶并原位写入，同一容量档内的布局切换不会替换 Geometry、Material 或过渡 Attribute。
 图集默认使用 4px 隔离、mipmap 和最高 4x 各向异性采样。Cards `resolution` 支持 `32–256` 的显式数值或 `'auto'`；内置默认卡片未显式配置时，超过 1024 项会使用 48px，否则使用 64px。模板和自定义 `drawCard` 未配置时继续固定 64px，只有显式选择 `'auto'` 才参与数量降级，避免改变基于像素的内容布局。`mipmaps: false` 可供对纹理内存更敏感的场景主动关闭 mipmap；默认仍开启以保持远处采样稳定。图集还会根据设备 `MAX_TEXTURE_SIZE` 收敛最终分辨率。
 
-内置默认卡片首次构建会直接绘制到整图 Canvas，不为每项创建临时 Canvas；异步模板和自定义 `drawCard` 继续使用隔离单元 Canvas。首次上传和 WebGL context 恢复仍使用完整图集上传。`renderer.metrics` 会报告实际 `atlasResolution` 和数值化的 `atlasMipmaps`。
+256 项以上的内置默认卡片会在支持时把首次整图绘制和 readback 放入 OffscreenCanvas Worker。图片按 URL 去重后转换为可转移 `ImageBitmap`；失败或中止会关闭位图并安全回退，模板、自定义 `drawCard` 和局部 patch 不跨线程。异步模板和自定义 `drawCard` 继续使用隔离单元 Canvas。
+
+首次上传和 WebGL context 恢复仍使用完整图集上传。Cards 默认只预热不超过 16 MiB 的 Atlas 像素缓冲，避免大图集预热占用单帧；`texturePrewarm: true/false` 可强制开启或关闭。`renderer.metrics` 会报告实际分辨率、mipmap、Worker/位图解码和预热次数与耗时。
 
 ## 包构建与体积基准
 

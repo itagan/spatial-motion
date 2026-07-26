@@ -108,7 +108,7 @@ v1.13 将 Benchmark JSON 固定为 version 1，并通过严格字段校验、方
 
 v1.14 的图片管线不改变纹理数量或 Draw Call：单次操作按 URL 去重，默认最多 6 个请求并发，每个 Stage 保留最多 128 个成功图片引用。自动化测试证明两个卡片共享 URL 只请求一次、后续 patch 命中缓存不再请求、并发上限为 2 时只启动两个 Image，以及 abort 会停止活动请求；A→B→A 并发回归证明中间图集不能覆盖最新请求。
 
-本阶段评估后未默认启用 `createImageBitmap`/OffscreenCanvas Worker：当前公共 `drawCard` 接收主线程 Canvas 2D 上下文，直接迁移 Worker 会破坏回调契约；ImageBitmap 还需要额外 close 生命周期和跨浏览器/CORS 实测。后续只有在 cold-start/atlas-update 基准证明解码或主线程绘制是主要瓶颈时，才考虑保持现有路径的可选实现。
+v1.14 当时暂未启用 `createImageBitmap`/OffscreenCanvas Worker，因为公共 `drawCard` 仍要求主线程 Canvas 2D 上下文。后续实现只覆盖内置默认绘制，模板、自定义 `drawCard` 与局部 patch 不跨线程，因此没有改变回调契约。
 
 v1.15 的过渡、流式特效、Stage Timeline 和 extension 继续共享单个 Stage RAF。自动化测试覆盖 completed/interrupted/aborted/destroyed 完成原因、暂停感知进度、destroy 停止 Timeline 后续步骤，以及键盘焦点、方向导航和激活。上述变更没有增加卡片 Mesh 或内建特效 Draw Call。
 
@@ -196,4 +196,10 @@ Atlas 指标拆分为 prepare、图片加载墙钟、单元绘制和整图像素
 
 同环境 2000/high/cold-start 的自动 48px 三轮 Atlas build 为 40.1/44.2/39.1ms，中位数 40.1ms，readback 中位数 33.1ms，纹理内存由固定 64px 的约 53.4MB 降至 33.9MB；主体保持 1 Draw Call，P95 为 17.50–18.25ms。40px 单轮为 build/readback 32.2/24.7ms、约 24.9MB，但仍记录一次 33ms 长帧，因此不继续牺牲清晰度。64px 关闭 mipmap 后纹理约 42.0MB，但 build/readback 仍为 56.4/46.5ms，说明 mipmap 不是 CPU 冷启动主瓶颈，默认继续开启。后续方向修正为离主线程默认绘制/readback，并单独评估纹理首传；不直接引入分页 Atlas。完整验证为 20 个测试文件、269 项测试，Library/Demo/Examples 与 tgz 消费检查全部通过。
 
-无图片的内置默认卡片在 256 项以上且浏览器同时支持 Worker/OffscreenCanvas 时，会把首次整图绘制与 `getImageData()` readback 移到独立模块 Worker。Worker 只接收稳定 id、标题、已解析样式和 Atlas 尺寸，返回可转移像素缓冲；失败、构造受限或中止时立即终止 Worker 并回退原主线程实现。图片解码、模板、`drawCard` 和局部 patch 不跨线程，避免改变 Canvas 回调、图片缓存和异步失效契约；现有头像 benchmark 因包含图片不会命中此优化，应另用无图片 cold-start 对照评估。
+内置默认卡片在 256 项以上且浏览器支持 Worker/OffscreenCanvas 时，会把首次整图绘制与 `getImageData()` readback 移到独立模块 Worker。包含图片时先沿用现有并发、超时、LRU、CORS 和 AbortSignal 管线加载资源，再按 URL 去重转换为 `ImageBitmap` 并转移；Worker 或主线程会在各自拥有期关闭位图。转换、构造、传输或任务执行失败时复用已加载的 HTML 图片回退主线程，不重复网络请求。模板、`drawCard` 和局部 patch 不跨线程。
+
+纹理首传通过 Stage 提供的受限 `prepareTexture()` 能力单独计时。Cards 默认仅对原始像素不超过 16 MiB 的 Atlas 执行预热，大图集留给正常渲染提交，避免 `initTexture()` 自身占用 33ms 帧；显式 `texturePrewarm` 可覆盖策略。2026-07-26 Chromium 150 / Apple M4 / DPR 2 的头像 cold-start 验证：500、1000、2000 项均命中图片 Worker、保持主体 1 Draw Call；2000 项自适应策略为 60.01 FPS、P95 17.45ms、P99 17.60ms、0 个 33ms 长帧，位图解码 2.6ms、Worker 单元绘制/readback 3.9/27.4ms，控制台无 warning/error。强制预热 2000 项会出现一次 33ms 长帧，因此未作为默认。
+
+同环境关闭 2000 项 Atlas mipmap 后，纹理内存由约 33.9MB 降为 24.2MB，但首次 render submit 仍为 30.9ms，P95 17.60ms；这说明 mipmap 能节省显存，却不是首传延迟的主要来源，默认继续保留远距采样质量。直接使用 ImageBitmap 纹理也会失去当前 DataTexture 的按行 patch，第一次内容更新需要整图回读和再次完整上传，因此没有作为低风险默认路径；后续 Texture2DArray/分页层上传应独立验证。
+
+Atlas 局部更新的内容指纹改为逐项保存。完整 `setItems()` 仍扫描全部输入以识别完全相同的数据，而 `updateItem(s)` 只对去重、校验后的变化索引序列化 `meta` 和解析样式。2000 项单卡更新自动化确认只调用一次样式解析；Renderer metrics 记录 full/patch 扫描次数及累计扫描项目数。Chromium 的 2000/high/atlas-update 3 秒复验完成 17 次单元 patch，保持 60 FPS、P95 17.50ms、0 个 33ms 长帧和 1 Draw Call。

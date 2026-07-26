@@ -1,4 +1,4 @@
-import type { Group } from 'three'
+import type { Group, Texture } from 'three'
 import type { StreamingEffectGpuData } from '../effects/types.js'
 import type { MotionItem, Transform } from '../core/types.js'
 
@@ -97,6 +97,7 @@ export interface MotionRendererFactoryContext {
   readonly maxTextureSize: number
   readonly maxAnisotropy: number
   readonly signal: AbortSignal
+  readonly prepareTexture: (texture: Texture) => number
 }
 
 export type MotionRendererFactory<TMeta = unknown> = (

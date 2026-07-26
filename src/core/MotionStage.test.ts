@@ -13,6 +13,7 @@ import {
   Object3D,
   PlaneGeometry,
   ShaderMaterial,
+  Texture,
 } from 'three'
 import type { Layout, LayoutContext, MotionItem, Transform } from './types'
 import type { StageExtensionContext } from './extensions'
@@ -115,6 +116,7 @@ vi.mock('three', async (importOriginal) => {
     setPixelRatio = vi.fn()
     setSize = vi.fn()
     render = vi.fn()
+    initTexture = vi.fn()
     dispose = vi.fn()
     getPixelRatio = vi.fn(() => 1.5)
     getContext = vi.fn(() => ({
@@ -398,6 +400,20 @@ describe('MotionStage', () => {
       'MotionStage renderer must be a renderer factory',
     )
     expect(stageMocks.webglRenderers).toHaveLength(0)
+  })
+
+  it('provides renderer factories with a scoped texture preparation callback', () => {
+    const renderer = mockMotionRenderer()
+    const texture = new Texture()
+    let elapsed = -1
+    const { stage } = createCustomStage((context) => {
+      elapsed = context.prepareTexture(texture)
+      return renderer
+    })
+
+    expect(stageMocks.webglRenderers.at(-1)?.initTexture).toHaveBeenCalledWith(texture)
+    expect(elapsed).toBeGreaterThanOrEqual(0)
+    stage.destroy()
   })
 
   it('initializes constructor items through the renderer and exposes readiness', async () => {
