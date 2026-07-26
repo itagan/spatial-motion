@@ -24,6 +24,7 @@
 - Cards/Points 现在按容量桶复用 Geometry、Material、过渡 Attribute 和 TypedArray；Atlas 相邻单元合并上传范围，模板复用有界文字测量结果。
 - 稳态布局与交互读取直接复用 Stage 持有的 Transform 快照，Stage wait 直接遍历现有集合；高频 `pointermove` 合并到 Stage 下一帧并只拾取最新坐标，避免 hover、pick 和每帧计时产生重复工作或临时数组。
 - Atlas 默认卡片首次构建直接写入整图 Canvas，不再创建逐卡临时 Canvas 或执行逐卡 `drawImage`；`DataTexture` 直接复用整图 `ImageData` 像素缓冲，移除同尺寸 `Uint8Array` 二次复制。
+- 256 项以上的无图片内置卡片会在支持时把首次 Atlas 栅格与 readback 移入 OffscreenCanvas Worker；图片、模板、自定义 Canvas、局部 patch 和不支持 Worker 的环境继续使用原主线程路径。
 
 ### Compatibility
 
