@@ -12,6 +12,7 @@
 - `MotionRenderer` 成为稳定 Core 契约，新增 `core`、Cards、Points 和逐布局按需入口。
 - 新增 `defineLayout()`，为自定义布局提供冻结对象与 Transform 输出验证。
 - 新增按需 `dev` 入口，可验证自定义 Renderer/Layout 并生成批量边界、法线和顶部方向调试对象。
+- Benchmark Atlas 指标新增 prepare、图片墙钟、单元绘制和像素 readback 分段耗时，便于定位冷启动瓶颈。
 
 ### Fixed
 
@@ -21,6 +22,7 @@
 - 质量切换现在异步协调 2000/1000/500 实例容量并从完整输入恢复升级数据，不再把实例上限与固定可见比例重复削减；等待缩容的实例会在顶点着色阶段提前裁剪。
 - Cards/Points 现在按容量桶复用 Geometry、Material、过渡 Attribute 和 TypedArray；Atlas 相邻单元合并上传范围，模板复用有界文字测量结果。
 - 稳态布局与交互读取直接复用 Stage 持有的 Transform 快照，Stage wait 直接遍历现有集合；高频 `pointermove` 合并到 Stage 下一帧并只拾取最新坐标，避免 hover、pick 和每帧计时产生重复工作或临时数组。
+- Atlas 默认卡片首次构建直接写入整图 Canvas，不再创建逐卡临时 Canvas 或执行逐卡 `drawImage`；`DataTexture` 直接复用整图 `ImageData` 像素缓冲，移除同尺寸 `Uint8Array` 二次复制。
 
 ### Compatibility
 
@@ -32,6 +34,7 @@
 - 构造期 `items` 现在实际进入 Renderer，并通过 `stage.ready` 暴露初始化完成状态。
 - `LayoutContext` 统一为 `itemWidth/itemHeight`，不保留 `cardWidth/cardHeight`。
 - 未发布数据契约收紧为只读 `MotionItem`、`Transform` 与 Renderer/Layout 输入数组，不保留可变签名。
+- 包体积门禁改为真实 root/Core-only/Cards-only 消费者构建；分模块 gzip 总和继续输出为诊断信息，不再误作实际下载体积。
 
 ## 1.15.0 - 2026-07-19
 

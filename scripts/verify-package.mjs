@@ -8,7 +8,9 @@ import { spawnSync } from 'node:child_process'
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
 const packageName = packageJson.name
-const jsGzipBudget = 40 * 1024
+const rootConsumerGzipBudget = 40 * 1024
+const coreConsumerGzipBudget = 16 * 1024
+const cardsRendererGzipBudget = 12 * 1024
 const cardTemplateGzipBudget = 12 * 1024
 const pointsRendererGzipBudget = 12 * 1024
 const devGzipBudget = 12 * 1024
@@ -77,7 +79,6 @@ const pointsRendererJsGzipBytes = pointsRendererJsContents
 const devJsGzipBytes = devJsContents
   .reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
 assert(jsBytes < 150 * 1024, `Core library JS suggests Three.js was bundled: ${jsBytes} bytes`)
-assert(jsGzipBytes <= jsGzipBudget, `Library JS gzip budget exceeded: ${jsGzipBytes} > ${jsGzipBudget}`)
 assert(
   cardTemplateJsGzipBytes <= cardTemplateGzipBudget,
   `Card template JS gzip budget exceeded: ${cardTemplateJsGzipBytes} > ${cardTemplateGzipBudget}`,
@@ -226,6 +227,10 @@ try {
     atlasBuildMs: 0,
     atlasPatchMs: 0,
     atlasDrawMs: 0,
+    atlasPrepareMs: 0,
+    atlasImageLoadWallMs: 0,
+    atlasCellRenderMs: 0,
+    atlasReadbackMs: 0,
     imageLoadMs: 0,
     imageRequests: 0,
     imageFailures: 0,
@@ -444,6 +449,31 @@ try {
   }, null, 2))
   run(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '-p', 'tsconfig.json'], consumer)
 
+  const rootConsumer = await buildConsumerBundle(consumer, 'root', `
+    import * as api from '${packageName}'
+    globalThis.__spatialMotionRoot = api
+  `)
+  const coreOnlyConsumer = await buildConsumerBundle(consumer, 'core-only', `
+    import * as api from '${packageName}/core'
+    globalThis.__spatialMotionCore = api
+  `)
+  const cardsOnlyConsumer = await buildConsumerBundle(consumer, 'cards-only', `
+    import * as api from '${packageName}/renderers/cards'
+    globalThis.__spatialMotionCards = api
+  `)
+  assert(
+    rootConsumer.gzipBytes <= rootConsumerGzipBudget,
+    `Root consumer JS gzip budget exceeded: ${rootConsumer.gzipBytes} > ${rootConsumerGzipBudget}`,
+  )
+  assert(
+    coreOnlyConsumer.gzipBytes <= coreConsumerGzipBudget,
+    `Core-only consumer JS gzip budget exceeded: ${coreOnlyConsumer.gzipBytes} > ${coreConsumerGzipBudget}`,
+  )
+  assert(
+    cardsOnlyConsumer.gzipBytes <= cardsRendererGzipBudget,
+    `Cards-only consumer JS gzip budget exceeded: ${cardsOnlyConsumer.gzipBytes} > ${cardsRendererGzipBudget}`,
+  )
+
   await writeFile(join(consumer, 'index.html'), '<div id="result"></div><script type="module" src="/tree.ts"></script>')
   await writeFile(join(consumer, 'tree.ts'), `
     import { sphere } from '${packageName}/layouts/sphere'
@@ -550,7 +580,11 @@ try {
     tarballBytes: dryRun.size,
     libraryJsBytes: jsBytes,
     totalJsBytes,
-    libraryJsGzipBytes: jsGzipBytes,
+    moduleJsGzipBytes: jsGzipBytes,
+    rootConsumerJsBytes: rootConsumer.bytes,
+    rootConsumerJsGzipBytes: rootConsumer.gzipBytes,
+    coreOnlyConsumerJsGzipBytes: coreOnlyConsumer.gzipBytes,
+    cardsOnlyConsumerJsGzipBytes: cardsOnlyConsumer.gzipBytes,
     cardTemplateJsGzipBytes,
     pointsRendererJsGzipBytes,
     devJsGzipBytes,
@@ -564,6 +598,37 @@ try {
   }, null, 2))
 } finally {
   if (!keepConsumer) await rm(tempRoot, { recursive: true, force: true })
+}
+
+async function buildConsumerBundle(consumer, name, source) {
+  const outDir = `dist-size-${name}`
+  await writeFile(join(consumer, `size-${name}.ts`), source)
+  await writeFile(join(consumer, `vite.size-${name}.config.mjs`), `
+    export default {
+      build: {
+        outDir: '${outDir}',
+        emptyOutDir: true,
+        minify: 'terser',
+        terserOptions: {
+          compress: { passes: 2 },
+          format: { comments: false },
+        },
+        rollupOptions: {
+          input: 'size-${name}.ts',
+          external: ['three'],
+          output: { entryFileNames: 'bundle.js' },
+        },
+      },
+    }
+  `)
+  run(process.execPath, [
+    join(root, 'node_modules/vite/bin/vite.js'),
+    'build',
+    '--config',
+    `vite.size-${name}.config.mjs`,
+  ], consumer)
+  const contents = await readFile(join(consumer, outDir, 'bundle.js'))
+  return { bytes: contents.byteLength, gzipBytes: gzipSync(contents).byteLength }
 }
 
 function run(command, args, cwd = root) {

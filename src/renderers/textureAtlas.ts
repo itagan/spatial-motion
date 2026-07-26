@@ -30,7 +30,7 @@ export interface TextureAtlasResult {
   rects: Float32Array
   width: number
   height: number
-  data: Uint8Array
+  data: Uint8Array | Uint8ClampedArray
   columns: number
   rows: number
   cellSize: number
@@ -52,7 +52,11 @@ export interface TextureAtlasPatch {
 export interface TextureAtlasMetrics {
   cells: number
   renderMs: number
+  prepareMs: number
+  imageLoadWallMs: number
+  cellRenderMs: number
   applyMs: number
+  readbackMs: number
   imageLoadMs: number
   imageRequests: number
   imageFailures: number
@@ -69,6 +73,14 @@ interface ImageLoadResult {
 
 interface RenderedCell {
   canvas: HTMLCanvasElement
+}
+
+interface TextureAtlasRenderTarget {
+  context: CanvasRenderingContext2D
+  columns: number
+  padding: number
+  strideX: number
+  strideY: number
 }
 
 export class TextureAtlasImageCache {
@@ -164,7 +176,8 @@ export async function createTextureAtlas<TMeta = unknown>(
   const canvas = document.createElement('canvas')
   canvas.width = columns * strideX
   canvas.height = rows * strideY
-  if (!canvas.getContext('2d')) throw new Error('Canvas 2D context is unavailable')
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Canvas 2D context is unavailable')
 
   const rects = new Float32Array(items.length * 4)
   items.forEach((_item, index) => {
@@ -181,18 +194,19 @@ export async function createTextureAtlas<TMeta = unknown>(
     )
   })
 
-  const patch = await createTextureAtlasPatch(
+  const patch = await createTextureAtlasPatchInternal(
     items,
     items.map((_item, index) => index),
     resolvedCellSize,
     options,
+    { context, columns, padding, strideX, strideY },
   )
   const applyStartedAt = now()
-  drawPatchToCanvas(canvas, columns, cellWidth, cellHeight, padding, strideX, strideY, patch)
+  drawPatchToCanvas(context, columns, cellWidth, cellHeight, padding, strideX, strideY, patch)
   patch.metrics.applyMs = now() - applyStartedAt
-  const imageData = canvas.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height)
-  if (!imageData) throw new Error('Canvas 2D image data is unavailable')
-  const data = new Uint8Array(imageData.data)
+  const readbackStartedAt = now()
+  const data = context.getImageData(0, 0, canvas.width, canvas.height).data
+  patch.metrics.readbackMs = now() - readbackStartedAt
   const texture = new DataTexture(data, canvas.width, canvas.height)
   texture.colorSpace = SRGBColorSpace
   texture.minFilter = LinearMipmapLinearFilter
@@ -237,9 +251,20 @@ export async function createTextureAtlasPatch<TMeta = unknown>(
   cellSize: number,
   options: TextureAtlasOptions<TMeta> = {},
 ): Promise<TextureAtlasPatch> {
+  return createTextureAtlasPatchInternal(items, indices, cellSize, options)
+}
+
+async function createTextureAtlasPatchInternal<TMeta = unknown>(
+  items: readonly MotionItem<TMeta>[],
+  indices: readonly number[],
+  cellSize: number,
+  options: TextureAtlasOptions<TMeta>,
+  renderTarget?: TextureAtlasRenderTarget,
+): Promise<TextureAtlasPatch> {
   const startedAt = now()
   const uniqueIndices = [...new Set(indices)].filter((index) => index >= 0 && index < items.length)
   throwIfAborted(options.signal)
+  const prepareStartedAt = now()
   const prepared = options.cardContent ? new Map<number, {
     content?: PreparedCardContent
     failed: boolean
@@ -268,37 +293,56 @@ export async function createTextureAtlasPatch<TMeta = unknown>(
         : []
     })
     .filter((url): url is string => Boolean(url)))]
+  const prepareMs = now() - prepareStartedAt
+  const imageLoadStartedAt = now()
   const imageResults = await mapWithConcurrency(
     imageUrls,
     options.imageConcurrency,
     (url) => loadImage(url, imageTimeout, options.imageCache, options.signal),
     options.signal,
   )
+  const imageLoadWallMs = now() - imageLoadStartedAt
   const images = new Map(imageUrls.map((url, index) => [url, imageResults[index]]))
   const resolvedImages = new Map(imageUrls.map((url, index) => [url, imageResults[index].image]))
   const { width: cellWidth, height: cellHeight } = resolveCellDimensions(
     cellSize,
     options.aspectRatio,
   )
-  const renderedCells = await Promise.all(uniqueIndices.map(async (index) => ({
-    index,
-    rendered: await renderCell(
-      items[index],
-      cellWidth,
-      cellHeight,
-      options,
-      items[index].image ? images.get(items[index].image) ?? null : null,
-      prepared?.get(index),
-      resolvedImages,
-    ),
-  })))
+  const cellRenderStartedAt = now()
+  const renderedCells = renderTarget && !options.cardContent && !options.drawCard
+    ? renderDefaultCellsToAtlas(
+        items,
+        uniqueIndices,
+        cellWidth,
+        cellHeight,
+        options,
+        images,
+        renderTarget,
+      )
+    : await Promise.all(uniqueIndices.map(async (index) => ({
+        index,
+        rendered: await renderCell(
+          items[index],
+          cellWidth,
+          cellHeight,
+          options,
+          items[index].image ? images.get(items[index].image) ?? null : null,
+          prepared?.get(index),
+          resolvedImages,
+        ),
+      })))
+  const cellRenderMs = now() - cellRenderStartedAt
   throwIfAborted(options.signal)
   return {
     cells: renderedCells.map(({ index, rendered }) => ({ index, canvas: rendered.canvas })),
     metrics: {
-      cells: renderedCells.length,
+      cells: uniqueIndices.length,
       renderMs: now() - startedAt,
+      prepareMs,
+      imageLoadWallMs,
+      cellRenderMs,
       applyMs: 0,
+      readbackMs: 0,
       imageLoadMs: imageResults.reduce((sum, result) => sum + result.durationMs, 0),
       imageRequests: imageResults.filter((result) => result.requested).length,
       imageFailures: imageResults.filter((result) => result.failed).length,
@@ -365,7 +409,7 @@ export function applyTextureAtlasPatch(atlas: TextureAtlasResult, patch: Texture
 }
 
 function drawPatchToCanvas(
-  canvas: HTMLCanvasElement,
+  context: CanvasRenderingContext2D,
   columns: number,
   cellWidth: number,
   cellHeight: number,
@@ -374,14 +418,70 @@ function drawPatchToCanvas(
   strideY: number,
   patch: TextureAtlasPatch,
 ): void {
-  const context = canvas.getContext('2d')
-  if (!context) throw new Error('Canvas 2D context is unavailable')
   patch.cells.forEach(({ index, canvas: cellCanvas }) => {
     const x = (index % columns) * strideX + padding
     const y = Math.floor(index / columns) * strideY + padding
     context.clearRect(x, y, cellWidth, cellHeight)
     context.drawImage(cellCanvas, x, y)
   })
+}
+
+function renderDefaultCellsToAtlas<TMeta>(
+  items: readonly MotionItem<TMeta>[],
+  indices: readonly number[],
+  cellWidth: number,
+  cellHeight: number,
+  options: TextureAtlasOptions<TMeta>,
+  images: ReadonlyMap<string, ImageLoadResult>,
+  target: TextureAtlasRenderTarget,
+): Array<{ index: number; rendered: RenderedCell }> {
+  indices.forEach((index) => {
+    const item = items[index]
+    const bounds = {
+      x: (index % target.columns) * target.strideX + target.padding,
+      y: Math.floor(index / target.columns) * target.strideY + target.padding,
+      width: cellWidth,
+      height: cellHeight,
+    }
+    drawDefaultCell(
+      target.context,
+      item,
+      item.image ? images.get(item.image)?.image ?? null : null,
+      bounds,
+      resolveCardStyle(item, options),
+    )
+  })
+  return []
+}
+
+function drawDefaultCell(
+  context: CanvasRenderingContext2D,
+  item: MotionItem,
+  image: HTMLImageElement | null,
+  bounds: CardDrawBounds,
+  style: CardStyle,
+): void {
+  context.save()
+  createCardPath(context, bounds, style)
+  if (style.backgroundColor) {
+    context.fillStyle = style.backgroundColor
+    context.fill()
+  }
+  context.clip()
+  drawDefaultCard(context, item, image, bounds, style)
+  context.restore()
+
+  const borderWidth = Math.min(
+    Math.min(bounds.width, bounds.height) / 2,
+    Math.max(0, style.borderWidth ?? 0),
+  )
+  if (borderWidth <= 0) return
+  context.save()
+  context.lineWidth = borderWidth
+  context.strokeStyle = style.borderColor ?? '#ffffff'
+  createCardPath(context, inset(bounds, borderWidth / 2), style)
+  context.stroke()
+  context.restore()
 }
 
 async function renderCell<TMeta>(
