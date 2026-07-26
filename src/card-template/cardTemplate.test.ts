@@ -62,6 +62,26 @@ describe('card template', () => {
     expect(canvasContext.fillText).toHaveBeenCalledWith('<script>alert(1)</script>', 0, 0)
   })
 
+  it('reuses bounded text measurements while isolating width and font keys', () => {
+    const renderer = defineCardTemplate((item) => html`
+      <span style="font-size:12px;line-clamp:1">${item.title}</span>
+    `)
+    const prepared = renderer.prepare({ id: 'one', title: 'Repeated measurement' }, {})
+    const canvasContext = context()
+    const first = drawContext(canvasContext)
+    prepared.draw(first)
+    const callsAfterFirstDraw = canvasContext.measureText.mock.calls.length
+    prepared.draw(first)
+    expect(canvasContext.measureText.mock.calls.length).toBe(callsAfterFirstDraw)
+    prepared.draw({ ...first, bounds: { ...first.bounds, width: 80 } })
+    expect(canvasContext.measureText.mock.calls.length).toBeGreaterThan(callsAfterFirstDraw)
+    expect(renderer.getMetrics?.()).toMatchObject({
+      templateMeasurementCacheHits: expect.any(Number),
+      templateMeasurementCacheMisses: expect.any(Number),
+    })
+    expect(renderer.getMetrics?.().templateMeasurementCacheEntries).toBeLessThanOrEqual(2048)
+  })
+
   it('binds unquoted dynamic image attributes without treating them as markup', () => {
     expect(resolveTemplate(html`<img src=${'https://example.test/image.png'} />`)).toEqual([
       expect.objectContaining({

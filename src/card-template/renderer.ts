@@ -21,6 +21,10 @@ type ResolvedStyle = CardTemplateStyle & {
   paddingEdges: Edges
   marginEdges: Edges
 }
+interface TemplatePaintCache {
+  readonly measurements: TextMeasurementCache
+  readonly classCombinations: Map<string, CardTemplateStyle>
+}
 
 const textStyleKeys = [
   'color',
@@ -55,6 +59,10 @@ export function defineCardTemplate<TMeta = unknown>(
     name,
     validateStyle(style),
   ]))
+  const paintCache: TemplatePaintCache = {
+    measurements: new TextMeasurementCache(2048),
+    classCombinations: new Map(),
+  }
   return {
     prepare(
       item: Readonly<MotionItem<TMeta>>,
@@ -73,7 +81,7 @@ export function defineCardTemplate<TMeta = unknown>(
         imageSources,
         draw(drawContext) {
           try {
-            paintTemplate(nodes, drawContext, classStyles)
+            paintTemplate(nodes, drawContext, classStyles, paintCache)
           } catch (error) {
             const templateError = normalizeError(error)
             options.onError?.(templateError, item)
@@ -82,6 +90,9 @@ export function defineCardTemplate<TMeta = unknown>(
         },
       }
     },
+    getMetrics() {
+      return paintCache.measurements.metrics()
+    },
   }
 }
 
@@ -89,6 +100,7 @@ function paintTemplate(
   nodes: RuntimeNode[],
   drawContext: CardContentDrawContext,
   classStyles: Record<string, CardTemplateStyle>,
+  paintCache: TemplatePaintCache,
 ): void {
   const children = materializeTextNodes(nodes)
   const rootStyle = resolveStyle({}, drawContext.bounds, {})
@@ -99,6 +111,7 @@ function paintTemplate(
     drawContext.context,
     drawContext.images,
     classStyles,
+    paintCache,
   )
 }
 
@@ -109,16 +122,25 @@ function layoutChildren(
   context: CanvasRenderingContext2D,
   images: ReadonlyMap<string, HTMLImageElement | null>,
   classStyles: Record<string, CardTemplateStyle>,
+  paintCache: TemplatePaintCache,
 ): void {
-  const normal = children.filter((child) => styleFor(child, classStyles).position !== 'absolute')
-  const absolute = children.filter((child) => styleFor(child, classStyles).position === 'absolute')
+  const styleCache = new WeakMap<RuntimeElement, CardTemplateStyle>()
+  const nodeStyle = (child: RuntimeElement) => {
+    const cached = styleCache.get(child)
+    if (cached) return cached
+    const style = styleFor(child, classStyles, paintCache.classCombinations)
+    styleCache.set(child, style)
+    return style
+  }
+  const normal = children.filter((child) => nodeStyle(child).position !== 'absolute')
+  const absolute = children.filter((child) => nodeStyle(child).position === 'absolute')
   const direction = parentStyle.flexDirection ?? 'column'
   const row = direction === 'row'
   const mainSize = row ? bounds.width : bounds.height
   const crossSize = row ? bounds.height : bounds.width
   const gap = resolveLength(parentStyle.gap, mainSize, 0)
   const entries = normal.map((node) => {
-    const style = resolveStyle(styleFor(node, classStyles), bounds, parentStyle)
+    const style = resolveStyle(nodeStyle(node), bounds, parentStyle)
     const marginMain = row
       ? style.marginEdges.left + style.marginEdges.right
       : style.marginEdges.top + style.marginEdges.bottom
@@ -167,11 +189,11 @@ function layoutChildren(
     const rect = row
       ? { x: bounds.x + cursor, y: bounds.y + crossOffset, width: main, height: cross }
       : { x: bounds.x + crossOffset, y: bounds.y + cursor, width: cross, height: main }
-    paintElement(node, rect, style, context, images, classStyles)
+    paintElement(node, rect, style, context, images, classStyles, paintCache)
     cursor += main + (row ? style.marginEdges.right : style.marginEdges.bottom) + between
   })
   absolute.forEach((node) => {
-    const style = resolveStyle(styleFor(node, classStyles), bounds, parentStyle)
+    const style = resolveStyle(nodeStyle(node), bounds, parentStyle)
     const left = resolveOptionalLength(style.left, bounds.width)
     const right = resolveOptionalLength(style.right, bounds.width)
     const top = resolveOptionalLength(style.top, bounds.height)
@@ -185,7 +207,7 @@ function layoutChildren(
       y: bounds.y + (top ?? Math.max(0, bounds.height - (bottom ?? 0) - height)),
       width,
       height,
-    }, style, context, images, classStyles)
+    }, style, context, images, classStyles, paintCache)
   })
 }
 
@@ -196,6 +218,7 @@ function paintElement(
   context: CanvasRenderingContext2D,
   images: ReadonlyMap<string, HTMLImageElement | null>,
   classStyles: Record<string, CardTemplateStyle>,
+  paintCache: TemplatePaintCache,
 ): void {
   if (node.tag === 'br') return
   context.save()
@@ -210,7 +233,7 @@ function paintElement(
   if (node.tag === 'img') {
     drawImage(context, images.get(String(node.attributes.src ?? '')) ?? null, rect, style)
   } else if (node.tag === 'span') {
-    drawText(context, collectText(node.children), rect, style)
+    drawText(context, collectText(node.children), rect, style, paintCache.measurements)
   } else {
     const inner = insetEdges(rect, style.paddingEdges)
     layoutChildren(
@@ -220,6 +243,7 @@ function paintElement(
       context,
       images,
       classStyles,
+      paintCache,
     )
   }
   const border = resolveBorder(style, rect)
@@ -281,6 +305,7 @@ function drawText(
   text: string,
   rect: Rect,
   style: ResolvedStyle,
+  measurements: TextMeasurementCache,
 ): void {
   const fontSize = resolveLength(style.fontSize, rect.height, Math.max(8, rect.height * 0.45))
   const lineHeight = fontSize * clamp(number(style.lineHeight, 1.2), 0.8, 2)
@@ -289,7 +314,7 @@ function drawText(
   context.textAlign = style.textAlign ?? 'left'
   context.textBaseline = 'top'
   context.fillStyle = style.color ?? '#ffffff'
-  const lines = wrapText(context, text, rect.width, lineClamp)
+  const lines = wrapText(context, text, rect.width, lineClamp, measurements)
   const x = context.textAlign === 'center'
     ? rect.x + rect.width / 2
     : context.textAlign === 'right'
@@ -305,6 +330,7 @@ function wrapText(
   text: string,
   width: number,
   maximumLines: number,
+  measurements: TextMeasurementCache,
 ): string[] {
   const paragraphs = text.split('\n')
   const lines: string[] = []
@@ -312,7 +338,7 @@ function wrapText(
     let line = ''
     for (const character of Array.from(paragraph)) {
       const candidate = line + character
-      if (line && context.measureText(candidate).width > width) {
+      if (line && measurements.measure(context, candidate, width) > width) {
         lines.push(line)
         line = character
         if (lines.length === maximumLines) break
@@ -324,9 +350,12 @@ function wrapText(
     if (lines.length === maximumLines) break
   }
   if (!lines.length) return ['']
-  if (lines.length === maximumLines && context.measureText(lines.at(-1) ?? '').width >= width) {
+  if (lines.length === maximumLines
+    && measurements.measure(context, lines.at(-1) ?? '', width) >= width) {
     let last = lines.at(-1) ?? ''
-    while (last && context.measureText(`${last}…`).width > width) last = last.slice(0, -1)
+    while (last && measurements.measure(context, `${last}…`, width) > width) {
+      last = last.slice(0, -1)
+    }
     lines[lines.length - 1] = `${last}…`
   }
   return lines
@@ -335,12 +364,59 @@ function wrapText(
 function styleFor(
   node: RuntimeElement,
   classStyles: Record<string, CardTemplateStyle>,
+  combinations: Map<string, CardTemplateStyle>,
 ): CardTemplateStyle {
-  const classes = String(node.attributes.class ?? '').split(/\s+/).filter(Boolean)
-  const fromClasses = Object.assign({}, ...classes.map((name) => classStyles[name] ?? {}))
+  const className = String(node.attributes.class ?? '').trim().replace(/\s+/g, ' ')
+  let fromClasses: CardTemplateStyle = combinations.get(className) ?? {}
+  if (!combinations.has(className)) {
+    const classes = className.split(/\s+/).filter(Boolean)
+    fromClasses = Object.freeze(Object.assign(
+      {},
+      ...classes.map((name) => classStyles[name] ?? {}),
+    ))
+    combinations.set(className, fromClasses)
+  }
   return {
     ...fromClasses,
     ...parseInlineStyle(node.attributes.style),
+  }
+}
+
+class TextMeasurementCache {
+  private readonly values = new Map<string, number>()
+  private hits = 0
+  private misses = 0
+
+  constructor(private readonly maximumEntries: number) {}
+
+  measure(context: CanvasRenderingContext2D, text: string, width: number): number {
+    const key = `${context.font}\n${width}\n${text}`
+    const cached = this.values.get(key)
+    if (cached !== undefined) {
+      this.values.delete(key)
+      this.values.set(key, cached)
+      this.hits += 1
+      return cached
+    }
+    const measured = context.measureText(text).width
+    this.values.set(key, measured)
+    this.misses += 1
+    while (this.values.size > this.maximumEntries) {
+      const oldest = this.values.keys().next().value as string | undefined
+      if (oldest === undefined) break
+      this.values.delete(oldest)
+    }
+    return measured
+  }
+
+  metrics(): Readonly<Record<string, number>> {
+    const total = this.hits + this.misses
+    return Object.freeze({
+      templateMeasurementCacheEntries: this.values.size,
+      templateMeasurementCacheHits: this.hits,
+      templateMeasurementCacheMisses: this.misses,
+      templateMeasurementCacheHitRate: total ? this.hits / total : 0,
+    })
   }
 }
 

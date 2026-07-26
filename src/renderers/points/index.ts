@@ -2,6 +2,7 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  DynamicDrawUsage,
   Points,
   ShaderMaterial,
   type Group,
@@ -115,6 +116,9 @@ class PointsMotionRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
   private items: MotionItem<TMeta>[] = []
   private transforms: Transform[] = []
   private disposed = false
+  private capacity = 0
+  private geometryBuilds = 0
+  private attributeReuses = 0
 
   constructor(
     private readonly root: Group,
@@ -163,20 +167,35 @@ class PointsMotionRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
     this.signal.addEventListener('abort', this.dispose, { once: true })
   }
 
-  async setItems(items: MotionItem<TMeta>[]): Promise<boolean> {
+  async setItems(items: readonly MotionItem<TMeta>[]): Promise<boolean> {
     if (this.disposed || this.signal.aborted) return false
     this.items = items.map((item) => ({ ...item }))
     this.transforms = fitTransforms(this.transforms, items.length)
-    const previousGeometry = this.geometry
-    this.geometry = createGeometry(items, this.options)
-    this.points.geometry = this.geometry
-    previousGeometry.dispose()
+    const nextCapacity = resolveBufferCapacity(this.capacity, items.length)
+    if (nextCapacity !== this.capacity) {
+      const previousGeometry = this.geometry
+      this.geometry = createGeometry(nextCapacity, items, this.options)
+      this.points.geometry = this.geometry
+      this.capacity = nextCapacity
+      this.geometryBuilds += 1
+      previousGeometry.dispose()
+    } else {
+      writeColors(
+        this.geometry.getAttribute('itemColor') as BufferAttribute,
+        items,
+        this.options,
+      )
+      this.attributeReuses += 1
+    }
     this.writeTransition(this.transforms, this.transforms)
     this.geometry.setDrawRange(0, items.length)
     return true
   }
 
-  async updateItems(items: MotionItem<TMeta>[], changedIndices: number[]): Promise<boolean> {
+  async updateItems(
+    items: readonly MotionItem<TMeta>[],
+    changedIndices: readonly number[],
+  ): Promise<boolean> {
     if (this.disposed || this.signal.aborted) return false
     if (items.length !== this.items.length) return this.setItems(items)
     this.items = items.map((item) => ({ ...item }))
@@ -185,19 +204,19 @@ class PointsMotionRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
       if (index < 0 || index >= items.length) return
       colors.setXYZ(index, ...itemColor(items[index], index, this.options))
     })
-    colors.needsUpdate = true
+    markAttributeRanges(colors, changedIndices, 3, items.length)
     return true
   }
 
-  setTransforms(transforms: Transform[]): void {
+  setTransforms(transforms: readonly Transform[]): void {
     this.transforms = transforms.map((transform) => ({ ...transform }))
     this.writeTransition(this.transforms, this.transforms)
     this.setProgress(1)
   }
 
   prepareTransition(
-    from: Transform[],
-    to: Transform[],
+    from: readonly Transform[],
+    to: readonly Transform[],
   ): void {
     this.transforms = to.map((transform) => ({ ...transform }))
     this.writeTransition(from, to)
@@ -250,6 +269,11 @@ class PointsMotionRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
       instanceCount,
       submittedInstanceCount: this.disposed ? 0 : this.geometry.drawRange.count,
       gpuBytes: this.disposed ? 0 : geometryByteLength(this.geometry),
+      metrics: {
+        capacity: this.disposed ? 0 : this.capacity,
+        geometryBuilds: this.geometryBuilds,
+        attributeReuses: this.attributeReuses,
+      },
     }
   }
 
@@ -264,53 +288,62 @@ class PointsMotionRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
     this.transforms = []
   }
 
-  private writeTransition(from: Transform[], to: Transform[]): void {
+  private writeTransition(from: readonly Transform[], to: readonly Transform[]): void {
     if (this.disposed) return
     const count = Math.min(from.length, to.length, this.items.length)
-    const fromPosition = new Float32Array(count * 3)
-    const toPosition = new Float32Array(count * 3)
-    const fromScale = new Float32Array(count)
-    const toScale = new Float32Array(count)
-    const fromOpacity = new Float32Array(count)
-    const toOpacity = new Float32Array(count)
+    const fromPosition = this.geometry.getAttribute('fromPosition') as BufferAttribute
+    const toPosition = this.geometry.getAttribute('toPosition') as BufferAttribute
+    const fromScale = this.geometry.getAttribute('fromScale') as BufferAttribute
+    const toScale = this.geometry.getAttribute('toScale') as BufferAttribute
+    const fromOpacity = this.geometry.getAttribute('fromOpacity') as BufferAttribute
+    const toOpacity = this.geometry.getAttribute('toOpacity') as BufferAttribute
     for (let index = 0; index < count; index += 1) {
-      writeTransform(from[index], index, fromPosition, fromScale, fromOpacity)
-      writeTransform(to[index], index, toPosition, toScale, toOpacity)
+      writeTransform(from[index], index, fromPosition.array as Float32Array,
+        fromScale.array as Float32Array, fromOpacity.array as Float32Array)
+      writeTransform(to[index], index, toPosition.array as Float32Array,
+        toScale.array as Float32Array, toOpacity.array as Float32Array)
     }
-    this.geometry.setAttribute('fromPosition', new BufferAttribute(fromPosition, 3))
-    this.geometry.setAttribute('toPosition', new BufferAttribute(toPosition, 3))
-    this.geometry.setAttribute('fromScale', new BufferAttribute(fromScale, 1))
-    this.geometry.setAttribute('toScale', new BufferAttribute(toScale, 1))
-    this.geometry.setAttribute('fromOpacity', new BufferAttribute(fromOpacity, 1))
-    this.geometry.setAttribute('toOpacity', new BufferAttribute(toOpacity, 1))
+    ;[fromPosition, toPosition].forEach((attribute) => markAttributeRange(attribute, count * 3))
+    ;[fromScale, toScale, fromOpacity, toOpacity]
+      .forEach((attribute) => markAttributeRange(attribute, count))
+    this.attributeReuses += 6
     this.geometry.setDrawRange(0, count)
   }
 }
 
 function createGeometry<TMeta>(
-  items: MotionItem<TMeta>[],
+  capacity: number,
+  items: readonly MotionItem<TMeta>[],
   options: PointsRendererOptions<TMeta>,
 ): BufferGeometry {
   const geometry = new BufferGeometry()
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array(items.length * 3), 3))
-  geometry.setAttribute('itemColor', new BufferAttribute(createColors(items, options), 3))
-  geometry.setAttribute('visibilityRank', new BufferAttribute(createVisibilityRanks(items.length), 1))
+  geometry.setAttribute('position', dynamicAttribute(new Float32Array(capacity * 3), 3))
+  const colors = dynamicAttribute(new Float32Array(capacity * 3), 3)
+  writeColors(colors, items, options)
+  geometry.setAttribute('itemColor', colors)
+  geometry.setAttribute('visibilityRank', new BufferAttribute(createVisibilityRanks(capacity), 1))
   geometry.setAttribute('itemIndex', new BufferAttribute(
-    Float32Array.from({ length: items.length }, (_value, index) => index),
+    Float32Array.from({ length: capacity }, (_value, index) => index),
     1,
   ))
+  geometry.setAttribute('fromPosition', dynamicAttribute(new Float32Array(capacity * 3), 3))
+  geometry.setAttribute('toPosition', dynamicAttribute(new Float32Array(capacity * 3), 3))
+  geometry.setAttribute('fromScale', dynamicAttribute(new Float32Array(capacity), 1))
+  geometry.setAttribute('toScale', dynamicAttribute(new Float32Array(capacity), 1))
+  geometry.setAttribute('fromOpacity', dynamicAttribute(new Float32Array(capacity), 1))
+  geometry.setAttribute('toOpacity', dynamicAttribute(new Float32Array(capacity), 1))
   return geometry
 }
 
-function createColors<TMeta>(
-  items: MotionItem<TMeta>[],
+function writeColors<TMeta>(
+  attribute: BufferAttribute,
+  items: readonly MotionItem<TMeta>[],
   options: PointsRendererOptions<TMeta>,
-): Float32Array {
-  const colors = new Float32Array(items.length * 3)
+): void {
   items.forEach((item, index) => {
-    colors.set(itemColor(item, index, options), index * 3)
+    attribute.setXYZ(index, ...itemColor(item, index, options))
   })
-  return colors
+  markAttributeRange(attribute, items.length * 3)
 }
 
 function itemColor<TMeta>(
@@ -347,7 +380,7 @@ function writeTransform(
   opacities[index] = transform.opacity
 }
 
-function fitTransforms(transforms: Transform[], count: number): Transform[] {
+function fitTransforms(transforms: readonly Transform[], count: number): Transform[] {
   return Array.from({ length: count }, (_value, index) => transforms[index]
     ? { ...transforms[index] }
     : {
@@ -373,6 +406,12 @@ function normalizeSize(value: number | undefined): number {
   return Number.isFinite(value) ? clamp(value as number, 0.05, 4) : 1
 }
 
+function resolveBufferCapacity(current: number, required: number): number {
+  if (required <= 0) return 0
+  if (required <= current && required >= current / 2) return current
+  return 2 ** Math.ceil(Math.log2(required))
+}
+
 function hashUnit(value: string): number {
   let hash = 2166136261
   for (let index = 0; index < value.length; index += 1) {
@@ -390,4 +429,41 @@ function geometryByteLength(geometry: BufferGeometry): number {
   const attributes = Object.values(geometry.attributes)
     .reduce((total, attribute) => total + attribute.array.byteLength, 0)
   return attributes + (geometry.index?.array.byteLength ?? 0)
+}
+
+function dynamicAttribute(array: Float32Array, itemSize: number): BufferAttribute {
+  return new BufferAttribute(array, itemSize).setUsage(DynamicDrawUsage)
+}
+
+function markAttributeRange(attribute: BufferAttribute, count: number): void {
+  attribute.clearUpdateRanges()
+  if (count > 0) attribute.addUpdateRange(0, count)
+  attribute.needsUpdate = true
+}
+
+function markAttributeRanges(
+  attribute: BufferAttribute,
+  indices: readonly number[],
+  itemSize: number,
+  itemCount: number,
+): void {
+  const unique = [...new Set(indices)]
+    .filter((index) => index >= 0 && index < itemCount)
+    .sort((left, right) => left - right)
+  attribute.clearUpdateRanges()
+  let start = unique[0]
+  let previous = start
+  for (let index = 1; index <= unique.length; index += 1) {
+    const current = unique[index]
+    if (current === previous + 1) {
+      previous = current
+      continue
+    }
+    if (start !== undefined && previous !== undefined) {
+      attribute.addUpdateRange(start * itemSize, (previous - start + 1) * itemSize)
+    }
+    start = current
+    previous = current
+  }
+  if (unique.length) attribute.needsUpdate = true
 }

@@ -163,3 +163,13 @@ Stage 持有专属内容 `Group` 并通过稳定 `MotionRenderer` 协议编排�
 API 收敛后的真实包检查结果为主库 40,379 bytes gzip、Points 2,556 bytes gzip、模板 5,820 bytes gzip、tarball 79,972 bytes、layout-only 5,598 bytes，全部保持在独立预算内。严格 TypeScript 与 Node ESM 消费验证 Core、Cards、Points 和逐布局入口可用，内部深层路径继续被拦截。
 
 2026-07-26 Chromium 150 / Apple M4 / 1265×633 协议加固回归：默认 Cards 的 2000/high/3 秒 steady 为 60.0 FPS、P95 17.34ms；transition-stress 为 60.0 FPS、P95 17.50ms、4 次中断/patch。两者均为 0 个 33ms 长帧、1 Draw Call，相对协议前 18.50/18.60ms 基线没有回退。Points 的 500/1000/2000 项球体与圆柱、快速中断、拾取和暂停恢复均保持单 Canvas、主体 1 Draw Call，控制台无 error。
+
+## 运行时容量与开发诊断打磨
+
+Cards 与 Points 将活动数量和 GPU 容量分离为二次幂容量桶；同一容量档内只原位更新 DynamicDrawUsage Attribute，布局切换不再成组创建位置、四元数、缩放和透明度 TypedArray。Cards 在容量不变时保留 Mesh、Geometry 和 Material，只替换 Atlas 纹理与矩形数据；Points 局部颜色更新只标记变化范围。
+
+Atlas patch 会按纹理行合并相邻卡片范围，模板实例保留最多 2048 项的字体/宽度/文本测量 LRU，并预解析 class 样式组合。`renderer.metrics` 增加 capacity、geometryBuilds、attributeReuses、atlasUploadRanges 和模板测量命中指标。
+
+自动验证当前为 20 个测试文件、264 项测试；真实包检查为主库 40,922 bytes gzip、模板 6,194 bytes、Points 2,918 bytes、Dev 3,892 bytes、tarball 85,087 bytes、layout-only 5,598 bytes，均未提高既有预算。
+
+2026-07-26 Chromium 150 / Apple M4 / 1265×633 运行时打磨回归：默认 Cards 2000/high 的 steady 为 60.0 FPS、P95 17.60ms；transition-stress 为 60.0 FPS、P95 17.46ms、4 次中断/patch；连续 Atlas 更新为 60.0 FPS、P95 17.50ms、17 次局部 patch。三组均为 0 个 33ms 长帧和 1 Draw Call，steady 相对本轮前 17.34ms 基线仅增加约 1.5%，低于 10% 门槛。Cards/Points 的 500/1000/2000 项均保持主体 1 Draw Call；同容量档布局切换时 `geometryBuilds` 保持 1，`attributeReuses` 持续增加，控制台无 error。

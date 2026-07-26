@@ -1,8 +1,8 @@
 export interface MotionItem<TMeta = unknown> {
-  id: string
-  image?: string
-  title?: string
-  meta?: TMeta
+  readonly id: string
+  readonly image?: string
+  readonly title?: string
+  readonly meta?: TMeta
 }
 
 export interface CardStyle {
@@ -67,6 +67,7 @@ export interface CardContentRenderer<TMeta = unknown> {
     item: Readonly<MotionItem<TMeta>>,
     resolvedStyle: Readonly<CardStyle>,
   ): PreparedCardContent
+  getMetrics?(): Readonly<Record<string, number>>
 }
 
 export type ResolveCardStyle<TMeta = unknown> = (
@@ -74,14 +75,14 @@ export type ResolveCardStyle<TMeta = unknown> = (
 ) => CardStyle | undefined
 
 export interface Transform {
-  x: number
-  y: number
-  z: number
-  scale: number
-  rotationX: number
-  rotationY: number
-  rotationZ: number
-  opacity: number
+  readonly x: number
+  readonly y: number
+  readonly z: number
+  readonly scale: number
+  readonly rotationX: number
+  readonly rotationY: number
+  readonly rotationZ: number
+  readonly opacity: number
 }
 
 export interface LayoutContext {
@@ -102,7 +103,7 @@ export interface Layout {
   readonly orientation?: 'surface' | 'camera'
   readonly hideBackHemisphere?: boolean
   readonly hemisphereEdgeFade?: number
-  calculate(count: number, context: LayoutContext): Transform[]
+  calculate(count: number, context: LayoutContext): readonly Transform[]
 }
 
 export interface LayoutDefinition {
@@ -110,7 +111,7 @@ export interface LayoutDefinition {
   readonly orientation?: 'surface' | 'camera'
   readonly hideBackHemisphere?: boolean
   readonly hemisphereEdgeFade?: number
-  readonly calculate: (count: number, context: LayoutContext) => Transform[]
+  readonly calculate: (count: number, context: LayoutContext) => readonly Transform[]
 }
 
 export interface TransitionOptions {

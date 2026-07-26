@@ -256,14 +256,51 @@ describe('texture atlas card rendering', () => {
     const applyMs = applyTextureAtlasPatch(atlas, patch)
 
     expect(texture.needsUpdate).toBe(true)
-    expect(texture.clearUpdateRanges).not.toHaveBeenCalled()
+    expect(texture.clearUpdateRanges).toHaveBeenCalledOnce()
     expect(texture.addUpdateRange).toHaveBeenCalledTimes(16)
     expect(patch.metrics.uploadBytes).toBe(16 * 16 * 4)
+    expect(patch.metrics.uploadRanges).toBe(16)
     expect(applyMs).toBeGreaterThanOrEqual(0)
 
     applyTextureAtlasPatch(atlas, patch)
-    expect(texture.clearUpdateRanges).not.toHaveBeenCalled()
+    expect(texture.clearUpdateRanges).toHaveBeenCalledTimes(2)
     expect(texture.addUpdateRange).toHaveBeenCalledTimes(32)
+  })
+
+  it('merges adjacent cells into one upload range per atlas row', async () => {
+    const patch = await createTextureAtlasPatch(
+      [{ id: 'a' }, { id: 'b' }],
+      [0, 1],
+      16,
+    )
+    const texture = {
+      needsUpdate: false,
+      addUpdateRange: vi.fn(),
+      clearUpdateRanges: vi.fn(),
+    }
+    const atlas = {
+      data: new Uint8Array(40 * 20 * 4),
+      width: 40,
+      height: 20,
+      columns: 2,
+      rows: 1,
+      cellSize: 16,
+      cellWidth: 16,
+      cellHeight: 16,
+      padding: 2,
+      stride: 20,
+      strideX: 20,
+      strideY: 20,
+      texture,
+      initialized: true,
+    } as unknown as TextureAtlasResult
+
+    applyTextureAtlasPatch(atlas, patch)
+
+    expect(texture.clearUpdateRanges).toHaveBeenCalledOnce()
+    expect(texture.addUpdateRange).toHaveBeenCalledTimes(16)
+    expect(patch.metrics.uploadRanges).toBe(16)
+    expect(patch.metrics.uploadBytes).toBe(36 * 16 * 4)
   })
 
   it('falls back to the built-in card when custom drawing fails', async () => {

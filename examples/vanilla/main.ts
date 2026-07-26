@@ -358,6 +358,14 @@ const statusTimer = window.setInterval(() => {
   document.documentElement.dataset.atlasPatches = String(stats.renderer.metrics.atlasPatches ?? 0)
   document.documentElement.dataset.atlasCellsUpdated =
     String(stats.renderer.metrics.atlasCellsUpdated ?? 0)
+  document.documentElement.dataset.rendererCapacity =
+    String(stats.renderer.metrics.capacity ?? stats.renderer.instanceCount)
+  document.documentElement.dataset.geometryBuilds =
+    String(stats.renderer.metrics.geometryBuilds ?? 0)
+  document.documentElement.dataset.attributeReuses =
+    String(stats.renderer.metrics.attributeReuses ?? 0)
+  document.documentElement.dataset.atlasUploadRanges =
+    String(stats.renderer.metrics.atlasUploadRanges ?? 0)
   status.textContent =
     `${stats.fps.toFixed(0)} FPS · ${stats.render.drawCalls} CALL · ${stats.renderer.instanceCount} ITEMS${lastPicked}`
 }, 500)

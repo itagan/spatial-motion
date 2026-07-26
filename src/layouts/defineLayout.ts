@@ -46,7 +46,7 @@ export function defineLayout(definition: LayoutDefinition): Layout {
     orientation: definition.orientation,
     hideBackHemisphere: definition.hideBackHemisphere,
     hemisphereEdgeFade: definition.hemisphereEdgeFade,
-    calculate(count: number, context: LayoutContext): Transform[] {
+    calculate(count: number, context: LayoutContext): readonly Transform[] {
       if (!Number.isInteger(count) || count < 0) {
         throw new RangeError('Layout count must be a non-negative integer')
       }

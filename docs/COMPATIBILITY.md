@@ -7,6 +7,7 @@ Spatial Motion 的 `MotionStage` 面向支持 WebGL2、ES2022、Canvas 2D、Resi
 - Chrome、Edge、Firefox、Safari 应使用仍受厂商支持的当前版本。
 - Three.js 必须满足 `>=0.178.0 <1.0.0`，并由应用提供。
 - 根入口包含浏览器运行时；`core` 不携带 Cards/Atlas/Points/内置布局，纯布局子入口可在 Node ESM 中计算。
+- `dev` 入口依赖 Three.js 并面向开发与测试环境，不会被根入口、Core 或生产 Renderer 自动加载。
 - 服务端渲染阶段不要实例化 `MotionStage`，应在浏览器挂载后创建并在卸载时销毁。
 
 项目不承诺 WebGL1、Internet Explorer、旧版内嵌 WebView 或关闭硬件加速的环境。应用应在创建 Stage 前检查自己的目标设备，并为 WebGL 创建失败提供静态回退界面。
@@ -30,6 +31,7 @@ Spatial Motion 的 `MotionStage` 面向支持 WebGL2、ES2022、Canvas 2D、Resi
 - 单 Draw Call 指主体实例卡片 Mesh；浏览器、调试工具或应用加入的其他场景对象不包含在该保证中。
 - `pointsRenderer()` 的主体同样保持一个 `THREE.Points` Draw Call；自定义 `MotionRenderer` 是否保持该特性由实现者负责。
 - 自定义渲染器只能声明 quad/disc 整体拾取或完全退出指针拾取，不支持内部热区、每项独立 Mesh、HTML/CSS3D、后处理、独立相机或渲染循环。
+- Dev 布局重叠检查基于三维包围尺度，是提示性 warning，不替代相机投影后的视觉验收。
 - 缺少可选能力时 Stage 会采用固定降级：数据 patch 完整重设并恢复状态，其余视觉/高亮/resize/恢复能力安全跳过，流式特效固定在静态首帧。
 - Stage extension 的额外 Object3D 可能增加 Draw Call；扩展必须复用应用提供且满足 peer 范围的同一 Three.js，不应捆绑第二份 Three.js。
 - Reduced Motion 会立即完成布局、停止自动旋转并固定流式特效首帧。Stage extension 会收到 pause/resume 生命周期，但动画库的具体低动态表现仍由扩展实现。
