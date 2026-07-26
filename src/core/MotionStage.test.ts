@@ -1402,7 +1402,28 @@ describe('MotionStage', () => {
     stage.destroy()
   })
 
+  it('reuses settled transforms for repeated interaction reads', async () => {
+    const stage = createStage()
+    await stage.setItems([{ id: 'center' }])
+    await stage.to(layout(() => [transform()]), { duration: 0 })
+    const internals = stage as unknown as {
+      transforms: Transform[]
+      resolveCurrentTransforms(now: number): Transform[]
+    }
+    const settled = internals.transforms
+
+    expect(internals.resolveCurrentTransforms(performance.now())).toBe(settled)
+    stage.pick(50, 50)
+    expect(internals.transforms).toBe(settled)
+    stage.destroy()
+  })
+
   it('reports hover changes once and clears GPU highlighting on pointer leave', async () => {
+    let frame: FrameRequestCallback | null = null
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
     const onItemHover = vi.fn()
     const stage = createStage({ onItemHover, hoverEffect: 'highlight' })
     const cards = currentCards()
@@ -1411,7 +1432,15 @@ describe('MotionStage', () => {
     const canvas = document.querySelector('canvas')
 
     canvas?.dispatchEvent(new PointerEvent('pointermove', { clientX: 50, clientY: 50 }))
+    canvas?.dispatchEvent(new PointerEvent('pointerleave'))
+    ;(frame as unknown as FrameRequestCallback)(performance.now())
+    expect(onItemHover).not.toHaveBeenCalled()
+
     canvas?.dispatchEvent(new PointerEvent('pointermove', { clientX: 50, clientY: 50 }))
+    canvas?.dispatchEvent(new PointerEvent('pointermove', { clientX: 50, clientY: 50 }))
+    expect(onItemHover).not.toHaveBeenCalled()
+    expect(frame).not.toBeNull()
+    ;(frame as unknown as FrameRequestCallback)(performance.now())
     expect(onItemHover).toHaveBeenCalledTimes(1)
     expect(onItemHover).toHaveBeenCalledWith({ id: 'center' }, 0)
     expect(cards.setHoverIndex).toHaveBeenLastCalledWith(0)
@@ -1419,6 +1448,11 @@ describe('MotionStage', () => {
     canvas?.dispatchEvent(new PointerEvent('pointerleave'))
     expect(onItemHover).toHaveBeenLastCalledWith(null, null)
     expect(cards.setHoverIndex).toHaveBeenLastCalledWith(null)
+
+    stage.pause()
+    canvas?.dispatchEvent(new PointerEvent('pointermove', { clientX: 50, clientY: 50 }))
+    expect(onItemHover).toHaveBeenCalledTimes(3)
+    expect(onItemHover).toHaveBeenLastCalledWith({ id: 'center' }, 0)
     stage.destroy()
   })
 

@@ -509,7 +509,7 @@ http://localhost:5173/benchmark.html
 - P50/P95/P99、24/33/50ms 长帧、Stage CPU 与 WebGL 提交耗时
 - 扩展数量与每帧扩展 update 耗时；NONE/NATIVE/GSAP/BOTH 对比
 - 图集构建/patch、图片加载失败和估算纹理上传字节
-- steady、cold-start、atlas-update、transition-stress 四类可复现场景
+- steady、cold-start、atlas-update、interaction-stress、transition-stress 五类可复现场景
 - 导入基线 JSON，并通过 `compareBenchmarkResults()` 输出同配置前后差异
 - 版本化基准 JSON 严格解析、方向感知回归阈值和可用于 CI 的退出码
 - 3 秒至 30 分钟采样、持续布局/特效中断与局部图集更新压力模式
@@ -534,11 +534,11 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| 主库 JavaScript gzip | ≤ 40 KB | 40.0 KB（40,922 bytes） |
+| 主库 JavaScript gzip | ≤ 40 KB | 40.0 KB（40,953 bytes） |
 | 按需 card-template gzip | ≤ 12 KB | 6.0 KB（6,194 bytes） |
 | 按需 Points Renderer gzip | ≤ 12 KB | 2.8 KB（2,918 bytes） |
 | 按需开发诊断 gzip | ≤ 12 KB | 3.8 KB（3,892 bytes） |
-| npm tarball | ≤ 150 KB | 83.1 KB（85,087 bytes） |
+| npm tarball | ≤ 150 KB | 83.2 KB（85,238 bytes） |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 5.5 KB（5,598 bytes） |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

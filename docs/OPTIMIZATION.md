@@ -170,6 +170,16 @@ Cards 与 Points 将活动数量和 GPU 容量分离为二次幂容量桶；同�
 
 Atlas patch 会按纹理行合并相邻卡片范围，模板实例保留最多 2048 项的字体/宽度/文本测量 LRU，并预解析 class 样式组合。`renderer.metrics` 增加 capacity、geometryBuilds、attributeReuses、atlasUploadRanges 和模板测量命中指标。
 
-自动验证当前为 20 个测试文件、264 项测试；真实包检查为主库 40,922 bytes gzip、模板 6,194 bytes、Points 2,918 bytes、Dev 3,892 bytes、tarball 85,087 bytes、layout-only 5,598 bytes，均未提高既有预算。
+自动验证当前为 20 个测试文件、265 项测试；真实包检查为主库 40,953 bytes gzip、模板 6,194 bytes、Points 2,918 bytes、Dev 3,892 bytes、tarball 85,238 bytes、layout-only 5,598 bytes，均未提高既有预算。
 
 2026-07-26 Chromium 150 / Apple M4 / 1265×633 运行时打磨回归：默认 Cards 2000/high 的 steady 为 60.0 FPS、P95 17.60ms；transition-stress 为 60.0 FPS、P95 17.46ms、4 次中断/patch；连续 Atlas 更新为 60.0 FPS、P95 17.50ms、17 次局部 patch。三组均为 0 个 33ms 长帧和 1 Draw Call，steady 相对本轮前 17.34ms 基线仅增加约 1.5%，低于 10% 门槛。Cards/Points 的 500/1000/2000 项均保持主体 1 Draw Call；同容量档布局切换时 `geometryBuilds` 保持 1，`attributeReuses` 持续增加，控制台无 error。
+
+## 稳态交互读取减负
+
+布局已经稳定且没有流式特效时，Stage 直接把内部只读 Transform 快照用于拾取、聚焦和数据协调，不再为每次读取复制全部 Transform 对象。活动布局过渡和流式特效仍生成独立快照，保持中断时的帧连续性；公开只读契约和 Renderer 输入没有变化。Stage 时钟 wait 同时改为直接遍历现有 Set，完成项在遍历中安全删除，不再为每个动画帧创建临时数组。
+
+启用 hover 后，高频 `pointermove` 只记录最新事件，并在 Stage 下一渲染帧执行一次拾取；暂停或 RAF 尚未启动时仍立即处理，`pointerup` 与公开 `pick()` 继续保持同步。Benchmark Demo 增加约 240Hz 合成输入的 `interaction-stress` 场景，结果中的 `operations` 与 `pickOperations` 可直接验证事件合并比例。
+
+自动化增加稳态快照引用回归，确保 2000 项 hover/pick 不会重新引入整组 Transform 克隆。该改动不增加 Renderer、Draw Call、纹理或公开 API，主库仍受原 40,960 bytes gzip 门禁约束。
+
+2026-07-26 Chromium 150 / Apple M4 / 1265×633 的 2000 Cards/high/interaction-stress 3 秒结果：合成输入触发 707 次 `pointermove`，Stage 实际执行 180 次拾取，合并 74.5%；平均 59.99 FPS、P95/P99 17.70/17.70ms、0 个 33ms 长帧、1 Draw Call。拾取累计 584.8ms，平均每次 3.249ms。Points 2000 浏览器复验继续保持 1 Draw Call，控制台无 error。

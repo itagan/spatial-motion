@@ -96,6 +96,8 @@
 - [x] 核心协议拆分可选能力，并用内部 Line/Shape 批量夹具验证。
 - [x] `defineLayout()`、通用 `itemWidth/itemHeight` 与逐布局入口完成。
 - [x] 增加按需 Dev 诊断、GPU 容量桶、Attribute 复用和模板/Atlas 热路径减负。
+- [x] 消除稳态交互读取的 Transform 深拷贝和 Stage wait 每帧临时数组。
+- [x] 高频 pointermove 合并到 Stage RAF，并增加 interaction-stress 浏览器基准。
 - [ ] 收集自定义 Renderer/Layout 案例，完成发布候选 API freeze。
 
 ### CSS3D 可选渲染器

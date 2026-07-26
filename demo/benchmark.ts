@@ -60,6 +60,7 @@ const stage = new MotionStage({
   renderer: cardsRenderer({ resolution: 64 }),
   quality: 'auto',
   adaptivePerformance: true,
+  hoverEffect: 'highlight',
 })
 let itemCount = 500
 let qualityMode: QualityMode = 'auto'
@@ -179,7 +180,12 @@ async function applyExtensions(): Promise<void> {
   updateMetrics()
 }
 
-type BenchmarkScenario = 'steady' | 'cold-start' | 'atlas-update' | 'transition-stress'
+type BenchmarkScenario =
+  | 'steady'
+  | 'cold-start'
+  | 'atlas-update'
+  | 'interaction-stress'
+  | 'transition-stress'
 
 async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
   cancelRun()
@@ -209,6 +215,9 @@ async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
   } else if (scenario === 'atlas-update') {
     void runAtlasUpdateOperation()
     stressTimer = window.setInterval(() => void runAtlasUpdateOperation(), 180)
+  } else if (scenario === 'interaction-stress') {
+    runInteractionOperation()
+    stressTimer = window.setInterval(runInteractionOperation, 4)
   } else if (scenario === 'cold-start') {
     void runColdStart(generation)
   }
@@ -257,6 +266,17 @@ async function runStressOperation(): Promise<void> {
   const effect = effects[target]
   if (effect) await stage.enterEffect(effect, { duration: 700 })
   else await stage.to(layouts[target], { duration: 700 })
+}
+
+function runInteractionOperation(): void {
+  const canvas = container!.querySelector('canvas')
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const phase = stressOperations++ * 0.17
+  canvas.dispatchEvent(new PointerEvent('pointermove', {
+    clientX: rect.left + (Math.sin(phase) * 0.45 + 0.5) * rect.width,
+    clientY: rect.top + (Math.cos(phase * 0.73) * 0.45 + 0.5) * rect.height,
+  }))
 }
 
 function cancelRun(message?: string): void {
@@ -323,6 +343,8 @@ function renderResult(result: BenchmarkResult): void {
     },
     averageFrameCpuMs: Number(result.averageFrameCpuMs.toFixed(3)),
     averageRenderSubmitMs: Number(result.averageRenderSubmitMs.toFixed(3)),
+    pickingMs: Number(result.pickingMs.toFixed(2)),
+    pickOperations: result.pickOperations,
     averageExtensionUpdateMs: Number(result.averageExtensionUpdateMs.toFixed(3)),
     maximumExtensionUpdateMs: Number(result.maximumExtensionUpdateMs.toFixed(3)),
     maximumExtensions: result.maximumExtensions,
@@ -428,6 +450,7 @@ function scenarioLabel(scenario: BenchmarkScenario): string {
     case 'steady': return '稳定运行采样'
     case 'cold-start': return '冷启动与完整图集采样'
     case 'atlas-update': return '连续局部更新采样'
+    case 'interaction-stress': return '高频指针交互采样'
     case 'transition-stress': return '切换/更新压力测试'
   }
 }

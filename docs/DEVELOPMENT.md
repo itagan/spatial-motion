@@ -134,7 +134,7 @@ npm tarball 只携带运行时 `dist`、README、CHANGELOG、LICENSE、PUBLIC_AP
 - Stage CPU、WebGL 提交、图集构建/patch、图片加载和估算纹理上传；
 - 设备、浏览器和采样时长。
 
-优先使用 steady、cold-start、atlas-update 与 transition-stress 四类固定场景，并导出完整 JSON。`scripts/benchmark-presets.json` 固化了跨 100/500/1000/2000 实例和 low/medium/high/auto 质量的六组配置；CLI 的 `--preset` 会同时校验基线和当前结果。比较优化前后结果时，实例数、质量、布局、场景和环境应一致；`compareBenchmarkResults()` 会标记配置是否可直接比较，`evaluateBenchmarkRegression()` 和 `benchmark:compare` 可进一步按方向感知阈值产生 CI 退出码。基准 JSON 必须先通过 `parseBenchmarkResult()`，不要把结构不完整的手写对象作为性能证据。
+优先使用 steady、cold-start、atlas-update、interaction-stress 与 transition-stress 五类固定场景，并导出完整 JSON。`interaction-stress` 用于本地浏览器验证高频指针事件合帧；`scripts/benchmark-presets.json` 继续固化跨 100/500/1000/2000 实例和 low/medium/high/auto 质量的六组 CI 配置。CLI 的 `--preset` 会同时校验基线和当前结果。比较优化前后结果时，实例数、质量、布局、场景和环境应一致；`compareBenchmarkResults()` 会标记配置是否可直接比较，`evaluateBenchmarkRegression()` 和 `benchmark:compare` 可进一步按方向感知阈值产生 CI 退出码。基准 JSON 必须先通过 `parseBenchmarkResult()`，不要把结构不完整的手写对象作为性能证据。
 
 性能结果会受设备与浏览器影响，所以不要只报告一个孤立 FPS 数字，也不要以降低视觉数量之外的指标来掩盖退化。
 

@@ -20,6 +20,7 @@
 - Sphere `surface` 卡片的顶部统一朝向球面北极，避免头像随经纬度发生无规则滚转或倒置。
 - 质量切换现在异步协调 2000/1000/500 实例容量并从完整输入恢复升级数据，不再把实例上限与固定可见比例重复削减；等待缩容的实例会在顶点着色阶段提前裁剪。
 - Cards/Points 现在按容量桶复用 Geometry、Material、过渡 Attribute 和 TypedArray；Atlas 相邻单元合并上传范围，模板复用有界文字测量结果。
+- 稳态布局与交互读取直接复用 Stage 持有的 Transform 快照，Stage wait 直接遍历现有集合；高频 `pointermove` 合并到 Stage 下一帧并只拾取最新坐标，避免 hover、pick 和每帧计时产生重复工作或临时数组。
 
 ### Compatibility
 
