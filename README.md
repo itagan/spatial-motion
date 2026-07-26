@@ -120,6 +120,7 @@ const stage = new MotionStage({
     imageConcurrency: 6,
     imageCacheSize: 128,
     texturePrewarm: undefined, // 自动：仅预热较小 Atlas；也可显式 true/false
+    atlasMode: 'single', // 'single' | 'array' | 'auto'；默认保持单图集
   }),
   quality: 'auto',
   adaptivePerformance: true,
@@ -531,7 +532,9 @@ npx spatial-motion-benchmark baseline.json current.json --preset transition-stre
 
 256 项以上的内置默认卡片会在支持时把首次整图绘制和 readback 放入 OffscreenCanvas Worker。图片按 URL 去重后转换为可转移 `ImageBitmap`；失败或中止会关闭位图并安全回退，模板、自定义 `drawCard` 和局部 patch 不跨线程。异步模板和自定义 `drawCard` 继续使用隔离单元 Canvas。
 
-首次上传和 WebGL context 恢复仍使用完整图集上传。Cards 默认只预热不超过 16 MiB 的 Atlas 像素缓冲，避免大图集预热占用单帧；`texturePrewarm: true/false` 可强制开启或关闭。`renderer.metrics` 会报告实际分辨率、mipmap、Worker/位图解码和预热次数与耗时。
+`atlasMode: 'single'` 保持默认的单图集、mipmap 和细粒度行 patch。`'array'` 使用 Texture2DArray 自适应分页，关闭 mipmap，并在不超过设备能力和 256 层的前提下选择尽量平衡的页尺寸；首帧约上传 3 MiB，后续每帧约上传 768 KiB，避免大型纹理一次提交。`'auto'` 只会在显式关闭 mipmap且完整图集像素不小于 16 MiB 时选择 array，小图集和需要 mipmap 的场景继续使用 single。
+
+Single 模式的首次上传和 WebGL context 恢复使用完整图集上传，并默认只预热不超过 16 MiB 的 Atlas 像素缓冲；`texturePrewarm: true/false` 可强制开启或关闭。Array 模式按层渐进上传，局部更新会重传受影响的完整页面，因此更适合大量静态内容；频繁小范围更新通常应继续使用 single。两种模式都保持一个实例 Mesh 和主体 1 Draw Call。Array Store 与 GLSL3 Shader 只在实际选中时动态加载，不进入默认 Cards 消费产物。`renderer.metrics` 会报告实际模式、分辨率、层数、上传进度、mipmap、Worker/位图解码和预热数据。
 
 ## 包构建与体积基准
 
@@ -539,13 +542,13 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| 根入口真实消费者 gzip | ≤ 40 KB | 32.6 KB（33,362 bytes） |
-| Core-only 真实消费者 gzip | ≤ 16 KB | 11.6 KB（11,875 bytes） |
-| Cards-only 真实消费者 gzip | ≤ 12 KB | 9.7 KB（9,972 bytes） |
+| 根入口真实消费者 gzip | ≤ 40 KB | 36.2 KB（37,093 bytes） |
+| Core-only 真实消费者 gzip | ≤ 16 KB | 12.7 KB（13,048 bytes） |
+| Cards-only 真实消费者 gzip | ≤ 12 KB | 11.9 KB（12,227 bytes） |
 | 按需 card-template gzip | ≤ 12 KB | 6.0 KB（6,194 bytes） |
 | 按需 Points Renderer gzip | ≤ 12 KB | 2.8 KB（2,918 bytes） |
-| 按需开发诊断 gzip | ≤ 12 KB | 3.8 KB（3,892 bytes） |
-| npm tarball | ≤ 150 KB | 约 84.6 KB |
+| 按需开发诊断 gzip | ≤ 12 KB | 3.8 KB（3,923 bytes） |
+| npm tarball | ≤ 150 KB | 约 98.5 KB（100,875 bytes） |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 5.5 KB（5,598 bytes） |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。根入口、Core-only 与 Cards-only 的预算按真实 Vite/Terser 消费产物计算，并保持 Three.js external；各输出模块 gzip 相加只保留为诊断值，不作为用户下载体积门禁。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

@@ -287,7 +287,7 @@ try {
     import { vortex, type EmissionOptions } from '${packageName}/effects'
     import { BenchmarkSession, compareBenchmarkResults, evaluateBenchmarkRegression, parseBenchmarkResult, type BenchmarkRegressionThresholds, type BenchmarkResult } from '${packageName}/performance'
     import { defineCardTemplate, html, type CardTemplateStyle } from '${packageName}/card-template'
-    import { defineMotionRenderer, type MotionRenderer, type MotionRendererCapabilities, type MotionRendererDescriptor, type MotionRendererFactory, type MotionRendererFactoryContext, type MotionRendererHighlightCapability, type MotionRendererPatchCapability, type MotionRendererPickShape, type MotionRendererResourceRecoveryCapability, type MotionRendererStats, type MotionRendererStreamingEffectsCapability, type MotionRendererViewport, type MotionRendererViewportCapability, type MotionRendererVisualCapability, type MotionRendererVisualState } from '${packageName}/core'
+    import { defineMotionRenderer, type MotionRenderer, type MotionRendererCapabilities, type MotionRendererDescriptor, type MotionRendererFactory, type MotionRendererFactoryContext, type MotionRendererFrameCapability, type MotionRendererHighlightCapability, type MotionRendererPatchCapability, type MotionRendererPickShape, type MotionRendererResourceRecoveryCapability, type MotionRendererStats, type MotionRendererStreamingEffectsCapability, type MotionRendererViewport, type MotionRendererViewportCapability, type MotionRendererVisualCapability, type MotionRendererVisualState } from '${packageName}/core'
     import { cardsRenderer as cardsRendererFromSubpath } from '${packageName}/renderers/cards'
     import {
       pointsRenderer,
@@ -439,7 +439,8 @@ try {
     const configuredLayouts = [createLayout(layoutConfig), createLayoutFromSubpath(subpathConfig)]
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
-    void [items, stage, cardsRenderer, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, rendererGpuBytes, rendererMetrics, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions, rendererCapabilities, rendererVisualState, rendererPickShape, rendererDescriptor, rendererViewport, rendererStats, rendererFactory, pointStageOptions, layoutReport, rendererReport, debugVisualization]
+    declare const rendererFrame: MotionRendererFrameCapability
+    void [items, stage, cardsRenderer, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, rendererGpuBytes, rendererMetrics, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions, rendererCapabilities, rendererVisualState, rendererPickShape, rendererDescriptor, rendererViewport, rendererStats, rendererFactory, rendererFrame, pointStageOptions, layoutReport, rendererReport, debugVisualization]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
@@ -478,6 +479,10 @@ try {
   assert(
     cardsOnlyConsumer.gzipBytes <= cardsRendererGzipBudget,
     `Cards-only consumer JS gzip budget exceeded: ${cardsOnlyConsumer.gzipBytes} > ${cardsRendererGzipBudget}`,
+  )
+  assert(
+    !cardsOnlyConsumer.contents.includes('sampler2DArray'),
+    'Cards-only entry eagerly contains the optional array Atlas shader',
   )
 
   await writeFile(join(consumer, 'index.html'), '<div id="result"></div><script type="module" src="/tree.ts"></script>')
@@ -634,7 +639,11 @@ async function buildConsumerBundle(consumer, name, source) {
     `vite.size-${name}.config.mjs`,
   ], consumer)
   const contents = await readFile(join(consumer, outDir, 'bundle.js'))
-  return { bytes: contents.byteLength, gzipBytes: gzipSync(contents).byteLength }
+  return {
+    bytes: contents.byteLength,
+    gzipBytes: gzipSync(contents).byteLength,
+    contents: contents.toString(),
+  }
 }
 
 function run(command, args, cwd = root) {

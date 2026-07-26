@@ -1,4 +1,5 @@
 import { drawDefaultCell } from './DefaultCardPainter.js'
+import { createArrayAtlasData } from './ArrayAtlasStore.js'
 import type {
   DefaultCardWorkerRequest,
   DefaultCardWorkerResponse,
@@ -37,8 +38,37 @@ scope.onmessage = (event) => {
     const readbackStartedAt = now()
     const imageData = context.getImageData(0, 0, request.width, request.height)
     const readbackMs = now() - readbackStartedAt
-    const data = imageData.data.buffer
-    scope.postMessage({ data, cellRenderMs, readbackMs }, [data])
+    const arrayPackStartedAt = now()
+    const array = request.arrayMaxTextureLayers
+      ? createArrayAtlasData(imageData.data, request.items.length, {
+          sourceWidth: request.width,
+          sourceColumns: request.columns,
+          sourceStrideX: request.strideX,
+          sourceStrideY: request.strideY,
+          cellWidth: request.cellWidth,
+          cellHeight: request.cellHeight,
+          padding: request.padding,
+          maxTextureLayers: request.arrayMaxTextureLayers,
+        })
+      : null
+    const arrayPackMs = array ? now() - arrayPackStartedAt : 0
+    const data = array?.data.buffer ?? imageData.data.buffer
+    const rects = array?.rects.buffer as ArrayBuffer | undefined
+    const transfer = [data, rects].filter(
+      (value): value is ArrayBuffer => Boolean(value),
+    )
+    scope.postMessage({
+      data,
+      rects,
+      arrayWidth: array?.width,
+      arrayHeight: array?.height,
+      arrayDepth: array?.depth,
+      arrayPageColumns: array?.pageColumns,
+      arrayPageRows: array?.pageRows,
+      arrayPackMs,
+      cellRenderMs,
+      readbackMs,
+    }, transfer)
   } catch (error) {
     scope.postMessage({
       cellRenderMs: 0,

@@ -6,7 +6,7 @@ import type {
 } from './DefaultCardWorkerProtocol.js'
 
 export interface DefaultCardWorkerResult {
-  data: Uint8ClampedArray
+  data: Uint8Array | Uint8ClampedArray
   cellRenderMs: number
   readbackMs: number
   imageBitmapDecodeMs: number
@@ -14,6 +14,15 @@ export interface DefaultCardWorkerResult {
   imageLoadMs: number
   imageRequests: number
   imageFailures: number
+  array?: {
+    rects: Float32Array
+    width: number
+    height: number
+    depth: number
+    pageColumns: number
+    pageRows: number
+    packMs: number
+  }
 }
 
 export interface DefaultCardWorkerAttempt {

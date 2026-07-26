@@ -73,6 +73,59 @@ describe('default card atlas worker', () => {
     expect(response.data).toBeInstanceOf(ArrayBuffer)
     expect(transfer).toEqual([response.data])
   })
+
+  it('repacks array pages before transferring pixels to the main thread', async () => {
+    const context = createContext()
+    const postMessage = vi.fn()
+    class TestOffscreenCanvas {
+      constructor(
+        readonly width: number,
+        readonly height: number,
+      ) {}
+      getContext() { return context }
+    }
+    vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas)
+    vi.stubGlobal('postMessage', postMessage)
+    await import('./DefaultCardWorker.js')
+    const scope = globalThis as unknown as {
+      onmessage: (event: MessageEvent<DefaultCardWorkerRequest>) => void
+    }
+    const request: DefaultCardWorkerRequest = {
+      width: 20,
+      height: 16,
+      columns: 5,
+      cellWidth: 2,
+      cellHeight: 2,
+      padding: 1,
+      strideX: 4,
+      strideY: 4,
+      items: Array.from({ length: 17 }, (_value, index) => ({
+        id: String(index),
+        style: {
+          imageFit: 'cover',
+          imagePosition: { x: 0.5, y: 0.5 },
+          contentPadding: 0,
+        },
+      })),
+      images: [],
+      arrayMaxTextureLayers: 2,
+    }
+
+    scope.onmessage({ data: request } as MessageEvent<DefaultCardWorkerRequest>)
+
+    const [response, transfer] = postMessage.mock.calls[0] as [
+      DefaultCardWorkerResponse,
+      Transferable[],
+    ]
+    expect(response).toMatchObject({
+      arrayWidth: 12,
+      arrayHeight: 12,
+      arrayDepth: 2,
+      arrayPageColumns: 3,
+      arrayPageRows: 3,
+    })
+    expect(transfer).toEqual([response.data, response.rects])
+  })
 })
 
 function createContext() {

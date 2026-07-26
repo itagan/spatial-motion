@@ -2,12 +2,14 @@ import type {
   TextureAtlasPatch,
   TextureAtlasResult,
 } from '../textureAtlas.js'
+import { DataTexture } from 'three'
 
 export function applyAtlasPatch(
   atlas: TextureAtlasResult,
   patch: TextureAtlasPatch,
 ): number {
   const startedAt = now()
+  const texture = atlas.texture as DataTexture
   let uploadBytes = 0
   const rangesByRow = new Map<number, Array<{ start: number; end: number }>>()
   patch.cells
@@ -36,11 +38,11 @@ export function applyAtlasPatch(
       }
     })
   if (!atlas.initialized) {
-    atlas.texture.clearUpdateRanges()
+    texture.clearUpdateRanges()
     uploadBytes = atlas.data.byteLength
     patch.metrics.uploadRanges = 1
   } else {
-    atlas.texture.clearUpdateRanges()
+    texture.clearUpdateRanges()
     let uploadRanges = 0
     rangesByRow.forEach((ranges) => {
       let current = ranges[0]
@@ -49,19 +51,19 @@ export function applyAtlasPatch(
           current.end = Math.max(current.end, range.end)
           return
         }
-        atlas.texture.addUpdateRange(current.start, current.end - current.start)
+        texture.addUpdateRange(current.start, current.end - current.start)
         uploadBytes += current.end - current.start
         uploadRanges += 1
         current = range
       })
-      atlas.texture.addUpdateRange(current.start, current.end - current.start)
+      texture.addUpdateRange(current.start, current.end - current.start)
       uploadBytes += current.end - current.start
       uploadRanges += 1
     })
     patch.metrics.uploadRanges = uploadRanges
   }
   patch.metrics.uploadBytes = uploadBytes
-  atlas.texture.needsUpdate = true
+  texture.needsUpdate = true
   return now() - startedAt
 }
 

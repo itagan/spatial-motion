@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 
-import { InstancedBufferGeometry, Mesh, Scene, ShaderMaterial } from 'three'
+import {
+  DataArrayTexture,
+  GLSL3,
+  InstancedBufferGeometry,
+  Mesh,
+  Scene,
+  ShaderMaterial,
+} from 'three'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TextureAtlasPatch, TextureAtlasResult } from './textureAtlas'
 import { InstancedCardRenderer } from './InstancedCardRenderer'
@@ -41,9 +48,11 @@ function atlas(count: number) {
   return {
     result: {
       texture: texture as unknown as TextureAtlasResult['texture'],
+      mode: 'single' as const,
       rects: new Float32Array(count * 4),
       width,
       height,
+      depth: 1,
       data: new Uint8Array(width * height * 4),
       columns: Math.ceil(Math.sqrt(count || 1)),
       rows: Math.ceil(Math.sqrt(count || 1)),
@@ -310,6 +319,7 @@ describe('InstancedCardRenderer item loading', () => {
     await renderer.setItems([{ id: 'wide' }])
 
     expect(Object.keys(renderer.capabilities).sort()).toEqual([
+      'frame',
       'highlight',
       'patch',
       'resourceRecovery',
@@ -329,8 +339,103 @@ describe('InstancedCardRenderer item loading', () => {
     const ys = positions.filter((_value, index) => index % 3 === 1)
     expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(1)
     expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(0.25)
+    expect(mesh.material.glslVersion).toBeNull()
+    expect(mesh.material.fragmentShader).not.toContain('sampler2DArray')
+    expect(mesh.material.vertexShader).not.toContain('uLayers')
     expect(atlasMock.create.mock.calls[0][2]).toMatchObject({ aspectRatio: 4 })
     expect(scene.children).toHaveLength(1)
+    renderer.dispose()
+  })
+
+  it('uses one sampler2DArray material and stable layer attributes for array atlases', async () => {
+    const currentAtlas = atlas(17)
+    const arrayResult = currentAtlas.result as TextureAtlasResult
+    const texture = new DataArrayTexture(new Uint8Array(8 * 8 * 2 * 4), 8, 8, 2)
+    arrayResult.texture = texture
+    arrayResult.mode = 'array'
+    arrayResult.width = 8
+    arrayResult.height = 8
+    arrayResult.depth = 2
+    arrayResult.data = texture.image.data as Uint8Array<ArrayBuffer>
+    arrayResult.columns = 4
+    arrayResult.rows = 4
+    arrayResult.mipmaps = false
+    atlasMock.create.mockResolvedValueOnce(arrayResult)
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene, { atlasMode: 'array' })
+
+    await renderer.setItems(Array.from({ length: 17 }, (_value, index) => ({
+      id: String(index),
+    })))
+
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+    expect(mesh.material.glslVersion).toBe(GLSL3)
+    expect(mesh.material.fragmentShader).toContain('sampler2DArray')
+    expect(mesh.geometry.getAttribute('atlasLayer')).toBeUndefined()
+    expect(Array.from(mesh.geometry.getAttribute('atlasRect').array).slice(64, 68))
+      .toEqual(Array.from(arrayResult.rects.slice(64, 68)))
+    expect(renderer.getStats().metrics).toMatchObject({
+      atlasMode: 1,
+      atlasLayers: 2,
+      atlasMipmaps: 0,
+    })
+    renderer.dispose()
+  })
+
+  it('uploads array atlas layers in bounded Stage-frame batches', async () => {
+    const currentAtlas = atlas(32)
+    const arrayResult = currentAtlas.result as TextureAtlasResult
+    const texture = new DataArrayTexture(
+      new Uint8Array(256 * 256 * 20 * 4),
+      256,
+      256,
+      20,
+    )
+    arrayResult.texture = texture
+    arrayResult.mode = 'array'
+    arrayResult.width = 256
+    arrayResult.height = 256
+    arrayResult.depth = 20
+    arrayResult.data = texture.image.data as Uint8Array<ArrayBuffer>
+    arrayResult.columns = 4
+    arrayResult.rows = 4
+    arrayResult.mipmaps = false
+    atlasMock.create.mockResolvedValueOnce(arrayResult)
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene, { atlasMode: 'array' })
+    await renderer.setItems(Array.from({ length: 32 }, (_value, index) => ({
+      id: String(index),
+    })))
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+
+    expect(texture.layerUpdates).toEqual(new Set(
+      Array.from({ length: 12 }, (_value, index) => index),
+    ))
+    renderer.capabilities.frame?.update(1 / 60)
+    expect(renderer.getStats().metrics).toMatchObject({
+      uploadedLayers: 12,
+      pendingLayers: 8,
+      layerUploadFrames: 0,
+    })
+    texture.layerUpdates.clear()
+    renderer.capabilities.frame?.update(1 / 60)
+
+    expect(texture.layerUpdates).toEqual(new Set([12, 13, 14]))
+    expect(mesh.material.uniforms.uLayers.value).toBe(15)
+    expect(renderer.getStats().metrics).toMatchObject({
+      uploadedLayers: 15,
+      pendingLayers: 5,
+      layerUploadFrames: 1,
+    })
+    renderer.capabilities.frame?.update(1 / 60)
+    renderer.capabilities.frame?.update(1 / 60)
+    expect(mesh.material.uniforms.uLayers.value).toBe(20)
+    texture.layerUpdates.clear()
+    renderer.capabilities.resourceRecovery?.refreshResources()
+    expect(texture.layerUpdates).toEqual(new Set(
+      Array.from({ length: 12 }, (_value, index) => index),
+    ))
+    expect(mesh.material.uniforms.uLayers.value).toBe(12)
     renderer.dispose()
   })
 

@@ -64,6 +64,10 @@ export interface MotionRendererStreamingEffectsCapability {
   setTime(elapsedSeconds: number): void
 }
 
+export interface MotionRendererFrameCapability {
+  update(deltaSeconds: number): void
+}
+
 export interface MotionRendererCapabilities<TMeta = unknown> {
   readonly patch?: MotionRendererPatchCapability<TMeta>
   readonly visual?: MotionRendererVisualCapability
@@ -71,6 +75,7 @@ export interface MotionRendererCapabilities<TMeta = unknown> {
   readonly viewport?: MotionRendererViewportCapability
   readonly resourceRecovery?: MotionRendererResourceRecoveryCapability
   readonly streamingEffects?: MotionRendererStreamingEffectsCapability
+  readonly frame?: MotionRendererFrameCapability
 }
 
 export interface MotionRendererStats {
@@ -95,6 +100,7 @@ export interface MotionRenderer<TMeta = unknown> {
 export interface MotionRendererFactoryContext {
   readonly root: Group
   readonly maxTextureSize: number
+  readonly maxTextureLayers: number
   readonly maxAnisotropy: number
   readonly signal: AbortSignal
   readonly prepareTexture: (texture: Texture) => number

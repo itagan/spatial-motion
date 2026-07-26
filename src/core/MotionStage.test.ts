@@ -1620,6 +1620,26 @@ describe('MotionStage', () => {
     stage.destroy()
   })
 
+  it('advances an optional renderer frame capability from the shared Stage RAF', () => {
+    let frame: FrameRequestCallback | null = null
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
+    const update = vi.fn()
+    const renderer = mockMotionRenderer({
+      capabilities: { frame: { update } },
+    })
+    const { stage } = createCustomStage(() => renderer)
+
+    const renderFrame = frame as FrameRequestCallback | null
+    renderFrame!(1000)
+
+    expect(update).toHaveBeenCalledOnce()
+    expect(update.mock.calls[0][0]).toBeGreaterThanOrEqual(0)
+    stage.destroy()
+  })
+
   it('supports a minimal LineSegments renderer and restores state after full-update fallback', async () => {
     const fixture = lineRendererFixture()
     const { stage } = createCustomStage(fixture.factory)
@@ -1736,6 +1756,7 @@ describe('MotionStage', () => {
     ['viewport', {}, 'resize'],
     ['resourceRecovery', {}, 'refreshResources'],
     ['streamingEffects', { enable: vi.fn(), disable: vi.fn() }, 'setTime'],
+    ['frame', {}, 'update'],
   ] as const)('rejects an incomplete %s renderer capability', (name, capability, missing) => {
     const renderer = mockMotionRenderer({
       capabilities: { [name]: capability },

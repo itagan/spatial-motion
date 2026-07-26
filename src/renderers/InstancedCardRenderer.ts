@@ -38,6 +38,9 @@ export interface CardRendererOptions<TMeta = unknown> extends TextureAtlasOption
   texturePrewarm?: boolean
 }
 
+const INITIAL_ARRAY_UPLOAD_BYTES = 3 * 1024 * 1024
+const FRAME_ARRAY_UPLOAD_BYTES = 768 * 1024
+
 export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
   readonly capabilities: MotionRendererCapabilities<TMeta>
   readonly descriptor: MotionRendererDescriptor
@@ -50,6 +53,9 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private fingerprintFullScans = 0
   private fingerprintPatchScans = 0
   private fingerprintItemsScanned = 0
+  private nextLayer = 0
+  private skipUploadFrames = 0
+  private layerUploadFrames = 0
   private textureBytes = 0
   private atlas: TextureAtlasResult | null = null
   private atlasBuilds = 0
@@ -105,6 +111,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       highlight: { setHighlightIndex: (index) => this.setHoverIndex(index) },
       viewport: { resize: (viewport) => this.resize(viewport) },
       resourceRecovery: { refreshResources: () => this.refreshResources() },
+      frame: { update: () => this.advanceAtlasUploads() },
       streamingEffects: {
         enable: (data) => this.enableEffect(data),
         disable: () => this.disableEffect(),
@@ -145,16 +152,38 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       atlas.texture.dispose()
       return false
     }
-    this.prewarmAtlas(atlas)
     const nextCapacity = resolveBufferCapacity(this.instanceCapacity, items.length)
-    if (this.mesh && this.material && nextCapacity === this.instanceCapacity) {
+    if (
+      this.mesh
+      && this.material
+      && nextCapacity === this.instanceCapacity
+      && atlas.mode === this.atlas?.mode
+    ) {
       this.replaceAtlas(atlas, items.length)
+      this.prewarmAtlas(atlas)
       this.itemFingerprints = fingerprints
       this.recordAtlasBuild(atlas)
       this.attributeReuses += 1
       return true
     }
+    let configureArrayMaterial: ((material: ShaderMaterial) => void) | undefined
+    try {
+      if (atlas.mode === 'array') {
+        configureArrayMaterial = (await import('./ArrayCardShader.js')).configureArrayCardMaterial
+      }
+    } catch (error) {
+      atlas.texture.dispose()
+      if (generation !== this.generation) return false
+      throw error
+    }
+    if (generation !== this.generation) {
+      this.atlasDiscardedBuilds += 1
+      atlas.texture.dispose()
+      return false
+    }
     this.disposeCurrent()
+    this.prepareAtlasUploads(atlas)
+    this.prewarmAtlas(atlas)
     const aspectRatio = resolveAspectRatio(this.atlasOptions.aspectRatio)
     const plane = new PlaneGeometry(
       aspectRatio >= 1 ? 1 : aspectRatio,
@@ -179,6 +208,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     geometry.setAttribute('fromOpacity', dynamicAttribute(new Float32Array(nextCapacity), 1))
     geometry.setAttribute('toOpacity', dynamicAttribute(new Float32Array(nextCapacity), 1))
     copyAttribute(geometry.getAttribute('atlasRect') as InstancedBufferAttribute, atlas.rects)
+    const arrayAtlas = atlas.mode === 'array'
     this.material = new ShaderMaterial({
       uniforms: {
         atlas: { value: atlas.texture },
@@ -196,6 +226,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
         effectParamsC: { value: new Vector4() },
         visibleRatio: { value: 1 },
         hoverIndex: { value: -1 },
+        uLayers: { value: arrayAtlas ? this.nextLayer : 1_000_000 },
       },
       vertexShader: `
         attribute vec4 atlasRect;
@@ -386,7 +417,9 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       `,
       transparent: true,
       side: FrontSide,
+      glslVersion: null,
     })
+    configureArrayMaterial?.(this.material)
     this.mesh = new Mesh(geometry, this.material)
     this.instanceCapacity = nextCapacity
     this.itemCount = items.length
@@ -580,7 +613,9 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   refreshResources(): void {
     if (this.atlas) {
       this.atlas.initialized = false
-      this.atlas.texture.clearUpdateRanges()
+      this.prepareAtlasUploads(this.atlas)
+      if (this.material) this.material.uniforms.uLayers.value =
+        this.atlas.mode === 'array' ? this.nextLayer : 1_000_000
       this.atlas.texture.needsUpdate = true
       this.estimatedTextureUploadBytes += this.atlas.data.byteLength
       this.prewarmAtlas(this.atlas)
@@ -612,6 +647,13 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
         atlasTexturePrewarmMs: this.atlasTexturePrewarmMs,
         atlasTexturePrewarmFailures: this.atlasTexturePrewarmFailures,
         atlasTexturePrewarmSkips: this.atlasTexturePrewarmSkips,
+        atlasMode: this.atlas?.mode === 'array' ? 1 : 0,
+        atlasLayers: this.atlas?.depth ?? 0,
+        uploadedLayers: this.atlas?.mode === 'array' ? this.nextLayer : 0,
+        pendingLayers: this.atlas?.mode === 'array'
+          ? Math.max(0, this.atlas.depth - this.nextLayer)
+          : 0,
+        layerUploadFrames: this.layerUploadFrames,
         fingerprintFullScans: this.fingerprintFullScans,
         fingerprintPatchScans: this.fingerprintPatchScans,
         fingerprintItemsScanned: this.fingerprintItemsScanned,
@@ -643,6 +685,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.atlas?.texture.dispose()
     this.atlas = atlas
     this.material.uniforms.atlas.value = atlas.texture
+    this.prepareAtlasUploads(atlas)
+    this.material.uniforms.uLayers.value = atlas.mode === 'array'
+      ? this.nextLayer
+      : 1_000_000
     copyAttribute(
       this.mesh.geometry.getAttribute('atlasRect') as InstancedBufferAttribute,
       atlas.rects,
@@ -653,7 +699,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
 
   private recordAtlasBuild(atlas: TextureAtlasResult): void {
     this.textureBytes = Math.ceil(
-      atlas.width * atlas.height * 4 * (atlas.mipmaps ? 4 / 3 : 1),
+      atlas.width * atlas.height * atlas.depth * 4 * (atlas.mipmaps ? 4 / 3 : 1),
     )
     this.atlasBuilds += 1
     this.atlasCellsUpdated += atlas.metrics.cells
@@ -691,6 +737,52 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     } catch {
       this.atlasTexturePrewarmFailures += 1
     }
+  }
+
+  private prepareAtlasUploads(atlas: TextureAtlasResult): void {
+    this.nextLayer = 0
+    this.skipUploadFrames = 0
+    if (atlas.mode !== 'array' || !('layerUpdates' in atlas.texture)) return
+    atlas.texture.layerUpdates.clear()
+    const initialLayers = Math.min(
+      atlas.depth,
+      this.layersPerUpload(atlas, INITIAL_ARRAY_UPLOAD_BYTES),
+    )
+    for (let layer = 0; layer < initialLayers; layer += 1) {
+      atlas.texture.addLayerUpdate(layer)
+    }
+    this.nextLayer = initialLayers
+    this.skipUploadFrames = 1
+  }
+
+  private advanceAtlasUploads(): void {
+    const atlas = this.atlas
+    if (
+      !atlas
+      || atlas.mode !== 'array'
+      || !this.material
+      || !('layerUpdates' in atlas.texture)
+      || this.nextLayer >= atlas.depth
+    ) return
+    if (this.skipUploadFrames > 0) {
+      this.skipUploadFrames -= 1
+      return
+    }
+    const end = Math.min(
+      atlas.depth,
+      this.nextLayer + this.layersPerUpload(atlas, FRAME_ARRAY_UPLOAD_BYTES),
+    )
+    for (let layer = this.nextLayer; layer < end; layer += 1) {
+      atlas.texture.addLayerUpdate(layer)
+    }
+    this.nextLayer = end
+    this.material.uniforms.uLayers.value = end
+    atlas.texture.needsUpdate = true
+    this.layerUploadFrames += 1
+  }
+
+  private layersPerUpload(atlas: TextureAtlasResult, byteBudget: number): number {
+    return Math.max(1, Math.floor(byteBudget / (atlas.width * atlas.height * 4)))
   }
 
   private beginAtlasOperation(): {

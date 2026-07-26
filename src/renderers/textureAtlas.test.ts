@@ -96,7 +96,8 @@ describe('texture atlas card rendering', () => {
     expect(atlas).toMatchObject({ width: 64, height: 64, cellSize: 56, padding: 4 })
     expect(atlas.texture.generateMipmaps).toBe(true)
     expect(atlas.texture.anisotropy).toBe(4)
-    expect(atlas.texture.isDataTexture).toBe(true)
+    expect(atlas.mode).toBe('single')
+    expect('isDataTexture' in atlas.texture && atlas.texture.isDataTexture).toBe(true)
     expect(atlas.data).toHaveLength(64 * 64 * 4)
     expect(atlas.metrics.uploadBytes).toBe(64 * 64 * 4)
     atlas.texture.dispose()
@@ -109,6 +110,75 @@ describe('texture atlas card rendering', () => {
     expect(atlas.texture.generateMipmaps).toBe(false)
     expect(atlas.texture.minFilter).toBe(LinearFilter)
     atlas.texture.dispose()
+  })
+
+  it('packs an experimental array atlas within the available layer limit', async () => {
+    const items = Array.from({ length: 17 }, (_value, index) => ({ id: String(index) }))
+    const atlas = await createTextureAtlas(items, 32, {
+      atlasMode: 'array',
+      maxTextureLayers: 2,
+    })
+
+    expect(atlas).toMatchObject({
+      mode: 'array',
+      depth: 2,
+      columns: 3,
+      rows: 3,
+      mipmaps: false,
+    })
+    expect('isDataArrayTexture' in atlas.texture && atlas.texture.isDataArrayTexture).toBe(true)
+    expect(Math.floor(atlas.rects[8 * 4])).toBe(0)
+    expect(Math.floor(atlas.rects[9 * 4])).toBe(1)
+    expect(atlas.metrics.arrayPackMs).toBeGreaterThanOrEqual(0)
+    atlas.texture.dispose()
+
+    const singleLayer = await createTextureAtlas(items, 32, {
+      atlasMode: 'array',
+      maxTextureLayers: 1,
+    })
+    expect(singleLayer).toMatchObject({ mode: 'array', depth: 1, mipmaps: false })
+    singleLayer.texture.dispose()
+
+    const capped = await createTextureAtlas(
+      Array.from({ length: 257 }, (_value, index) => ({ id: String(index) })),
+      8,
+      { atlasMode: 'array', maxTextureLayers: 256 },
+    )
+    expect(capped).toMatchObject({
+      mode: 'array',
+      depth: 129,
+      columns: 1,
+      rows: 2,
+    })
+    capped.texture.dispose()
+  })
+
+  it('selects an array atlas automatically only for large non-mipmapped uploads', async () => {
+    const smallItems = Array.from({ length: 500 }, (_value, index) => ({ id: String(index) }))
+    const small = await createTextureAtlas(smallItems, 64, {
+      atlasMode: 'auto',
+      mipmaps: false,
+      maxTextureLayers: 256,
+    })
+    expect(small.mode).toBe('single')
+    small.texture.dispose()
+
+    const largeItems = Array.from({ length: 1000 }, (_value, index) => ({ id: String(index) }))
+    const mipmapped = await createTextureAtlas(largeItems, 64, {
+      atlasMode: 'auto',
+      mipmaps: true,
+      maxTextureLayers: 256,
+    })
+    expect(mipmapped.mode).toBe('single')
+    mipmapped.texture.dispose()
+
+    const uploadSensitive = await createTextureAtlas(largeItems, 64, {
+      atlasMode: 'auto',
+      mipmaps: false,
+      maxTextureLayers: 256,
+    })
+    expect(uploadSensitive.mode).toBe('array')
+    uploadSensitive.texture.dispose()
   })
 
   it('reuses the atlas canvas pixel buffer without a second full-size copy', async () => {

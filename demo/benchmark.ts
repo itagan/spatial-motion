@@ -59,12 +59,17 @@ const benchmarkParameters = new URLSearchParams(window.location.search)
 const requestedResolution = resolveBenchmarkResolution(benchmarkParameters.get('resolution'))
 const requestedMipmaps = benchmarkParameters.get('mipmaps') !== '0'
 const requestedTexturePrewarm = resolveTexturePrewarm(benchmarkParameters.get('prewarm'))
+const atlasParameter = benchmarkParameters.get('atlas')
+const requestedAtlasMode = atlasParameter === 'array' || atlasParameter === 'auto'
+  ? atlasParameter
+  : 'single'
 const stage = new MotionStage({
   container,
   renderer: cardsRenderer({
     resolution: requestedResolution,
     mipmaps: requestedMipmaps,
     texturePrewarm: requestedTexturePrewarm,
+    atlasMode: requestedAtlasMode,
   }),
   quality: 'auto',
   adaptivePerformance: true,
@@ -411,6 +416,12 @@ function renderResult(result: BenchmarkResult): void {
       mipmaps: Boolean(result.samples.at(-1)?.stats.renderer.metrics.atlasMipmaps),
       requestedResolution,
       requestedTexturePrewarm: requestedTexturePrewarm ?? 'auto',
+      requestedAtlasMode,
+      actualAtlasMode: result.samples.at(-1)?.stats.renderer.metrics.atlasMode ? 'array' : 'single',
+      atlasLayers: result.samples.at(-1)?.stats.renderer.metrics.atlasLayers ?? 1,
+      uploadedAtlasLayers: result.samples.at(-1)?.stats.renderer.metrics.uploadedLayers ?? 0,
+      pendingAtlasLayers: result.samples.at(-1)?.stats.renderer.metrics.pendingLayers ?? 0,
+      atlasLayerUploadFrames: result.samples.at(-1)?.stats.renderer.metrics.layerUploadFrames ?? 0,
       firstRenderSubmitMs: Number(coldStartRenderSubmitMs.toFixed(3)),
     },
     operations: stressOperations,
