@@ -30,6 +30,7 @@ function createRenderer(options = {}) {
   const renderer = pointsRenderer(options)({
     root,
     maxTextureSize: 4096,
+    maxTextureLayers: 256,
     maxAnisotropy: 4,
     signal: controller.signal,
     prepareTexture: () => 0,

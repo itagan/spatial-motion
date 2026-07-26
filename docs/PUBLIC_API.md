@@ -19,14 +19,15 @@ Spatial Motion 尚未发布。本文件记录准备冻结的首版边界；发�
 - `MotionStage<TMeta>` 强制接收 `renderer: MotionRendererFactory<TMeta>`，Core 不隐式创建 Cards。
 - 构造参数提供 `items` 时通过 `stage.ready` 等待初始 Renderer 数据准备；后续数据使用 `setItems()` / `updateItem(s)`。
 - `MotionItem<TMeta>`、`Transform`、Renderer/Layout 输入及更新索引使用只读契约；Stage、Cards/Points Resolver 和 item 回调共享同一泛型 meta。
-- Factory 只获得隔离内容 `Group`、GPU 限制和 destroy `AbortSignal`，不能接管 Scene、Camera、WebGLRenderer 或 RAF。
-- 核心协议负责数据、Transform、GPU 过渡进度、质量可见比例、统计和销毁；patch、visual、highlight、viewport、resource recovery 与 streaming effects 是可选能力。
+- Factory 只获得隔离内容 `Group`、GPU 限制（含 `maxTextureSize`、`maxTextureLayers`）、受限纹理准备函数和 destroy `AbortSignal`，不能接管 Scene、Camera、WebGLRenderer 或 RAF。
+- 核心协议负责数据、Transform、GPU 过渡进度、质量可见比例、统计和销毁；patch、visual、highlight、viewport、resource recovery、streaming effects 与逐帧 `frame.update()` 是可选能力。
 - `descriptor.itemBounds` 支持 layout/camera quad、camera disc 或 `null`；`null` 关闭指针拾取但不影响布局与程序化 focus。
 - `StagePerformanceStats.render` 报告场景 Draw Call/三角形；`renderer` 报告实例数、提交数、GPU 字节和有限 metrics。
 
 ## Cards 与模板
 
 - `cardsRenderer()` 统一接收 `style`、`resolveStyle`、`draw`、`content`、`aspectRatio` 和 Atlas 图片资源选项；`resolution` 支持显式像素值或 `'auto'`，`mipmaps` 可关闭，`texturePrewarm` 可覆盖默认的小图集自适应预热策略。
+- `atlasMode` 支持 `'single' | 'array' | 'auto'`，默认 `single`。`array` 使用无 mipmap 的 Texture2DArray 自适应分页与渐进上传；`auto` 仅在 `mipmaps: false` 且完整图集像素不小于 16 MiB 时选择 array。
 - `content` 与 `draw` 互斥；卡片比例限制为 `0.25–4`，最长边归一为一个世界单位。
 - `defineCardTemplate<TMeta>()` 返回 `CardContentRenderer<TMeta>`；模板只生成 Canvas 绘制树，不创建 DOM 或执行脚本。
 - 产品、人物和指标卡是 Vanilla 源码配方，不是官方预设或单独公共入口。

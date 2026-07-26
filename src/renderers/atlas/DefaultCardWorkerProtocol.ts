@@ -18,10 +18,18 @@ export interface DefaultCardWorkerRequest {
   strideY: number
   items: DefaultCardWorkerItem[]
   images: ImageBitmap[]
+  arrayMaxTextureLayers?: number
 }
 
 export interface DefaultCardWorkerResponse {
   data?: ArrayBuffer
+  rects?: ArrayBuffer
+  arrayWidth?: number
+  arrayHeight?: number
+  arrayDepth?: number
+  arrayPageColumns?: number
+  arrayPageRows?: number
+  arrayPackMs?: number
   cellRenderMs: number
   readbackMs: number
   error?: string

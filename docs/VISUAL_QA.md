@@ -72,6 +72,9 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 - [ ] 模板模式 500/1000/2000 输入保持主体 1 Draw Call，局部数据更新只增加对应 Atlas patch，模板资源不会随更新持续增长。
 - [ ] 同容量档快速布局切换时 `geometryBuilds` 不增长，`attributeReuses` 持续增加；跨容量档只保留一个活动 Geometry/Material。
 - [ ] 相邻卡片 patch 的 `atlasUploadRanges` 少于逐卡逐行范围，离散 patch 不上传无关大块。
+- [ ] `atlasMode=single`、`array` 与 `auto` 画面一致，array 渐进上传期间未完成层透明且不显示垃圾像素。
+- [ ] `auto + mipmaps:true` 使用 single；`auto + mipmaps:false` 只在图集不小于 16 MiB 时使用 array。
+- [ ] Array context restore 从首层恢复，上传过程中保持主体 1 Draw Call，完成后 `pendingLayers` 归零。
 
 ## 开发诊断
 
@@ -143,3 +146,5 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 2026-07-26 已完成图片 Atlas Worker 与纹理首传对照：默认头像 Cards 的 500/1000/2000 项均把去重图片转换为 `ImageBitmap` 并在 Worker 完成整图绘制/readback，主体保持 1 Draw Call。2000/high/cold-start 使用自适应预热时为 60.01 FPS、P95 17.45ms、P99 17.60ms、0 个 33ms 长帧；位图解码 2.6ms、Worker 绘制/readback 3.9/27.4ms，控制台无 warning/error。强制预热大图集的对照出现一次 33ms 长帧，默认策略因此跳过超过 16 MiB 的像素缓冲。
 
 2026-07-26 已完成 mipmap 与局部指纹对照：2000/high/cold-start 关闭 mipmap 后纹理内存降至 24.2MB，但首次提交仍为 30.9ms，未改变首传瓶颈，因此默认继续开启。逐项内容指纹下，2000 项单卡 patch 只解析一个变化索引；3 秒连续更新完成 17 次 patch，保持 60 FPS、P95 17.50ms、P99 17.65ms、0 个 33ms 长帧和 1 Draw Call，控制台无 error。
+
+2026-07-26 已完成 Texture2DArray 对照：2000/high 的显式 array 与 `auto + mipmaps:false` 均使用 250 层自适应页面，渐进上传期间画面稳定，完成后 2000 项全部显示；首次 WebGL 提交约 4.3ms，P95 18.4–18.6ms、0 个 33ms 长帧和主体 1 Draw Call。`auto + mipmaps:true` 与 500 项无 mipmap小图集均保持 single。17 次 array patch 估算上传约 1.71 MiB，无资源或 Draw Call 增长，控制台无 warning/error。

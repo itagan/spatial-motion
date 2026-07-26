@@ -22,12 +22,13 @@ Spatial Motion 的 `MotionStage` 面向支持 WebGL2、ES2022、Canvas 2D、Resi
 - 自定义绘制回调接收 Canvas 2D 上下文，不接收 HTML；异步回调应自行处理业务请求的超时和取消。
 - 图集默认使用 64px 单元，内置默认卡片超过 1024 项时自动使用 48px，并继续受设备最大纹理尺寸约束；它适合大量缩略卡片，不是高清近景图片管线。
 - 图片 Worker 路径依赖 `Worker`、`OffscreenCanvas` 和 `createImageBitmap`；缺少能力、CORS/解码失败或任务中止时回退主线程，不影响正确性。
+- Cards 默认使用单图集；可选 Texture2DArray 模式依赖 WebGL2 的数组纹理能力，关闭 mipmap，并受设备 `MAX_ARRAY_TEXTURE_LAYERS` 限制。`auto` 在条件不满足时确定性回退 single。
 
 ## 已知限制
 
 - 不提供 DOM/CSS3D 卡片、HTML 模板或 Vue/React 组件挂载；内建可访问性限于 Canvas region、键盘导航和焦点事件，不为每张卡片创建独立 DOM 语义。
 - WebGL context loss 会暂停 Stage，context restored 后重新上传图集并恢复；若浏览器无法恢复上下文，应用仍应提供重新创建 Stage 或静态回退入口。
-- 一个 Stage 使用单张纹理图集，没有跨图集分页；图集会自动降低单元分辨率以遵守设备最大纹理尺寸，因此极端实例量下清晰度会下降。
+- Single 模式使用一张纹理图集并自动降低单元分辨率以遵守设备最大纹理尺寸；Array 模式可分页到最多 256 层，但局部更新以完整页面为上传单位，因此不适合高频、稀疏的小范围内容 patch。
 - FPS 与纹理内存统计用于相对基准，不等同于浏览器完整 GPU/进程内存。
 - 单 Draw Call 指主体实例卡片 Mesh；浏览器、调试工具或应用加入的其他场景对象不包含在该保证中。
 - `pointsRenderer()` 的主体同样保持一个 `THREE.Points` Draw Call；自定义 `MotionRenderer` 是否保持该特性由实现者负责。

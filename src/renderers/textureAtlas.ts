@@ -1,4 +1,10 @@
-import { DataTexture, LinearFilter, LinearMipmapLinearFilter, SRGBColorSpace } from 'three'
+import {
+  DataArrayTexture,
+  DataTexture,
+  LinearFilter,
+  LinearMipmapLinearFilter,
+  SRGBColorSpace,
+} from 'three'
 import type {
   CardContentRenderer,
   CardStyle,
@@ -14,6 +20,7 @@ import {
   rasterizeCards,
 } from './atlas/CardRasterizer.js'
 import { renderDefaultAtlasInWorker } from './atlas/DefaultCardWorkerClient.js'
+import type { DefaultCardWorkerResult } from './atlas/DefaultCardWorkerClient.js'
 import {
   applyAtlasPatch,
   drawPatchToCanvas,
@@ -35,14 +42,18 @@ export interface TextureAtlasOptions<TMeta = unknown> {
   imageCacheSize?: number
   imageCache?: TextureAtlasImageCache
   mipmaps?: boolean
+  atlasMode?: 'single' | 'array' | 'auto'
+  maxTextureLayers?: number
   signal?: AbortSignal
 }
 
 export interface TextureAtlasResult {
-  texture: DataTexture
+  texture: DataTexture | DataArrayTexture
+  mode: 'single' | 'array'
   rects: Float32Array
   width: number
   height: number
+  depth: number
   data: Uint8Array | Uint8ClampedArray
   columns: number
   rows: number
@@ -78,7 +89,13 @@ export interface TextureAtlasMetrics {
   uploadRanges?: number
   workerRenders?: number
   imageBitmapDecodeMs?: number
+  arrayPackMs?: number
 }
+
+const arrayAtlasPatchers = new WeakMap<
+  TextureAtlasResult,
+  (atlas: TextureAtlasResult, patch: TextureAtlasPatch) => number
+>()
 
 export async function createTextureAtlas<TMeta = unknown>(
   items: readonly MotionItem<TMeta>[],
@@ -104,6 +121,12 @@ export async function createTextureAtlas<TMeta = unknown>(
   } = metrics
   const width = columns * strideX
   const height = rows * strideY
+  const useArrayAtlas = options.atlasMode === 'array'
+    || (
+      options.atlasMode === 'auto'
+      && options.mipmaps === false
+      && width * height * 4 >= 16 * 1024 * 1024
+    )
 
   const rects = new Float32Array(items.length * 4)
   items.forEach((_item, index) => {
@@ -129,6 +152,9 @@ export async function createTextureAtlas<TMeta = unknown>(
     padding,
     strideX,
     strideY,
+    arrayMaxTextureLayers: useArrayAtlas
+      ? options.maxTextureLayers ?? 256
+      : undefined,
   }, options)
   const workerResult = workerAttempt.result
   if (workerResult) {
@@ -152,7 +178,10 @@ export async function createTextureAtlas<TMeta = unknown>(
         uploadRanges: 1,
         workerRenders: 1,
         imageBitmapDecodeMs: workerResult.imageBitmapDecodeMs,
+        arrayPackMs: workerResult.array?.packMs ?? 0,
       },
+      workerResult.array,
+      useArrayAtlas,
     )
   }
 
@@ -183,16 +212,18 @@ export async function createTextureAtlas<TMeta = unknown>(
     workerRenders: 0,
     imageBitmapDecodeMs: 0,
   }
-  return createAtlasResult(data, rects, metrics, options, patch.metrics)
+  return createAtlasResult(data, rects, metrics, options, patch.metrics, undefined, useArrayAtlas)
 }
 
-function createAtlasResult<TMeta>(
+async function createAtlasResult<TMeta>(
   data: Uint8Array | Uint8ClampedArray,
   rects: Float32Array,
   dimensions: ReturnType<typeof resolveAtlasMetrics>,
   options: TextureAtlasOptions<TMeta>,
   atlasMetrics: TextureAtlasMetrics,
-): TextureAtlasResult {
+  prepackedArray?: DefaultCardWorkerResult['array'],
+  useArrayAtlas = false,
+): Promise<TextureAtlasResult> {
   const {
     columns,
     rows,
@@ -206,6 +237,70 @@ function createAtlasResult<TMeta>(
   } = dimensions
   const width = columns * strideX
   const height = rows * strideY
+  if (useArrayAtlas) {
+    const { applyArrayAtlasPatch, createArrayAtlasData } = await import('./atlas/ArrayAtlasStore.js')
+    const arrayStartedAt = now()
+    const array = prepackedArray
+      ? {
+          data: data as Uint8Array<ArrayBuffer>,
+          ...prepackedArray,
+        }
+      : createArrayAtlasData(data, rects.length / 4, {
+          sourceWidth: width,
+          sourceColumns: columns,
+          sourceStrideX: strideX,
+          sourceStrideY: strideY,
+          cellWidth,
+          cellHeight,
+          padding,
+          maxTextureLayers: options.maxTextureLayers,
+        })
+    if (array) {
+      const texture = new DataArrayTexture(
+        array.data,
+        array.width,
+        array.height,
+        array.depth,
+      )
+      texture.colorSpace = SRGBColorSpace
+      texture.minFilter = LinearFilter
+      texture.magFilter = LinearFilter
+      texture.generateMipmaps = false
+      texture.flipY = false
+      texture.anisotropy = Math.max(1, Math.floor(options.anisotropy ?? 1))
+      texture.needsUpdate = true
+      const atlas: TextureAtlasResult = {
+        texture,
+        mode: 'array',
+        rects: array.rects,
+        width: array.width,
+        height: array.height,
+        depth: array.depth,
+        data: array.data,
+        columns: array.pageColumns,
+        rows: array.pageRows,
+        cellSize,
+        cellWidth,
+        cellHeight,
+        padding,
+        stride,
+        strideX,
+        strideY,
+        mipmaps: false,
+        initialized: false,
+        metrics: {
+          ...atlasMetrics,
+          uploadBytes: array.data.byteLength,
+          arrayPackMs: prepackedArray?.packMs ?? now() - arrayStartedAt,
+        },
+      }
+      texture.onUpdate = () => {
+        atlas.initialized = true
+      }
+      arrayAtlasPatchers.set(atlas, applyArrayAtlasPatch)
+      return atlas
+    }
+  }
   const texture = new DataTexture(data, width, height)
   const mipmaps = options.mipmaps !== false
   texture.colorSpace = SRGBColorSpace
@@ -217,9 +312,11 @@ function createAtlasResult<TMeta>(
   texture.needsUpdate = true
   const atlas: TextureAtlasResult = {
     texture,
+    mode: 'single',
     rects,
     width,
     height,
+    depth: 1,
     data,
     columns,
     rows,
@@ -250,7 +347,10 @@ export async function createTextureAtlasPatch<TMeta = unknown>(
 }
 
 export function applyTextureAtlasPatch(atlas: TextureAtlasResult, patch: TextureAtlasPatch): number {
-  return applyAtlasPatch(atlas, patch)
+  if (atlas.mode !== 'array') return applyAtlasPatch(atlas, patch)
+  const patchArrayAtlas = arrayAtlasPatchers.get(atlas)
+  if (!patchArrayAtlas) throw new Error()
+  return patchArrayAtlas(atlas, patch)
 }
 
 

@@ -100,7 +100,7 @@
 - [x] 高频 pointermove 合并到 Stage RAF，并增加 interaction-stress 浏览器基准。
 - [x] 包体积改用真实 root/Core/Cards 消费者门禁，保留分模块聚合诊断。
 - [x] Atlas 冷启动增加分阶段指标，默认绘制移除逐卡临时 Canvas，并移除整图像素缓冲二次复制。
-- [ ] 评估默认 Atlas 的离主线程绘制/readback 与渐进式纹理首传，在不增加 Draw Call 或破坏局部 patch 的前提下消除大型图集冷启动峰值。
+- [x] 完成默认 Atlas 的离主线程绘制/readback，以及可选 Texture2DArray 分页与渐进式纹理首传评估；默认保留 single，保守 auto 策略只在无 mipmap 的大型图集启用 array。
 - [ ] 收集自定义 Renderer/Layout 案例，完成发布候选 API freeze。
 
 ### CSS3D 可选渲染器

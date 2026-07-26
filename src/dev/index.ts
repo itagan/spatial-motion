@@ -62,6 +62,7 @@ export interface MotionRendererValidationOptions<TMeta = unknown> {
   readonly transforms?: readonly Transform[]
   readonly cycles?: number
   readonly maxTextureSize?: number
+  readonly maxTextureLayers?: number
   readonly maxAnisotropy?: number
 }
 
@@ -220,6 +221,7 @@ export async function validateMotionRenderer<TMeta = unknown>(
     renderer = factory({
       root,
       maxTextureSize: clampInteger(options.maxTextureSize, 32, 32768, 4096),
+      maxTextureLayers: clampInteger(options.maxTextureLayers, 1, 2048, 256),
       maxAnisotropy: finiteNonNegative(options.maxAnisotropy, 1),
       signal: controller.signal,
       prepareTexture: () => 0,
@@ -600,6 +602,7 @@ function assertDiagnosticRenderer(value: unknown): asserts value is ReturnType<M
     viewport: ['resize'],
     resourceRecovery: ['refreshResources'],
     streamingEffects: ['enable', 'disable', 'setTime'],
+    frame: ['update'],
   } as const
   Object.entries(required).forEach(([name, methods]) => {
     const capability = capabilities[name]

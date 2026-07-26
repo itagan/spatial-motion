@@ -15,6 +15,7 @@
 - Benchmark Atlas 指标新增 prepare、图片墙钟、单元绘制和像素 readback 分段耗时，便于定位冷启动瓶颈。
 - Cards `resolution` 新增 `'auto'`，内置默认卡片超过 1024 项时使用 48px；新增 `mipmaps` 开关及实际分辨率/mipmap Renderer 指标。
 - 默认图片卡片可将去重后的图片转换为可转移 `ImageBitmap`，在 OffscreenCanvas Worker 中完成首次 Atlas 绘制与 readback；Benchmark 同步报告位图解码和纹理预热成本。
+- Cards 新增 `atlasMode: 'single' | 'array' | 'auto'`。可选 Texture2DArray 路径使用自适应分页和逐帧分层上传；`auto` 仅在关闭 mipmap 且完整图集像素不小于 16 MiB 时启用。
 
 ### Fixed
 
@@ -28,6 +29,7 @@
 - 256 项以上的内置默认卡片会在支持时把首次 Atlas 栅格与 readback 移入 OffscreenCanvas Worker；重复图片 URL 只转移一份 `ImageBitmap`，中止、转换失败和不支持 Worker 时安全回退主线程并复用已加载图片。模板、自定义 Canvas 与局部 patch 保持原路径。
 - Cards 可自适应预热首次 Atlas 纹理上传；默认仅预热不超过 16 MiB 的像素缓冲，避免大图集预热本身形成长帧，也可通过 `texturePrewarm` 显式覆盖。
 - Cards 的稳定内容指纹改为逐项保存；局部 `updateItem(s)` 只序列化去重后的变化索引，不再为单卡 Atlas patch 扫描完整名单。
+- Array Atlas 根据设备层数限制和项目数量选择平衡页尺寸，最多规划 256 层；首次约 3 MiB、后续每帧约 768 KiB 的上传预算避免大纹理一次提交，context restore 会从首层重新协调。
 
 ### Compatibility
 
@@ -40,6 +42,8 @@
 - `LayoutContext` 统一为 `itemWidth/itemHeight`，不保留 `cardWidth/cardHeight`。
 - 未发布数据契约收紧为只读 `MotionItem`、`Transform` 与 Renderer/Layout 输入数组，不保留可变签名。
 - 包体积门禁改为真实 root/Core-only/Cards-only 消费者构建；分模块 gzip 总和继续输出为诊断信息，不再误作实际下载体积。
+- 默认 Atlas 仍为支持 mipmap 和细粒度 patch 的 `single`；Array Store、GLSL3 Shader 与 Texture2DArray 代码只在显式或自动选中时动态加载，不进入默认 Cards 消费路径，也不增加主体 Draw Call。
+- Renderer 新增可选 `frame.update()` 能力，Stage 每个活动 RAF 调用一次；不声明该能力的 Renderer 行为不变。
 
 ## 1.15.0 - 2026-07-19
 

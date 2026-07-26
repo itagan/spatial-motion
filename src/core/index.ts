@@ -45,6 +45,7 @@ export type {
   MotionRendererDescriptor,
   MotionRendererFactory,
   MotionRendererFactoryContext,
+  MotionRendererFrameCapability,
   MotionRendererHighlightCapability,
   MotionRendererPatchCapability,
   MotionRendererPickShape,

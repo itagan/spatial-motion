@@ -255,6 +255,7 @@ export class MotionStage<TMeta = unknown> {
       contentRenderer = options.renderer({
         root: this.contentRoot,
         maxTextureSize: this.renderer.capabilities.maxTextureSize,
+        maxTextureLayers: resolveMaxTextureLayers(this.renderer.getContext()),
         maxAnisotropy: this.renderer.capabilities.getMaxAnisotropy(),
         signal: this.contentAbortController.signal,
         prepareTexture: (texture) => {
@@ -1001,6 +1002,7 @@ export class MotionStage<TMeta = unknown> {
       this.activeEffect.lastUpdatedAt = now
       this.contentRenderer.capabilities.streamingEffects?.setTime(this.activeEffect.elapsedSeconds)
     }
+    this.contentRenderer.capabilities.frame?.update(delta)
     this.interaction.flushPendingPointerMove()
     this.extensionHost.update(delta)
     this.frameCpuMs = performance.now() - frameCpuStartedAt
@@ -1123,6 +1125,7 @@ function assertMotionRenderer(value: unknown): asserts value is MotionRenderer {
   validateCapability(renderer.capabilities.streamingEffects, 'streamingEffects', [
     'enable', 'disable', 'setTime',
   ])
+  validateCapability(renderer.capabilities.frame, 'frame', ['update'])
   const shape = renderer.descriptor.itemBounds
   if (shape === null) return
   if (!shape || (shape.kind !== 'quad' && shape.kind !== 'disc')) {
@@ -1191,6 +1194,15 @@ function normalizeRendererStats(stats: MotionRendererStats): NormalizedRendererS
 
 function finiteStat(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
+}
+
+function resolveMaxTextureLayers(
+  context: WebGLRenderingContext | WebGL2RenderingContext,
+): number {
+  const parameter = (context as WebGL2RenderingContext).MAX_ARRAY_TEXTURE_LAYERS
+  if (!Number.isFinite(parameter)) return 256
+  const value = context.getParameter(parameter)
+  return Number.isFinite(value) ? Math.max(1, Math.floor(value as number)) : 256
 }
 
 function disposeObjectResources(root: Object3D): void {

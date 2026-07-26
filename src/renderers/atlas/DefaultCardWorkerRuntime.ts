@@ -137,12 +137,16 @@ function runWorker(
 ): Promise<Pick<
   DefaultCardWorkerResult,
   'data' | 'cellRenderMs' | 'readbackMs'
+  | 'array'
 > | null> {
   return new Promise((resolve, reject) => {
     let settled = false
     let transferred = false
     const finish = (
-      result: Pick<DefaultCardWorkerResult, 'data' | 'cellRenderMs' | 'readbackMs'> | null,
+      result: Pick<
+        DefaultCardWorkerResult,
+        'data' | 'cellRenderMs' | 'readbackMs' | 'array'
+      > | null,
     ): void => {
       if (settled) return
       settled = true
@@ -164,10 +168,29 @@ function runWorker(
         finish(null)
         return
       }
+      const array = response.rects
+        && response.arrayWidth
+        && response.arrayHeight
+        && response.arrayDepth
+        && response.arrayPageColumns
+        && response.arrayPageRows
+        ? {
+            rects: new Float32Array(response.rects),
+            width: response.arrayWidth,
+            height: response.arrayHeight,
+            depth: response.arrayDepth,
+            pageColumns: response.arrayPageColumns,
+            pageRows: response.arrayPageRows,
+            packMs: response.arrayPackMs ?? 0,
+          }
+        : undefined
       finish({
-        data: new Uint8ClampedArray(response.data),
+        data: array
+          ? new Uint8Array(response.data)
+          : new Uint8ClampedArray(response.data),
         cellRenderMs: response.cellRenderMs,
         readbackMs: response.readbackMs,
+        array,
       })
     }
     worker.onerror = () => finish(null)

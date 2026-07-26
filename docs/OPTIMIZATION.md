@@ -203,3 +203,13 @@ Atlas 指标拆分为 prepare、图片加载墙钟、单元绘制和整图像素
 同环境关闭 2000 项 Atlas mipmap 后，纹理内存由约 33.9MB 降为 24.2MB，但首次 render submit 仍为 30.9ms，P95 17.60ms；这说明 mipmap 能节省显存，却不是首传延迟的主要来源，默认继续保留远距采样质量。直接使用 ImageBitmap 纹理也会失去当前 DataTexture 的按行 patch，第一次内容更新需要整图回读和再次完整上传，因此没有作为低风险默认路径；后续 Texture2DArray/分页层上传应独立验证。
 
 Atlas 局部更新的内容指纹改为逐项保存。完整 `setItems()` 仍扫描全部输入以识别完全相同的数据，而 `updateItem(s)` 只对去重、校验后的变化索引序列化 `meta` 和解析样式。2000 项单卡更新自动化确认只调用一次样式解析；Renderer metrics 记录 full/patch 扫描次数及累计扫描项目数。Chromium 的 2000/high/atlas-update 3 秒复验完成 17 次单元 patch，保持 60 FPS、P95 17.50ms、0 个 33ms 长帧和 1 Draw Call。
+
+## Texture2DArray 分页与渐进首传
+
+Cards 增加显式 `single`、`array` 和保守 `auto` 策略。默认 `single` 保留 mipmap、细粒度行 patch 与既有视觉；`array` 把 Atlas 拆成自适应二维页面并装入单个 `DataArrayTexture`，页面层编码在既有 Atlas rect 数据中，不增加实例 Attribute、Mesh 或 Draw Call。页尺寸会在设备层数限制内选择最小平衡方案，并额外限制为 256 层。
+
+Array 首帧上传预算约 3 MiB，后续每个 Stage RAF 约 768 KiB。新的 Renderer `frame.update()` 可选能力只负责协调该上传队列；默认 Cards 以外的 Renderer 不需要空实现。context restore 会从首层重新上传，局部 patch 则重传受影响的整页，因此 array 面向大型、相对静态的内容，single 仍是高频稀疏 patch 的合理默认。
+
+2026-07-26 Chromium 150 / Apple M4 / 2000 Cards 实测：array 和 `auto + mipmaps:false` 选择 2×4 单元页面、250 层，首次 WebGL 提交约 4.3ms，P95 18.4–18.6ms，0 个 33ms 长帧并保持主体 1 Draw Call；`auto + mipmaps:true` 确定性使用 single，首次提交约 34.7–37.3ms。500 项无 mipmap图集约 10.49 MiB，低于 16 MiB 门槛，auto 同样保持 single。
+
+17 次局部更新下，自适应页面累计估算上传约 1.71 MiB，相比固定 4×4 页面约 3.41 MiB 减半；single 仍只需约 0.16 MiB，验证了默认不切换 array 的取舍。Array Store 与 GLSL3 Shader 通过动态模块隔离，默认 Cards 消费包不包含 `sampler2DArray`。完整包检查为 root 37,093 bytes、Core 13,048 bytes、Cards 12,227 bytes gzip，tarball 100,875 bytes，均在既有预算内。

@@ -15,6 +15,7 @@ describe('cardsRenderer', () => {
     const renderer = cardsRenderer({ aspectRatio: 10 })({
       root: new Group(),
       maxTextureSize: 4096,
+      maxTextureLayers: 256,
       maxAnisotropy: 8,
       signal: controller.signal,
       prepareTexture: () => 0,
