@@ -1,9 +1,7 @@
 import {
-  Euler,
   Group,
   PerspectiveCamera,
   Scene,
-  Vector3,
   WebGLRenderer,
   type Material,
   type Object3D,
@@ -16,11 +14,10 @@ import type {
   Transform,
   TransitionOptions,
 } from './types.js'
-import { easing, identityTransform, interpolateTransform } from './math.js'
+import { easing, identityTransform } from './math.js'
 import {
   type MotionRenderer,
   type MotionRendererFactory,
-  type MotionRendererPickShape,
   type MotionRendererStats,
   type MotionRendererVisualState,
 } from '../renderers/MotionRenderer.js'
@@ -38,6 +35,12 @@ import type {
   StageViewport,
 } from './extensions.js'
 import type { StreamingEffect, StreamingEffectGpuData } from '../effects/types.js'
+import {
+  InteractionController,
+  visibilityRank,
+} from './InteractionController.js'
+import { ItemCoordinator } from './ItemCoordinator.js'
+import { MotionController } from './MotionController.js'
 
 export interface MotionStageOptions<TMeta = unknown> {
   container: HTMLElement
@@ -182,25 +185,6 @@ interface StageExtensionRecord {
   lastError: string | null
 }
 
-interface ActiveTransition {
-  from: Transform[]
-  to: Transform[]
-  elapsedMs: number
-  lastUpdatedAt: number
-  duration: number
-  easing: (value: number) => number
-  fromBillboard: number
-  toBillboard: number
-  fromHideBackHemisphere: number
-  toHideBackHemisphere: number
-  fromHemisphereEdgeFade: number
-  toHemisphereEdgeFade: number
-  targetLayout: Layout
-  layout: string
-  resolve: (result: StageTransitionResult) => void
-  removeAbortListener: () => void
-}
-
 interface ActiveEffect {
   effect: StreamingEffect
   gpuData: StreamingEffectGpuData
@@ -215,13 +199,13 @@ export class MotionStage<TMeta = unknown> {
   private readonly renderer: WebGLRenderer
   private readonly contentRoot: Group
   private readonly contentRenderer: MotionRenderer<TMeta>
-  private readonly itemBounds: MotionRendererPickShape | null
+  private readonly interaction: InteractionController<TMeta>
+  private readonly itemCoordinator: ItemCoordinator<TMeta>
+  private readonly motionController = new MotionController()
   private readonly contentAbortController = new AbortController()
   private readonly itemWidth: number
   private readonly itemHeight: number
   private readonly resizeObserver: ResizeObserver
-  private readonly projectionVector = new Vector3()
-  private readonly groupEuler = new Euler()
   private items: MotionItem<TMeta>[] = []
   private sourceItems: MotionItem<TMeta>[] = []
   private transforms: Transform[] = []
@@ -231,7 +215,6 @@ export class MotionStage<TMeta = unknown> {
   private rotateY = 0
   private rotateSpeedX = 0
   private rotateSpeedY = 0
-  private activeTransition: ActiveTransition | null = null
   private activeEffect: ActiveEffect | null = null
   private quality: QualityLevel
   private performanceManager: AdaptivePerformanceManager
@@ -242,7 +225,6 @@ export class MotionStage<TMeta = unknown> {
   private hideBackHemisphere = false
   private hemisphereEdgeFade = 0
   private inputItemCount = 0
-  private itemsToken = 0
   private destroyed = false
   private pausedByUser = false
   private pausedByVisibility = document.visibilityState === 'hidden'
@@ -250,14 +232,6 @@ export class MotionStage<TMeta = unknown> {
   private readonly motionPreference: MotionPreference
   private readonly motionQuery: MediaQueryList | null
   private reducedMotion = false
-  private hoveredIndex: number | null = null
-  private pendingPointerMove?: PointerEvent
-  private focusedItemId: string | null = null
-  private readonly hoverEnabled: boolean
-  private readonly keyboardNavigation: boolean
-  private readonly baseAriaLabel: string
-  private lastTransitionStatus: StageTransitionStatus | null = null
-  private lastTransitionLayout: string | null = null
   private readonly stageWaits = new Set<{
     remainingMs: number
     complete: (result?: boolean) => void
@@ -266,14 +240,6 @@ export class MotionStage<TMeta = unknown> {
   private renderSubmitMs = 0
   private transformCalculationMs = 0
   private transformCalculations = 0
-  private pickingMs = 0
-  private pickOperations = 0
-  private pendingItemUpdateBatch: {
-    updates: MotionItemUpdate<TMeta>[]
-    resolve: Array<(applied: boolean) => void>
-    reject: Array<(reason: unknown) => void>
-  } | null = null
-  private itemUpdateChain: Promise<unknown> = Promise.resolve()
   private readonly extensions = new Set<StageExtensionRecord>()
   private readonly extensionHistory: StageExtensionStats[] = []
   private extensionUpdateMs = 0
@@ -283,16 +249,20 @@ export class MotionStage<TMeta = unknown> {
     if (typeof options.renderer !== 'function') {
       throw new TypeError('MotionStage renderer must be a renderer factory')
     }
-    if (options.items) validateItems(options.items)
+    this.itemCoordinator = new ItemCoordinator({
+      applyPatches: (updates) => this.updateItemsByIdInternal(updates, {}),
+      isDestroyed: () => this.destroyed,
+    })
+    if (options.items) this.itemCoordinator.validateItems(options.items)
     this.motionPreference = options.motionPreference ?? 'auto'
     this.motionQuery = typeof matchMedia === 'function'
       ? matchMedia('(prefers-reduced-motion: reduce)')
       : null
     this.reducedMotion = this.motionPreference === 'reduced'
       || (this.motionPreference === 'auto' && Boolean(this.motionQuery?.matches))
-    this.hoverEnabled = Boolean(options.onItemHover) || options.hoverEffect === 'highlight'
-    this.keyboardNavigation = options.keyboardNavigation !== false
-    this.baseAriaLabel = options.ariaLabel ?? 'Spatial Motion'
+    const hoverEnabled = Boolean(options.onItemHover) || options.hoverEffect === 'highlight'
+    const keyboardNavigation = options.keyboardNavigation !== false
+    const baseAriaLabel = options.ariaLabel ?? 'Spatial Motion'
     this.qualityMode = options.quality ?? 'auto'
     this.quality = this.qualityMode === 'auto' ? detectQuality() : this.qualityMode
     this.performanceManager = new AdaptivePerformanceManager(this.quality)
@@ -306,19 +276,6 @@ export class MotionStage<TMeta = unknown> {
     this.options.container.appendChild(canvas)
     canvas.addEventListener('webglcontextlost', this.handleContextLost)
     canvas.addEventListener('webglcontextrestored', this.handleContextRestored)
-    canvas.addEventListener('pointerup', this.handlePointerUp)
-    if (this.keyboardNavigation) {
-      canvas.tabIndex = 0
-      canvas.setAttribute('role', 'region')
-      canvas.setAttribute('aria-label', this.baseAriaLabel)
-      canvas.addEventListener('keydown', this.handleKeyDown)
-      canvas.addEventListener('focus', this.handleCanvasFocus)
-      canvas.addEventListener('blur', this.handleCanvasBlur)
-    }
-    if (this.hoverEnabled) {
-      canvas.addEventListener('pointermove', this.handlePointerMove)
-      canvas.addEventListener('pointerleave', this.handlePointerLeave)
-    }
     if (this.motionPreference === 'auto') {
       this.motionQuery?.addEventListener('change', this.handleMotionPreferenceChange)
     }
@@ -346,13 +303,39 @@ export class MotionStage<TMeta = unknown> {
       throw error
     }
     this.contentRenderer = contentRenderer
-    this.itemBounds = contentRenderer.descriptor.itemBounds
-    this.itemWidth = this.itemBounds
-      ? this.itemBounds.kind === 'disc' ? this.itemBounds.diameter : this.itemBounds.width
+    const itemBounds = contentRenderer.descriptor.itemBounds
+    this.itemWidth = itemBounds
+      ? itemBounds.kind === 'disc' ? itemBounds.diameter : itemBounds.width
       : 1
-    this.itemHeight = this.itemBounds
-      ? this.itemBounds.kind === 'disc' ? this.itemBounds.diameter : this.itemBounds.height
+    this.itemHeight = itemBounds
+      ? itemBounds.kind === 'disc' ? itemBounds.diameter : itemBounds.height
       : 1
+    this.interaction = new InteractionController({
+      element: canvas,
+      camera: this.camera,
+      itemBounds,
+      hoverEnabled,
+      hoverEffect: options.hoverEffect ?? 'none',
+      keyboardNavigation,
+      ariaLabel: baseAriaLabel,
+      getState: () => ({
+        items: this.items,
+        visibleRatio: this.visibleRatio,
+        rotationX: this.rotateX,
+        rotationY: this.rotateY,
+        orientation: this.currentOrientation,
+        hideBackHemisphere: this.hideBackHemisphere,
+        effectActive: Boolean(this.activeEffect),
+      }),
+      resolveTransforms: (now) => this.resolveCurrentTransforms(now),
+      hasScheduledFrame: () => Boolean(this.frameId),
+      isDestroyed: () => this.destroyed,
+      setHighlightIndex: (index) =>
+        this.contentRenderer.capabilities.highlight?.setHighlightIndex(index),
+      onItemClick: options.onItemClick,
+      onItemHover: options.onItemHover,
+      onItemFocus: options.onItemFocus,
+    })
     this.resizeObserver = new ResizeObserver(() => {
       if (!this.destroyed) this.resizeInternal()
     })
@@ -367,34 +350,35 @@ export class MotionStage<TMeta = unknown> {
 
   setItems(items: readonly MotionItem<TMeta>[]): Promise<void> {
     this.assertActive()
-    validateItems(items)
+    this.itemCoordinator.validateItems(items)
     return this.setItemsAfterPendingUpdates(items)
   }
 
   private async setItemsAfterPendingUpdates(items: readonly MotionItem<TMeta>[]): Promise<void> {
-    await this.flushPendingItemUpdates()
+    await this.itemCoordinator.flushPatches()
     return this.setItemsInternal(items)
   }
 
   private async setItemsInternal(items: readonly MotionItem<TMeta>[]): Promise<void> {
-    const token = ++this.itemsToken
-    this.cancelActiveTransition('interrupted')
+    const revision = this.itemCoordinator.beginOperation()
+    this.motionController.cancel('interrupted')
     this.activeEffect = null
     this.contentRenderer.capabilities.streamingEffects?.disable()
     const maxItems = qualityProfiles[this.quality].maxVisibleItems
-    const nextItems = items.slice(0, maxItems)
+    const prepared = this.itemCoordinator.prepareItems(items, maxItems)
+    const nextItems = prepared.visibleItems
     const nextTransforms = nextItems.map(identityTransform)
     const applied = await this.contentRenderer.setItems(nextItems)
-    if (!applied || token !== this.itemsToken || this.destroyed) return
+    if (!applied || !this.itemCoordinator.isCurrent(revision)) return
     this.items = nextItems
-    this.sourceItems = items.map((item) => ({ ...item }))
-    this.inputItemCount = items.length
+    this.sourceItems = prepared.sourceItems
+    this.inputItemCount = prepared.sourceItems.length
     this.transforms = nextTransforms
     this.contentRenderer.capabilities.visual?.setVisualState(this.currentRendererVisualState())
     this.contentRenderer.setTransforms(nextTransforms)
     this.visibleRatio = 1
     this.contentRenderer.setVisibleRatio(this.visibleRatio)
-    this.syncFocusedItem()
+    this.interaction.syncItems()
   }
 
   to(layout: Layout, options: TransitionOptions = {}): Promise<boolean> {
@@ -425,20 +409,7 @@ export class MotionStage<TMeta = unknown> {
 
   getTransitionState(): StageTransitionState {
     this.assertActive()
-    const transition = this.activeTransition
-    return transition
-      ? {
-          active: true,
-          status: 'running',
-          layout: transition.layout,
-          progress: this.transitionProgress(transition, performance.now()),
-        }
-      : {
-          active: false,
-          status: this.lastTransitionStatus,
-          layout: this.lastTransitionLayout,
-          progress: this.lastTransitionStatus === 'completed' ? 1 : 0,
-        }
+    return this.motionController.getState(performance.now(), this.isPaused())
   }
 
   private async toInternal(layout: Layout, options: TransitionOptions): Promise<boolean> {
@@ -456,9 +427,7 @@ export class MotionStage<TMeta = unknown> {
     options: TransitionOptions = {},
   ): Promise<StageTransitionResult> {
     if (options.signal?.aborted) {
-      this.lastTransitionStatus = 'aborted'
-      this.lastTransitionLayout = layout.name
-      return Promise.resolve({ completed: false, status: 'aborted' })
+      return Promise.resolve(this.motionController.settle(layout.name, 'aborted'))
     }
     const now = performance.now()
     const visualState = this.resolveCurrentVisualState(now)
@@ -467,7 +436,7 @@ export class MotionStage<TMeta = unknown> {
       this.activeEffect = null
       this.contentRenderer.capabilities.streamingEffects?.disable()
     }
-    this.cancelActiveTransition('interrupted')
+    this.motionController.cancel('interrupted')
     const from = this.transforms
     const calculationStartedAt = performance.now()
     const target = [...layout.calculate(this.items.length, this.context())]
@@ -487,16 +456,13 @@ export class MotionStage<TMeta = unknown> {
     const ease = options.easing ?? this.options.transition?.easing ?? easing.sineInOut
     if (duration === 0) {
       this.transforms = target
-      this.activeTransition = null
       this.contentRenderer.capabilities.visual?.setVisualState({
         billboard: targetBillboard,
         hideBackHemisphere: targetHideBack,
         hemisphereEdgeFade: targetHemisphereEdgeFade,
       })
       this.contentRenderer.setTransforms(target)
-      this.lastTransitionStatus = 'completed'
-      this.lastTransitionLayout = layout.name
-      return Promise.resolve({ completed: true, status: 'completed' })
+      return Promise.resolve(this.motionController.settle(layout.name, 'completed'))
     }
     this.contentRenderer.prepareTransition(from, target)
     this.contentRenderer.capabilities.visual?.prepareVisualTransition(visualState, {
@@ -504,31 +470,20 @@ export class MotionStage<TMeta = unknown> {
       hideBackHemisphere: targetHideBack,
       hemisphereEdgeFade: targetHemisphereEdgeFade,
     })
-    return new Promise<StageTransitionResult>((resolve) => {
-      const transition: ActiveTransition = {
-        from,
-        to: target,
-        elapsedMs: 0,
-        lastUpdatedAt: now,
-        duration,
-        easing: ease,
-        fromBillboard: visualState.billboard,
-        toBillboard: targetBillboard,
-        fromHideBackHemisphere: visualState.hideBackHemisphere,
-        toHideBackHemisphere: targetHideBack,
-        fromHemisphereEdgeFade: visualState.hemisphereEdgeFade,
-        toHemisphereEdgeFade: targetHemisphereEdgeFade,
-        targetLayout: layout,
-        layout: layout.name,
-        resolve,
-        removeAbortListener: () => {},
-      }
-      const handleAbort = () => {
-        if (this.activeTransition === transition) this.cancelActiveTransition('aborted')
-      }
-      options.signal?.addEventListener('abort', handleAbort, { once: true })
-      transition.removeAbortListener = () => options.signal?.removeEventListener('abort', handleAbort)
-      this.activeTransition = transition
+    return this.motionController.start({
+      from,
+      to: target,
+      fromVisual: visualState,
+      toVisual: {
+        billboard: targetBillboard,
+        hideBackHemisphere: targetHideBack,
+        hemisphereEdgeFade: targetHemisphereEdgeFade,
+      },
+      targetLayout: layout,
+      duration,
+      easing: ease,
+      now,
+      signal: options.signal,
     })
   }
 
@@ -576,7 +531,7 @@ export class MotionStage<TMeta = unknown> {
     options: UpdateItemsOptions = {},
   ): Promise<boolean> {
     this.assertActive()
-    validateItems(items)
+    this.itemCoordinator.validateItems(items)
     return this.updateItemsAfterPendingUpdates(items, options)
   }
 
@@ -584,7 +539,7 @@ export class MotionStage<TMeta = unknown> {
     items: readonly MotionItem<TMeta>[],
     options: UpdateItemsOptions,
   ): Promise<boolean> {
-    await this.flushPendingItemUpdates()
+    await this.itemCoordinator.flushPatches()
     return this.updateItemsInternal(items, options)
   }
 
@@ -601,55 +556,20 @@ export class MotionStage<TMeta = unknown> {
     options: UpdateItemsOptions = {},
   ): Promise<boolean> {
     this.assertActive()
-    validateItemUpdates(updates)
+    this.itemCoordinator.validateUpdates(updates)
     if (!updates.length) return Promise.resolve(true)
     if (!isBatchableItemUpdate(options)) {
       return this.updateItemsByIdAfterPendingUpdates(updates, options)
     }
-    return this.queueItemUpdates(updates)
+    return this.itemCoordinator.queuePatches(updates)
   }
 
   private async updateItemsByIdAfterPendingUpdates(
     updates: MotionItemUpdate<TMeta>[],
     options: UpdateItemsOptions,
   ): Promise<boolean> {
-    await this.flushPendingItemUpdates()
+    await this.itemCoordinator.flushPatches()
     return this.updateItemsByIdInternal(updates, options)
-  }
-
-  private queueItemUpdates(updates: MotionItemUpdate<TMeta>[]): Promise<boolean> {
-    return new Promise<boolean>((resolve, reject) => {
-      if (!this.pendingItemUpdateBatch) {
-        this.pendingItemUpdateBatch = { updates: [], resolve: [], reject: [] }
-        queueMicrotask(() => { void this.flushPendingItemUpdates() })
-      }
-      this.pendingItemUpdateBatch.updates.push(...updates)
-      this.pendingItemUpdateBatch.resolve.push(resolve)
-      this.pendingItemUpdateBatch.reject.push(reject)
-    })
-  }
-
-  private flushPendingItemUpdates(): Promise<unknown> {
-    const batch = this.pendingItemUpdateBatch
-    if (!batch) return this.itemUpdateChain
-    this.pendingItemUpdateBatch = null
-    const mergedPatches = new Map<string, MotionItemPatch<TMeta>>()
-    batch.updates.forEach(({ id, patch }) => {
-      mergedPatches.set(id, { ...mergedPatches.get(id), ...patch })
-    })
-    const updates = [...mergedPatches].map(([id, patch]) => ({ id, patch }))
-    const operation = this.itemUpdateChain.then(() => this.destroyed
-      ? false
-      : this.updateItemsByIdInternal(updates, {}))
-    this.itemUpdateChain = operation.then(
-      (applied) => {
-        batch.resolve.forEach((resolve) => resolve(applied))
-      },
-      (error) => {
-        batch.reject.forEach((reject) => reject(error))
-      },
-    )
-    return operation
   }
 
   private async updateItemsByIdInternal(
@@ -657,33 +577,22 @@ export class MotionStage<TMeta = unknown> {
     options: UpdateItemsOptions,
   ): Promise<boolean> {
     if (!updates.length) return true
-    const updatesById = new Map(updates.map((update) => [update.id, update.patch]))
-    const knownIds = new Set(this.sourceItems.map((item) => item.id))
-    updates.forEach(({ id }) => {
-      if (!knownIds.has(id)) throw new Error(`Unknown MotionItem id: ${id}`)
-    })
-    const nextSource = this.sourceItems.map((item) => {
-      const patch = updatesById.get(item.id)
-      return patch ? { ...item, ...patch, id: item.id } : item
-    })
     const maxItems = qualityProfiles[this.quality].maxVisibleItems
-    const nextItems = nextSource.slice(0, maxItems)
-    const changedIndices = nextItems
-      .map((item, index) => updatesById.has(item.id) ? index : -1)
-      .filter((index) => index >= 0)
-    const token = ++this.itemsToken
+    const prepared = this.itemCoordinator.preparePatch(this.sourceItems, updates, maxItems)
+    const nextItems = prepared.visibleItems
+    const revision = this.itemCoordinator.beginOperation()
     const patch = this.contentRenderer.capabilities.patch
     const applied = patch
-      ? await patch.updateItems(nextItems, changedIndices)
+      ? await patch.updateItems(nextItems, prepared.changedIndices)
       : await this.contentRenderer.setItems(nextItems)
-    if (!applied || token !== this.itemsToken || this.destroyed) return false
-    this.sourceItems = nextSource
+    if (!applied || !this.itemCoordinator.isCurrent(revision)) return false
+    this.sourceItems = prepared.sourceItems
     this.items = nextItems
-    this.inputItemCount = nextSource.length
+    this.inputItemCount = prepared.sourceItems.length
     this.visibleRatio = 1
     if (!patch) this.restoreRendererStateAfterItems()
     this.contentRenderer.setVisibleRatio(this.visibleRatio)
-    this.syncFocusedItem()
+    this.interaction.syncItems()
 
     if (!options.layout) return true
     const completed = await this.transitionTo(options.layout, {
@@ -703,8 +612,8 @@ export class MotionStage<TMeta = unknown> {
     const current = this.resolveCurrentTransforms(now)
     const previousById = new Map(this.items.map((item, index) => [item.id, current[index]]))
     const currentEffect = preserveEffect ? this.activeEffect : null
-    const token = ++this.itemsToken
-    this.cancelActiveTransition('interrupted')
+    const revision = this.itemCoordinator.beginOperation()
+    this.motionController.cancel('interrupted')
     if (!preserveEffect) {
       this.activeEffect = null
       this.contentRenderer.capabilities.streamingEffects?.disable()
@@ -713,22 +622,23 @@ export class MotionStage<TMeta = unknown> {
     this.contentRenderer.setTransforms(current)
 
     const maxItems = qualityProfiles[this.quality].maxVisibleItems
-    const nextItems = items.slice(0, maxItems)
+    const prepared = this.itemCoordinator.prepareItems(items, maxItems)
+    const nextItems = prepared.visibleItems
     const nextTransforms = nextItems.map((item) => {
       const previous = previousById.get(item.id)
       return previous ? { ...previous } : identityTransform()
     })
     const applied = await this.contentRenderer.setItems(nextItems)
-    if (!applied || token !== this.itemsToken || this.destroyed) return false
+    if (!applied || !this.itemCoordinator.isCurrent(revision)) return false
     this.items = nextItems
-    this.sourceItems = items.map((item) => ({ ...item }))
-    this.inputItemCount = items.length
+    this.sourceItems = prepared.sourceItems
+    this.inputItemCount = prepared.sourceItems.length
     this.transforms = nextTransforms
     this.contentRenderer.capabilities.visual?.setVisualState(this.currentRendererVisualState())
     this.contentRenderer.setTransforms(nextTransforms)
     this.visibleRatio = 1
     this.contentRenderer.setVisibleRatio(this.visibleRatio)
-    this.syncFocusedItem()
+    this.interaction.syncItems()
 
     const targetLayout = options.layout ?? this.lastLayout
     if (currentEffect && this.activeEffect === currentEffect) {
@@ -811,102 +721,17 @@ export class MotionStage<TMeta = unknown> {
     options: number | PickOptions = {},
   ): PickResult<TMeta> | null {
     this.assertActive()
-    const startedAt = performance.now()
-    try {
-      return this.pickInternal(clientX, clientY, options)
-    } finally {
-      this.pickingMs += performance.now() - startedAt
-      this.pickOperations += 1
-    }
+    return this.interaction.pick(clientX, clientY, options)
   }
 
   focusItem(id: string): boolean {
     this.assertActive()
-    const index = this.items.findIndex((item) => item.id === id)
-    if (index < 0 || visibilityRank(index) > this.visibleRatio) return false
-    this.setFocusedIndex(index)
-    this.renderer.domElement.focus()
-    return true
+    return this.interaction.focusItem(id)
   }
 
   getFocusedItem(): MotionItem<TMeta> | null {
     this.assertActive()
-    const index = this.focusedIndex()
-    return index === null ? null : this.items[index]
-  }
-
-  private pickInternal(
-    clientX: number,
-    clientY: number,
-    options: number | PickOptions,
-  ): PickResult<TMeta> | null {
-    const itemBounds = this.itemBounds
-    if (!itemBounds) return null
-    const rect = this.renderer.domElement.getBoundingClientRect()
-    if (!rect.width || !rect.height) return null
-    const transforms = this.resolveCurrentTransforms(performance.now())
-    this.camera.updateMatrixWorld()
-    this.groupEuler.set(this.rotateX, this.rotateY, 0, 'XYZ')
-    const legacyRadius = typeof options === 'number' ? Math.max(0, options) : null
-    const pickOptions = typeof options === 'number' ? {} : options
-    const padding = Math.max(0, pickOptions.padding ?? 0)
-    const billboard = itemBounds.facing === 'camera'
-      || this.currentOrientation === 'camera'
-      || Boolean(this.activeEffect)
-    const candidates: Array<PickResult<TMeta> & { depth: number }> = []
-    const groupOrigin = new Vector3(0, 0, 0)
-    const groupOriginViewZ = groupOrigin.clone().applyMatrix4(this.camera.matrixWorldInverse).z
-
-    transforms.forEach((transform, index) => {
-      if (transform.opacity < 0.05 || visibilityRank(index) > this.visibleRatio) return
-      const center = new Vector3(transform.x, transform.y, transform.z).applyEuler(this.groupEuler)
-      const centerViewZ = center.clone().applyMatrix4(this.camera.matrixWorldInverse).z
-      if (this.hideBackHemisphere && centerViewZ < groupOriginViewZ) return
-      const projectedCenter = this.projectToScreen(center, rect)
-      if (!projectedCenter) return
-      const screenX = projectedCenter.x
-      const screenY = projectedCenter.y
-      const distance = Math.hypot(clientX - screenX, clientY - screenY)
-      if (legacyRadius !== null) {
-        if (distance <= legacyRadius) {
-          candidates.push({ item: this.items[index], index, distance, depth: center.distanceTo(this.camera.position) })
-        }
-        return
-      }
-
-      const halfWidth = Math.max(0, transform.scale) * this.itemWidth / 2
-      const halfHeight = Math.max(0, transform.scale) * this.itemHeight / 2
-      if (itemBounds.kind === 'disc') {
-        const right = new Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion)
-        const edge = this.projectToScreen(center.clone().addScaledVector(right, halfWidth), rect)
-        if (!edge) return
-        const radius = Math.hypot(edge.x - screenX, edge.y - screenY)
-        if (distance > radius + padding) return
-        candidates.push({
-          item: this.items[index],
-          index,
-          distance,
-          depth: center.distanceTo(this.camera.position),
-        })
-        return
-      }
-      const corners = billboard
-        ? this.billboardCorners(center, halfWidth, halfHeight)
-        : this.surfaceCorners(center, halfWidth, halfHeight, transform)
-      if (!billboard && !isFrontFacing(corners, center, this.camera.position)) return
-      const screenCorners = corners.map((corner) => this.projectToScreen(corner, rect))
-      if (screenCorners.some((corner) => !corner)) return
-      const quad = screenCorners as ScreenPoint[]
-      if (!pointHitsQuad(clientX, clientY, quad, padding)) return
-      candidates.push({ item: this.items[index], index, distance, depth: center.distanceTo(this.camera.position) })
-    })
-
-    if (!candidates.length) return null
-    candidates.sort((a, b) => pickOptions.includeOccluded
-      ? a.distance - b.distance || a.depth - b.depth
-      : a.depth - b.depth || a.distance - b.distance)
-    const { depth: _depth, ...result } = candidates[0]
-    return result
+    return this.interaction.getFocusedItem()
   }
 
   autoRotate(options: { x?: number; y?: number } = {}): void {
@@ -1047,7 +872,12 @@ export class MotionStage<TMeta = unknown> {
     this.camera.aspect = width / height
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(width, height, false)
-    if (this.lastLayout && this.items.length && !this.activeTransition && !this.activeEffect) {
+    if (
+      this.lastLayout
+      && this.items.length
+      && !this.motionController.hasActiveTransition()
+      && !this.activeEffect
+    ) {
       this.transforms = [...this.lastLayout.calculate(this.items.length, this.context())]
       this.contentRenderer.setTransforms(this.transforms)
     }
@@ -1066,8 +896,8 @@ export class MotionStage<TMeta = unknown> {
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
-    this.itemsToken += 1
-    this.cancelActiveTransition('destroyed')
+    this.itemCoordinator.invalidate()
+    this.motionController.cancel('destroyed')
     cancelAnimationFrame(this.frameId)
     this.frameId = 0
     this.resizeObserver.disconnect()
@@ -1083,16 +913,11 @@ export class MotionStage<TMeta = unknown> {
   }
 
   private cleanupCanvasAndListeners(): void {
-    this.renderer.domElement.removeEventListener('pointerup', this.handlePointerUp)
+    this.interaction?.dispose()
     this.renderer.domElement.removeEventListener('webglcontextlost', this.handleContextLost)
     this.renderer.domElement.removeEventListener('webglcontextrestored', this.handleContextRestored)
-    this.renderer.domElement.removeEventListener('pointermove', this.handlePointerMove)
-    this.renderer.domElement.removeEventListener('pointerleave', this.handlePointerLeave)
     this.motionQuery?.removeEventListener('change', this.handleMotionPreferenceChange)
     document.removeEventListener('visibilitychange', this.handleVisibilityChange)
-    this.renderer.domElement.removeEventListener('keydown', this.handleKeyDown)
-    this.renderer.domElement.removeEventListener('focus', this.handleCanvasFocus)
-    this.renderer.domElement.removeEventListener('blur', this.handleCanvasBlur)
   }
 
   getQuality(): QualityLevel {
@@ -1104,6 +929,7 @@ export class MotionStage<TMeta = unknown> {
     this.assertActive()
     const performanceStats = this.performanceManager.getStats()
     const rendererStats = normalizeRendererStats(this.contentRenderer.getStats())
+    const interactionStats = this.interaction.getStats()
     return {
       ...performanceStats,
       qualityMode: this.qualityMode,
@@ -1127,8 +953,8 @@ export class MotionStage<TMeta = unknown> {
       renderSubmitMs: this.renderSubmitMs,
       transformCalculationMs: this.transformCalculationMs,
       transformCalculations: this.transformCalculations,
-      pickingMs: this.pickingMs,
-      pickOperations: this.pickOperations,
+      pickingMs: interactionStats.pickingMs,
+      pickOperations: interactionStats.pickOperations,
       extensions: this.extensions.size,
       extensionUpdateMs: this.extensionUpdateMs,
     }
@@ -1194,33 +1020,16 @@ export class MotionStage<TMeta = unknown> {
         this.effectElapsedSeconds(this.activeEffect, now),
       )
     }
-    if (!this.activeTransition) return this.transforms
-    const { from, to, easing: transitionEasing } = this.activeTransition
-    const progress = transitionEasing(this.transitionProgress(this.activeTransition, now))
-    return to.map((transform, index) =>
-      interpolateTransform(from[index] ?? identityTransform(), transform, progress),
-    )
+    return this.motionController.resolveTransforms(this.transforms, now, this.isPaused())
   }
 
   private resolveCurrentVisualState(now: number): MotionRendererVisualState {
     if (this.activeEffect) return { billboard: 1, hideBackHemisphere: 0, hemisphereEdgeFade: 0 }
-    if (!this.activeTransition) {
-      return {
-        billboard: this.currentOrientation === 'camera' ? 1 : 0,
-        hideBackHemisphere: this.hideBackHemisphere ? 1 : 0,
-        hemisphereEdgeFade: this.hemisphereEdgeFade,
-      }
-    }
-    const transition = this.activeTransition
-    const progress = transition.easing(this.transitionProgress(transition, now))
-    return {
-      billboard: transition.fromBillboard
-        + (transition.toBillboard - transition.fromBillboard) * progress,
-      hideBackHemisphere: transition.fromHideBackHemisphere
-        + (transition.toHideBackHemisphere - transition.fromHideBackHemisphere) * progress,
-      hemisphereEdgeFade: transition.fromHemisphereEdgeFade
-        + (transition.toHemisphereEdgeFade - transition.fromHemisphereEdgeFade) * progress,
-    }
+    return this.motionController.resolveVisualState(
+      this.currentRendererVisualState(),
+      now,
+      this.isPaused(),
+    )
   }
 
   private currentRendererVisualState(): MotionRendererVisualState {
@@ -1233,29 +1042,17 @@ export class MotionStage<TMeta = unknown> {
 
   private restoreRendererStateAfterItems(): void {
     const visual = this.contentRenderer.capabilities.visual
-    const transition = this.activeTransition
+    const transition = this.motionController.getSnapshot(performance.now(), this.isPaused())
     if (transition) {
-      const fromVisual: MotionRendererVisualState = {
-        billboard: transition.fromBillboard,
-        hideBackHemisphere: transition.fromHideBackHemisphere,
-        hemisphereEdgeFade: transition.fromHemisphereEdgeFade,
-      }
-      const toVisual: MotionRendererVisualState = {
-        billboard: transition.toBillboard,
-        hideBackHemisphere: transition.toHideBackHemisphere,
-        hemisphereEdgeFade: transition.toHemisphereEdgeFade,
-      }
       this.contentRenderer.prepareTransition(transition.from, transition.to)
-      visual?.prepareVisualTransition(fromVisual, toVisual)
-      this.contentRenderer.setProgress(transition.easing(
-        this.transitionProgress(transition, performance.now()),
-      ))
+      visual?.prepareVisualTransition(transition.fromVisual, transition.toVisual)
+      this.contentRenderer.setProgress(transition.progress)
     } else {
       visual?.setVisualState(this.currentRendererVisualState())
       this.contentRenderer.setTransforms(this.transforms)
     }
     this.contentRenderer.setVisibleRatio(this.visibleRatio)
-    this.updateInteractionHighlight()
+    this.interaction.refreshHighlight()
     if (this.activeEffect) {
       const streaming = this.contentRenderer.capabilities.streamingEffects
       streaming?.enable(this.activeEffect.gpuData)
@@ -1263,40 +1060,9 @@ export class MotionStage<TMeta = unknown> {
     }
   }
 
-  private transitionProgress(transition: ActiveTransition, now: number): number {
-    const pendingMs = this.isPaused() ? 0 : Math.max(0, now - transition.lastUpdatedAt)
-    return Math.min(1, (transition.elapsedMs + pendingMs) / transition.duration)
-  }
-
   private effectElapsedSeconds(effect: ActiveEffect, now: number): number {
     const pendingSeconds = this.isPaused() ? 0 : Math.max(0, now - effect.lastUpdatedAt) / 1000
     return effect.elapsedSeconds + pendingSeconds
-  }
-
-  private advanceTransition(now: number): void {
-    const transition = this.activeTransition
-    if (!transition) return
-    transition.elapsedMs += Math.max(0, now - transition.lastUpdatedAt)
-    transition.lastUpdatedAt = now
-    const progress = Math.min(1, transition.elapsedMs / transition.duration)
-    this.contentRenderer.setProgress(transition.easing(progress))
-    if (progress < 1) return
-    this.transforms = transition.to
-    this.activeTransition = null
-    transition.removeAbortListener()
-    this.lastTransitionStatus = 'completed'
-    this.lastTransitionLayout = transition.layout
-    transition.resolve({ completed: true, status: 'completed' })
-  }
-
-  private cancelActiveTransition(status: 'interrupted' | 'aborted' | 'destroyed'): void {
-    const transition = this.activeTransition
-    if (!transition) return
-    this.activeTransition = null
-    transition.removeAbortListener()
-    this.lastTransitionStatus = status
-    this.lastTransitionLayout = transition.layout
-    transition.resolve({ completed: false, status })
   }
 
   private readonly render = (now: number) => {
@@ -1305,7 +1071,11 @@ export class MotionStage<TMeta = unknown> {
     const delta = Math.min(0.05, rawFrameMs / 1000)
     this.lastFrame = now
     this.advanceStageWaits(rawFrameMs)
-    this.advanceTransition(now)
+    const completedTransforms = this.motionController.advance(
+      now,
+      (progress) => this.contentRenderer.setProgress(progress),
+    )
+    if (completedTransforms) this.transforms = completedTransforms
     const nextQuality = this.performanceManager.recordFrame(
       rawFrameMs,
       now,
@@ -1320,7 +1090,7 @@ export class MotionStage<TMeta = unknown> {
       this.activeEffect.lastUpdatedAt = now
       this.contentRenderer.capabilities.streamingEffects?.setTime(this.activeEffect.elapsedSeconds)
     }
-    if (this.pendingPointerMove) this.handlePointerMove()
+    this.interaction.flushPendingPointerMove()
     this.updateExtensions(delta)
     this.frameCpuMs = performance.now() - frameCpuStartedAt
     const renderStartedAt = performance.now()
@@ -1330,7 +1100,7 @@ export class MotionStage<TMeta = unknown> {
   }
 
   private applyQuality(quality: QualityLevel): void {
-    const targetLayout = this.activeTransition?.targetLayout ?? this.lastLayout
+    const targetLayout = this.motionController.getTargetLayout() ?? this.lastLayout
     this.quality = quality
     const profile = qualityProfiles[quality]
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
@@ -1339,7 +1109,7 @@ export class MotionStage<TMeta = unknown> {
       ? Math.min(1, targetCount / this.items.length)
       : 1
     this.contentRenderer.setVisibleRatio(this.visibleRatio)
-    this.syncFocusedItem()
+    this.interaction.syncItems()
     if (this.activeEffect) {
       const now = performance.now()
       this.activeEffect.elapsedSeconds = this.effectElapsedSeconds(this.activeEffect, now)
@@ -1372,7 +1142,7 @@ export class MotionStage<TMeta = unknown> {
     this.setExtensionsPaused(false)
     const now = performance.now()
     this.lastFrame = now
-    if (this.activeTransition) this.activeTransition.lastUpdatedAt = now
+    this.motionController.rebaseClock(now)
     if (this.activeEffect) this.activeEffect.lastUpdatedAt = now
     this.frameId = requestAnimationFrame(this.render)
   }
@@ -1576,127 +1346,6 @@ export class MotionStage<TMeta = unknown> {
     this.options.onContextChange?.('restored')
   }
 
-  private readonly handlePointerUp = (event: PointerEvent) => {
-    if (this.destroyed) return
-    const result = this.pick(event.clientX, event.clientY)
-    if (result) this.options.onItemClick?.(result.item, result.index)
-  }
-
-  private readonly handlePointerMove = (event?: PointerEvent) => {
-    if (event) {
-      this.pendingPointerMove = event
-      if (this.frameId) return
-    }
-    const pointer = this.pendingPointerMove!
-    this.pendingPointerMove = undefined
-    const result = this.pick(pointer.clientX, pointer.clientY)
-    const index = result?.index ?? null
-    if (index === this.hoveredIndex) return
-    this.hoveredIndex = index
-    this.updateInteractionHighlight()
-    this.options.onItemHover?.(result?.item ?? null, index)
-  }
-
-  private readonly handlePointerLeave = () => {
-    this.pendingPointerMove = undefined
-    if (this.hoveredIndex === null) return
-    this.hoveredIndex = null
-    this.updateInteractionHighlight()
-    this.options.onItemHover?.(null, null)
-  }
-
-  private readonly handleCanvasFocus = () => {
-    if (this.destroyed || this.focusedIndex() !== null) return
-    const first = this.visibleItemIndices()[0]
-    if (first !== undefined) this.setFocusedIndex(first)
-  }
-
-  private readonly handleCanvasBlur = () => {
-    if (this.destroyed) return
-    this.setFocusedIndex(null)
-  }
-
-  private readonly handleKeyDown = (event: KeyboardEvent) => {
-    if (this.destroyed) return
-    const visible = this.visibleItemIndices()
-    if (!visible.length) return
-    const current = this.focusedIndex()
-    const position = current === null ? -1 : visible.indexOf(current)
-    let next: number | undefined
-    switch (event.key) {
-      case 'ArrowRight':
-      case 'ArrowDown':
-        next = visible[(position + 1 + visible.length) % visible.length]
-        break
-      case 'ArrowLeft':
-      case 'ArrowUp':
-        next = visible[(position - 1 + visible.length) % visible.length]
-        break
-      case 'Home':
-        next = visible[0]
-        break
-      case 'End':
-        next = visible.at(-1)
-        break
-      case 'Enter':
-      case ' ':
-        if (current !== null) {
-          event.preventDefault()
-          this.options.onItemClick?.(this.items[current], current)
-        }
-        return
-      default:
-        return
-    }
-    event.preventDefault()
-    if (next !== undefined) this.setFocusedIndex(next)
-  }
-
-  private focusedIndex(): number | null {
-    if (this.focusedItemId === null) return null
-    const index = this.items.findIndex((item) => item.id === this.focusedItemId)
-    return index >= 0 ? index : null
-  }
-
-  private visibleItemIndices(): number[] {
-    return this.items
-      .map((_item, index) => visibilityRank(index) <= this.visibleRatio ? index : -1)
-      .filter((index) => index >= 0)
-  }
-
-  private setFocusedIndex(index: number | null): void {
-    const previousId = this.focusedItemId
-    const item = index === null ? null : this.items[index] ?? null
-    this.focusedItemId = item?.id ?? null
-    this.updateInteractionHighlight()
-    this.updateAriaLabel(item, index)
-    if (previousId !== this.focusedItemId) this.options.onItemFocus?.(item, item ? index : null)
-  }
-
-  private syncFocusedItem(): void {
-    const index = this.focusedIndex()
-    if (this.focusedItemId !== null && (index === null || visibilityRank(index) > this.visibleRatio)) {
-      this.setFocusedIndex(null)
-    }
-    else if (index !== null) {
-      this.updateInteractionHighlight()
-      this.updateAriaLabel(this.items[index], index)
-    }
-  }
-
-  private updateInteractionHighlight(): void {
-    const index = (this.options.hoverEffect === 'highlight' ? this.hoveredIndex : null) ?? this.focusedIndex()
-    this.contentRenderer.capabilities.highlight?.setHighlightIndex(index)
-  }
-
-  private updateAriaLabel(item: MotionItem<TMeta> | null, index: number | null): void {
-    if (!this.keyboardNavigation) return
-    const detail = item && index !== null
-      ? `: ${item.title?.trim() || item.id} (${index + 1} of ${this.items.length})`
-      : ''
-    this.renderer.domElement.setAttribute('aria-label', `${this.baseAriaLabel}${detail}`)
-  }
-
   private readonly handleMotionPreferenceChange = (event: MediaQueryListEvent) => {
     if (this.destroyed || this.motionPreference !== 'auto') return
     this.reducedMotion = event.matches
@@ -1713,49 +1362,6 @@ export class MotionStage<TMeta = unknown> {
   private assertActive(): void {
     if (this.destroyed) throw new Error('MotionStage has been destroyed')
   }
-
-  private projectToScreen(point: Vector3, rect: DOMRect): ScreenPoint | null {
-    this.projectionVector.copy(point).project(this.camera)
-    if (this.projectionVector.z < -1 || this.projectionVector.z > 1) return null
-    return {
-      x: rect.left + (this.projectionVector.x + 1) * rect.width / 2,
-      y: rect.top + (1 - this.projectionVector.y) * rect.height / 2,
-    }
-  }
-
-  private billboardCorners(center: Vector3, halfWidth: number, halfHeight: number): Vector3[] {
-    const right = new Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion)
-    const up = new Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion)
-    return [
-      center.clone().addScaledVector(right, -halfWidth).addScaledVector(up, -halfHeight),
-      center.clone().addScaledVector(right, halfWidth).addScaledVector(up, -halfHeight),
-      center.clone().addScaledVector(right, halfWidth).addScaledVector(up, halfHeight),
-      center.clone().addScaledVector(right, -halfWidth).addScaledVector(up, halfHeight),
-    ]
-  }
-
-  private surfaceCorners(
-    center: Vector3,
-    halfWidth: number,
-    halfHeight: number,
-    transform: Transform,
-  ): Vector3[] {
-    const itemEuler = new Euler(transform.rotationX, transform.rotationY, transform.rotationZ, 'XYZ')
-    return [
-      [-halfWidth, -halfHeight],
-      [halfWidth, -halfHeight],
-      [halfWidth, halfHeight],
-      [-halfWidth, halfHeight],
-    ].map(([x, y]) => new Vector3(x, y, 0)
-      .applyEuler(itemEuler)
-      .applyEuler(this.groupEuler)
-      .add(center))
-  }
-}
-
-interface ScreenPoint {
-  x: number
-  y: number
 }
 
 function assertMotionRenderer(value: unknown): asserts value is MotionRenderer {
@@ -1912,43 +1518,6 @@ function percentile(orderedValues: number[], fraction: number): number {
   return orderedValues[Math.min(orderedValues.length - 1, Math.floor(orderedValues.length * fraction))]
 }
 
-function isFrontFacing(corners: Vector3[], center: Vector3, cameraPosition: Vector3): boolean {
-  const edgeA = corners[1].clone().sub(corners[0])
-  const edgeB = corners[3].clone().sub(corners[0])
-  const normal = edgeA.cross(edgeB)
-  return normal.dot(cameraPosition.clone().sub(center)) > 0
-}
-
-function pointHitsQuad(x: number, y: number, corners: ScreenPoint[], padding: number): boolean {
-  let hasPositive = false
-  let hasNegative = false
-  for (let index = 0; index < corners.length; index += 1) {
-    const start = corners[index]
-    const end = corners[(index + 1) % corners.length]
-    const cross = (end.x - start.x) * (y - start.y) - (end.y - start.y) * (x - start.x)
-    hasPositive ||= cross > 0
-    hasNegative ||= cross < 0
-  }
-  if (!(hasPositive && hasNegative)) return true
-  if (!padding) return false
-  return corners.some((start, index) =>
-    distanceToSegment(x, y, start, corners[(index + 1) % corners.length]) <= padding,
-  )
-}
-
-function distanceToSegment(x: number, y: number, start: ScreenPoint, end: ScreenPoint): number {
-  const dx = end.x - start.x
-  const dy = end.y - start.y
-  const lengthSquared = dx * dx + dy * dy
-  if (!lengthSquared) return Math.hypot(x - start.x, y - start.y)
-  const amount = Math.min(1, Math.max(0, ((x - start.x) * dx + (y - start.y) * dy) / lengthSquared))
-  return Math.hypot(x - (start.x + amount * dx), y - (start.y + amount * dy))
-}
-
-function visibilityRank(index: number): number {
-  return (index * 0.618033988749895) % 1
-}
-
 function countVisibleItems(count: number, ratio: number): number {
   let visible = 0
   for (let index = 0; index < count; index += 1) {
@@ -1971,24 +1540,6 @@ function countVisibleEffectItems(speedFactors: Float32Array, ratio: number): num
     if (speed >= 0 && visibilityRank(index) <= ratio) visible += 1
   })
   return visible
-}
-
-function validateItems<TMeta>(items: readonly MotionItem<TMeta>[]): void {
-  const ids = new Set<string>()
-  items.forEach((item, index) => {
-    if (!item.id.trim()) throw new Error(`MotionItem at index ${index} must have a non-empty id`)
-    if (ids.has(item.id)) throw new Error(`Duplicate MotionItem id: ${item.id}`)
-    ids.add(item.id)
-  })
-}
-
-function validateItemUpdates<TMeta>(updates: MotionItemUpdate<TMeta>[]): void {
-  const ids = new Set<string>()
-  updates.forEach(({ id }, index) => {
-    if (!id.trim()) throw new Error(`MotionItem update at index ${index} must have a non-empty id`)
-    if (ids.has(id)) throw new Error(`Duplicate MotionItem update id: ${id}`)
-    ids.add(id)
-  })
 }
 
 function isBatchableItemUpdate(options: UpdateItemsOptions): boolean {
