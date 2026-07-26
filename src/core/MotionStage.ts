@@ -41,6 +41,7 @@ import {
 import { ItemCoordinator } from './ItemCoordinator.js'
 import { MotionController } from './MotionController.js'
 import { ExtensionHost } from './ExtensionHost.js'
+import { StageRuntime } from './StageRuntime.js'
 
 export interface MotionStageOptions<TMeta = unknown> {
   container: HTMLElement
@@ -179,6 +180,7 @@ export class MotionStage<TMeta = unknown> {
   private readonly itemCoordinator: ItemCoordinator<TMeta>
   private readonly motionController = new MotionController()
   private readonly extensionHost: ExtensionHost
+  private readonly runtime: StageRuntime
   private readonly contentAbortController = new AbortController()
   private readonly itemWidth: number
   private readonly itemHeight: number
@@ -186,8 +188,6 @@ export class MotionStage<TMeta = unknown> {
   private items: MotionItem<TMeta>[] = []
   private sourceItems: MotionItem<TMeta>[] = []
   private transforms: Transform[] = []
-  private frameId = 0
-  private lastFrame = 0
   private rotateX = 0
   private rotateY = 0
   private rotateSpeedX = 0
@@ -203,9 +203,6 @@ export class MotionStage<TMeta = unknown> {
   private hemisphereEdgeFade = 0
   private inputItemCount = 0
   private destroyed = false
-  private pausedByUser = false
-  private pausedByVisibility = document.visibilityState === 'hidden'
-  private pausedByContext = false
   private readonly motionPreference: MotionPreference
   private readonly motionQuery: MediaQueryList | null
   private reducedMotion = false
@@ -247,12 +244,9 @@ export class MotionStage<TMeta = unknown> {
     const canvas = this.renderer.domElement
     canvas.style.width = canvas.style.height = '100%'
     this.options.container.appendChild(canvas)
-    canvas.addEventListener('webglcontextlost', this.handleContextLost)
-    canvas.addEventListener('webglcontextrestored', this.handleContextRestored)
     if (this.motionPreference === 'auto') {
       this.motionQuery?.addEventListener('change', this.handleMotionPreferenceChange)
     }
-    document.addEventListener('visibilitychange', this.handleVisibilityChange)
     this.contentRoot = new Group()
     this.contentRoot.name = 'SpatialMotionContent'
     this.scene.add(this.contentRoot)
@@ -283,6 +277,29 @@ export class MotionStage<TMeta = unknown> {
     this.itemHeight = itemBounds
       ? itemBounds.kind === 'disc' ? itemBounds.diameter : itemBounds.height
       : 1
+    this.extensionHost = new ExtensionHost({
+      parent: this.scene,
+      camera: this.camera,
+      getViewport: () => this.extensionViewport(),
+      getQuality: () => this.quality,
+      getReducedMotion: () => this.reducedMotion,
+      isPaused: () => this.runtime.isPaused(),
+      isDestroyed: () => this.destroyed,
+      onError: options.onExtensionError,
+    })
+    this.runtime = new StageRuntime({
+      element: canvas,
+      onFrame: (frame) => this.renderFrame(frame.now, frame.rawFrameMs, frame.deltaSeconds),
+      onPauseChange: (paused) => this.extensionHost.setPaused(paused),
+      onResume: (now) => {
+        this.motionController.rebaseClock(now)
+        if (this.activeEffect) this.activeEffect.lastUpdatedAt = now
+      },
+      onContextLost: () => {},
+      onContextRestored: () =>
+        this.contentRenderer.capabilities.resourceRecovery?.refreshResources(),
+      onContextChange: options.onContextChange,
+    })
     this.interaction = new InteractionController({
       element: canvas,
       camera: this.camera,
@@ -301,7 +318,7 @@ export class MotionStage<TMeta = unknown> {
         effectActive: Boolean(this.activeEffect),
       }),
       resolveTransforms: (now) => this.resolveCurrentTransforms(now),
-      hasScheduledFrame: () => Boolean(this.frameId),
+      hasScheduledFrame: () => this.runtime.hasScheduledFrame(),
       isDestroyed: () => this.destroyed,
       setHighlightIndex: (index) =>
         this.contentRenderer.capabilities.highlight?.setHighlightIndex(index),
@@ -309,25 +326,12 @@ export class MotionStage<TMeta = unknown> {
       onItemHover: options.onItemHover,
       onItemFocus: options.onItemFocus,
     })
-    this.extensionHost = new ExtensionHost({
-      parent: this.scene,
-      camera: this.camera,
-      getViewport: () => this.extensionViewport(),
-      getQuality: () => this.quality,
-      getReducedMotion: () => this.reducedMotion,
-      isPaused: () => this.isPaused(),
-      isDestroyed: () => this.destroyed,
-      onError: options.onExtensionError,
-    })
     this.resizeObserver = new ResizeObserver(() => {
       if (!this.destroyed) this.resizeInternal()
     })
     this.resizeObserver.observe(this.options.container)
     this.resizeInternal()
-    if (!this.isPaused()) {
-      this.lastFrame = performance.now()
-      this.frameId = requestAnimationFrame(this.render)
-    }
+    this.runtime.start()
     this.ready = options.items ? this.setItemsInternal(options.items) : Promise.resolve()
   }
 
@@ -392,7 +396,7 @@ export class MotionStage<TMeta = unknown> {
 
   getTransitionState(): StageTransitionState {
     this.assertActive()
-    return this.motionController.getState(performance.now(), this.isPaused())
+    return this.motionController.getState(performance.now(), this.runtime.isPaused())
   }
 
   private async toInternal(layout: Layout, options: TransitionOptions): Promise<boolean> {
@@ -743,16 +747,12 @@ export class MotionStage<TMeta = unknown> {
 
   pause(): void {
     this.assertActive()
-    if (this.pausedByUser) return
-    this.pausedByUser = true
-    this.stopRenderLoop()
+    this.runtime.pause()
   }
 
   resume(): void {
     this.assertActive()
-    if (!this.pausedByUser) return
-    this.pausedByUser = false
-    this.startRenderLoop()
+    this.runtime.resume()
   }
 
   stopRotation(): void {
@@ -808,8 +808,7 @@ export class MotionStage<TMeta = unknown> {
     this.destroyed = true
     this.itemCoordinator.invalidate()
     this.motionController.cancel('destroyed')
-    cancelAnimationFrame(this.frameId)
-    this.frameId = 0
+    this.runtime.dispose()
     this.resizeObserver.disconnect()
     this.cleanupCanvasAndListeners()
     for (const wait of this.stageWaits) wait.complete(false)
@@ -824,10 +823,8 @@ export class MotionStage<TMeta = unknown> {
 
   private cleanupCanvasAndListeners(): void {
     this.interaction?.dispose()
-    this.renderer.domElement.removeEventListener('webglcontextlost', this.handleContextLost)
-    this.renderer.domElement.removeEventListener('webglcontextrestored', this.handleContextRestored)
+    this.runtime?.dispose()
     this.motionQuery?.removeEventListener('change', this.handleMotionPreferenceChange)
-    document.removeEventListener('visibilitychange', this.handleVisibilityChange)
   }
 
   getQuality(): QualityLevel {
@@ -853,12 +850,12 @@ export class MotionStage<TMeta = unknown> {
       }),
       renderer: Object.freeze(rendererStats),
       pixelRatio: this.renderer.getPixelRatio(),
-      paused: this.isPaused(),
+      paused: this.runtime.isPaused(),
       effect: this.activeEffect?.effect.name ?? null,
       activeEffectItems: this.activeEffect
         ? countActiveEffectItems(this.activeEffect.gpuData.speedFactors)
         : 0,
-      contextLost: this.pausedByContext,
+      contextLost: this.runtime.isContextLost(),
       frameCpuMs: this.frameCpuMs,
       renderSubmitMs: this.renderSubmitMs,
       transformCalculationMs: this.transformCalculationMs,
@@ -927,7 +924,7 @@ export class MotionStage<TMeta = unknown> {
         this.effectElapsedSeconds(this.activeEffect, now),
       )
     }
-    return this.motionController.resolveTransforms(this.transforms, now, this.isPaused())
+    return this.motionController.resolveTransforms(this.transforms, now, this.runtime.isPaused())
   }
 
   private resolveCurrentVisualState(now: number): MotionRendererVisualState {
@@ -935,7 +932,7 @@ export class MotionStage<TMeta = unknown> {
     return this.motionController.resolveVisualState(
       this.currentRendererVisualState(),
       now,
-      this.isPaused(),
+      this.runtime.isPaused(),
     )
   }
 
@@ -949,7 +946,10 @@ export class MotionStage<TMeta = unknown> {
 
   private restoreRendererStateAfterItems(): void {
     const visual = this.contentRenderer.capabilities.visual
-    const transition = this.motionController.getSnapshot(performance.now(), this.isPaused())
+    const transition = this.motionController.getSnapshot(
+      performance.now(),
+      this.runtime.isPaused(),
+    )
     if (transition) {
       this.contentRenderer.prepareTransition(transition.from, transition.to)
       visual?.prepareVisualTransition(transition.fromVisual, transition.toVisual)
@@ -968,15 +968,14 @@ export class MotionStage<TMeta = unknown> {
   }
 
   private effectElapsedSeconds(effect: ActiveEffect, now: number): number {
-    const pendingSeconds = this.isPaused() ? 0 : Math.max(0, now - effect.lastUpdatedAt) / 1000
+    const pendingSeconds = this.runtime.isPaused()
+      ? 0
+      : Math.max(0, now - effect.lastUpdatedAt) / 1000
     return effect.elapsedSeconds + pendingSeconds
   }
 
-  private readonly render = (now: number) => {
+  private renderFrame(now: number, rawFrameMs: number, delta: number): void {
     const frameCpuStartedAt = performance.now()
-    const rawFrameMs = now - this.lastFrame || 0
-    const delta = Math.min(0.05, rawFrameMs / 1000)
-    this.lastFrame = now
     this.advanceStageWaits(rawFrameMs)
     const completedTransforms = this.motionController.advance(
       now,
@@ -1003,7 +1002,6 @@ export class MotionStage<TMeta = unknown> {
     const renderStartedAt = performance.now()
     this.renderer.render(this.scene, this.camera)
     this.renderSubmitMs = performance.now() - renderStartedAt
-    if (!this.isPaused()) this.frameId = requestAnimationFrame(this.render)
   }
 
   private applyQuality(quality: QualityLevel): void {
@@ -1035,34 +1033,6 @@ export class MotionStage<TMeta = unknown> {
         duration: 0,
       }, true).catch((error) => console.error('Spatial Motion quality reconciliation failed', error))
     }
-  }
-
-  private readonly handleVisibilityChange = () => {
-    if (this.destroyed) return
-    this.pausedByVisibility = document.visibilityState === 'hidden'
-    if (this.pausedByVisibility) this.stopRenderLoop()
-    else this.startRenderLoop()
-  }
-
-  private startRenderLoop(): void {
-    if (this.destroyed || this.isPaused() || this.frameId) return
-    this.extensionHost.setPaused(false)
-    const now = performance.now()
-    this.lastFrame = now
-    this.motionController.rebaseClock(now)
-    if (this.activeEffect) this.activeEffect.lastUpdatedAt = now
-    this.frameId = requestAnimationFrame(this.render)
-  }
-
-  private stopRenderLoop(): void {
-    this.extensionHost.setPaused(true)
-    if (!this.frameId) return
-    cancelAnimationFrame(this.frameId)
-    this.frameId = 0
-  }
-
-  private isPaused(): boolean {
-    return this.pausedByUser || this.pausedByVisibility || this.pausedByContext
   }
 
   private waitOnStageClock(duration: number): {
@@ -1101,22 +1071,6 @@ export class MotionStage<TMeta = unknown> {
       height: this.options.container.clientHeight,
       pixelRatio: this.renderer.getPixelRatio(),
     }
-  }
-
-  private readonly handleContextLost = (event: Event) => {
-    if (this.destroyed || this.pausedByContext) return
-    event.preventDefault()
-    this.pausedByContext = true
-    this.stopRenderLoop()
-    this.options.onContextChange?.('lost')
-  }
-
-  private readonly handleContextRestored = () => {
-    if (this.destroyed || !this.pausedByContext) return
-    this.pausedByContext = false
-    this.contentRenderer.capabilities.resourceRecovery?.refreshResources()
-    this.startRenderLoop()
-    this.options.onContextChange?.('restored')
   }
 
   private readonly handleMotionPreferenceChange = (event: MediaQueryListEvent) => {
