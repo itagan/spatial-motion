@@ -4,6 +4,7 @@ import type { TextureAtlasResult } from '../textureAtlas'
 import {
   applyArrayAtlasPatch,
   createArrayAtlasData,
+  createArrayAtlasLayout,
   resolveArrayAtlasPageSize,
 } from './ArrayAtlasStore'
 
@@ -74,6 +75,35 @@ describe('ArrayAtlasStore', () => {
     const fifthContentOffset = 8 * 8 * 4 + ((8 - 1 - 1) * 8 + 1) * 4
     expect(result!.data[firstContentOffset]).toBe(1)
     expect(result!.data[fifthContentOffset]).toBe(5)
+  })
+
+  it('shares stable page dimensions and rects with direct page rasterization', () => {
+    const layout = createArrayAtlasLayout(17, {
+      sourceWidth: 20,
+      sourceHeight: 16,
+      sourceColumns: 5,
+      sourceStrideX: 4,
+      sourceStrideY: 4,
+      cellWidth: 2,
+      cellHeight: 2,
+      padding: 1,
+      maxTextureLayers: 2,
+    })
+
+    expect(layout).toMatchObject({
+      width: 12,
+      height: 12,
+      depth: 2,
+      pageColumns: 3,
+      pageRows: 3,
+      pageCapacity: 9,
+      layerByteLength: 12 * 12 * 4,
+    })
+    expect(Array.from(layout!.rects.filter((_value, index) => index % 4 === 0).map(Math.floor)))
+      .toEqual([
+        0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 1, 1, 1, 1, 1, 1, 1,
+      ])
   })
 
   it('honors an explicit page size that exceeds the device layer limit', () => {

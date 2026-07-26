@@ -30,6 +30,7 @@
 - Cards 可自适应预热首次 Atlas 纹理上传；默认仅预热不超过 16 MiB 的像素缓冲，避免大图集预热本身形成长帧，也可通过 `texturePrewarm` 显式覆盖。
 - Cards 的稳定内容指纹改为逐项保存；局部 `updateItem(s)` 只序列化去重后的变化索引，不再为单卡 Atlas patch 扫描完整名单。
 - Array Atlas 根据设备层数限制和项目数量选择平衡页尺寸，最多规划 256 层；首次约 3 MiB、后续每帧约 768 KiB 的上传预算避免大纹理一次提交，context restore 会从首层重新协调。
+- 默认卡片的 Array Worker 改为约 8 MiB 的平衡分页批次直接绘制和 readback，不再同时保留完整 2D Atlas 像素与最终数组缓冲。
 
 ### Compatibility
 

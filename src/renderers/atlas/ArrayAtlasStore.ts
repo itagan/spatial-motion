@@ -16,6 +16,17 @@ interface ArrayAtlasPlanOptions {
   maxTextureLayers?: number
 }
 
+export interface ArrayAtlasLayout {
+  rects: Float32Array
+  width: number
+  height: number
+  depth: number
+  pageColumns: number
+  pageRows: number
+  pageCapacity: number
+  layerByteLength: number
+}
+
 export interface ArrayAtlasData {
   data: Uint8Array<ArrayBuffer>
   rects: Float32Array
@@ -61,10 +72,48 @@ export function createArrayAtlasData(
   options: ArrayAtlasPlanOptions,
 ): ArrayAtlasData | null {
   const sourceHeight = source.byteLength / 4 / options.sourceWidth
-  const resolvedPage = resolveArrayAtlasPageSize(itemCount, {
+  const layout = createArrayAtlasLayout(itemCount, {
     ...options,
     sourceHeight,
   })
+  if (!layout) return null
+  const data = new Uint8Array(layout.layerByteLength * layout.depth)
+
+  for (let index = 0; index < itemCount; index += 1) {
+    const sourceX = (index % options.sourceColumns) * options.sourceStrideX
+    const sourceY = Math.floor(index / options.sourceColumns) * options.sourceStrideY
+    const pageIndex = Math.floor(index / layout.pageCapacity)
+    const pageSlot = index % layout.pageCapacity
+    const targetX = (pageSlot % layout.pageColumns) * options.sourceStrideX
+    const targetY = Math.floor(pageSlot / layout.pageColumns) * options.sourceStrideY
+    for (let row = 0; row < options.sourceStrideY; row += 1) {
+      const sourceOffset = ((sourceY + row) * options.sourceWidth + sourceX) * 4
+      const targetRow = layout.height - 1 - (targetY + row)
+      const targetOffset = pageIndex * layout.layerByteLength
+        + (targetRow * layout.width + targetX) * 4
+      data.set(
+        source.subarray(sourceOffset, sourceOffset + options.sourceStrideX * 4),
+        targetOffset,
+      )
+    }
+  }
+
+  return {
+    data,
+    rects: layout.rects,
+    width: layout.width,
+    height: layout.height,
+    depth: layout.depth,
+    pageColumns: layout.pageColumns,
+    pageRows: layout.pageRows,
+  }
+}
+
+export function createArrayAtlasLayout(
+  itemCount: number,
+  options: ArrayAtlasPlanOptions & { sourceHeight: number },
+): ArrayAtlasLayout | null {
+  const resolvedPage = resolveArrayAtlasPageSize(itemCount, options)
   const pageColumns = finiteInteger(options.pageColumns, resolvedPage.columns)
   const pageRows = finiteInteger(options.pageRows, resolvedPage.rows)
   const pageCapacity = pageColumns * pageRows
@@ -75,25 +124,12 @@ export function createArrayAtlasData(
   const width = pageColumns * options.sourceStrideX
   const height = pageRows * options.sourceStrideY
   const layerByteLength = width * height * 4
-  const data = new Uint8Array(layerByteLength * depth)
   const rects = new Float32Array(itemCount * 4)
-
   for (let index = 0; index < itemCount; index += 1) {
-    const sourceX = (index % options.sourceColumns) * options.sourceStrideX
-    const sourceY = Math.floor(index / options.sourceColumns) * options.sourceStrideY
     const pageIndex = Math.floor(index / pageCapacity)
     const pageSlot = index % pageCapacity
     const targetX = (pageSlot % pageColumns) * options.sourceStrideX
     const targetY = Math.floor(pageSlot / pageColumns) * options.sourceStrideY
-    for (let row = 0; row < options.sourceStrideY; row += 1) {
-      const sourceOffset = ((sourceY + row) * options.sourceWidth + sourceX) * 4
-      const targetRow = height - 1 - (targetY + row)
-      const targetOffset = pageIndex * layerByteLength + (targetRow * width + targetX) * 4
-      data.set(
-        source.subarray(sourceOffset, sourceOffset + options.sourceStrideX * 4),
-        targetOffset,
-      )
-    }
     rects.set([
       pageIndex + (targetX + options.padding) / width,
       1 - (targetY + options.padding + options.cellHeight) / height,
@@ -103,13 +139,14 @@ export function createArrayAtlasData(
   }
 
   return {
-    data,
     rects,
     width,
     height,
     depth,
     pageColumns,
     pageRows,
+    pageCapacity,
+    layerByteLength,
   }
 }
 

@@ -213,3 +213,7 @@ Array 首帧上传预算约 3 MiB，后续每个 Stage RAF 约 768 KiB。新的 
 2026-07-26 Chromium 150 / Apple M4 / 2000 Cards 实测：array 和 `auto + mipmaps:false` 选择 2×4 单元页面、250 层，首次 WebGL 提交约 4.3ms，P95 18.4–18.6ms，0 个 33ms 长帧并保持主体 1 Draw Call；`auto + mipmaps:true` 确定性使用 single，首次提交约 34.7–37.3ms。500 项无 mipmap图集约 10.49 MiB，低于 16 MiB 门槛，auto 同样保持 single。
 
 17 次局部更新下，自适应页面累计估算上传约 1.71 MiB，相比固定 4×4 页面约 3.41 MiB 减半；single 仍只需约 0.16 MiB，验证了默认不切换 array 的取舍。Array Store 与 GLSL3 Shader 通过动态模块隔离，默认 Cards 消费包不包含 `sampler2DArray`。完整包检查为 root 37,093 bytes、Core 13,048 bytes、Cards 12,227 bytes gzip，tarball 100,875 bytes，均在既有预算内。
+
+Array 默认卡片 Worker 随后移除“完整 2D Atlas readback 后再逐单元重排”的中间路径，改为最多约 8 MiB 的平衡分页批次直接绘制、批量 readback 并写入最终 layer 缓冲。2000 项 48px/250 层只需约 3 次 readback；估算瞬时像素缓冲由完整 2D Canvas、完整 ImageData 和最终数组同时驻留的约 62 MiB，降低到最终数组加单批 Canvas/ImageData 的约 41 MiB。
+
+同环境三轮 2000/high/cold-start 的 Atlas build 为 51.7/74.6/55.0ms，中位数 55.0ms；readback 为 30.7/39.5/31.8ms，中位数 31.8ms。P95 为 18.55–18.60ms，均为 0 个 24/33/50ms 长帧、主体 1 Draw Call，首次提交 4.2–6.5ms。默认 root/Core/Cards 消费体积保持 37,093/13,048/12,227 bytes gzip，新增实现只进入按需 Worker/Array chunk；tarball 约 99.1 KiB，仍低于既有预算。

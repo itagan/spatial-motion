@@ -148,3 +148,5 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 2026-07-26 已完成 mipmap 与局部指纹对照：2000/high/cold-start 关闭 mipmap 后纹理内存降至 24.2MB，但首次提交仍为 30.9ms，未改变首传瓶颈，因此默认继续开启。逐项内容指纹下，2000 项单卡 patch 只解析一个变化索引；3 秒连续更新完成 17 次 patch，保持 60 FPS、P95 17.50ms、P99 17.65ms、0 个 33ms 长帧和 1 Draw Call，控制台无 error。
 
 2026-07-26 已完成 Texture2DArray 对照：2000/high 的显式 array 与 `auto + mipmaps:false` 均使用 250 层自适应页面，渐进上传期间画面稳定，完成后 2000 项全部显示；首次 WebGL 提交约 4.3ms，P95 18.4–18.6ms、0 个 33ms 长帧和主体 1 Draw Call。`auto + mipmaps:true` 与 500 项无 mipmap小图集均保持 single。17 次 array patch 估算上传约 1.71 MiB，无资源或 Draw Call 增长，控制台无 warning/error。
+
+2026-07-26 已完成 Array Worker 分页批次复验：2000/high/auto、48px、250 层完成全部渐进上传，球面卡片方向和层顺序保持稳定。三轮 cold-start Atlas build 中位数 55.0ms、readback 中位数 31.8ms，P95 18.55–18.60ms、0 个 24/33/50ms 长帧、主体 1 Draw Call，首次提交 4.2–6.5ms；默认 Cards 消费体积不变。
