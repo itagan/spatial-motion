@@ -251,6 +251,7 @@ export class MotionStage<TMeta = unknown> {
   private readonly motionQuery: MediaQueryList | null
   private reducedMotion = false
   private hoveredIndex: number | null = null
+  private pendingPointerMove?: PointerEvent
   private focusedItemId: string | null = null
   private readonly hoverEnabled: boolean
   private readonly keyboardNavigation: boolean
@@ -1193,7 +1194,7 @@ export class MotionStage<TMeta = unknown> {
         this.effectElapsedSeconds(this.activeEffect, now),
       )
     }
-    if (!this.activeTransition) return this.transforms.map((transform) => ({ ...transform }))
+    if (!this.activeTransition) return this.transforms
     const { from, to, easing: transitionEasing } = this.activeTransition
     const progress = transitionEasing(this.transitionProgress(this.activeTransition, now))
     return to.map((transform, index) =>
@@ -1319,6 +1320,7 @@ export class MotionStage<TMeta = unknown> {
       this.activeEffect.lastUpdatedAt = now
       this.contentRenderer.capabilities.streamingEffects?.setTime(this.activeEffect.elapsedSeconds)
     }
+    if (this.pendingPointerMove) this.handlePointerMove()
     this.updateExtensions(delta)
     this.frameCpuMs = performance.now() - frameCpuStartedAt
     const renderStartedAt = performance.now()
@@ -1410,7 +1412,7 @@ export class MotionStage<TMeta = unknown> {
 
   private advanceStageWaits(deltaMs: number): void {
     if (deltaMs <= 0) return
-    for (const wait of [...this.stageWaits]) {
+    for (const wait of this.stageWaits) {
       wait.remainingMs -= deltaMs
       if (wait.remainingMs <= 0) wait.complete()
     }
@@ -1580,9 +1582,14 @@ export class MotionStage<TMeta = unknown> {
     if (result) this.options.onItemClick?.(result.item, result.index)
   }
 
-  private readonly handlePointerMove = (event: PointerEvent) => {
-    if (this.destroyed) return
-    const result = this.pick(event.clientX, event.clientY)
+  private readonly handlePointerMove = (event?: PointerEvent) => {
+    if (event) {
+      this.pendingPointerMove = event
+      if (this.frameId) return
+    }
+    const pointer = this.pendingPointerMove!
+    this.pendingPointerMove = undefined
+    const result = this.pick(pointer.clientX, pointer.clientY)
     const index = result?.index ?? null
     if (index === this.hoveredIndex) return
     this.hoveredIndex = index
@@ -1591,7 +1598,8 @@ export class MotionStage<TMeta = unknown> {
   }
 
   private readonly handlePointerLeave = () => {
-    if (this.destroyed || this.hoveredIndex === null) return
+    this.pendingPointerMove = undefined
+    if (this.hoveredIndex === null) return
     this.hoveredIndex = null
     this.updateInteractionHighlight()
     this.options.onItemHover?.(null, null)

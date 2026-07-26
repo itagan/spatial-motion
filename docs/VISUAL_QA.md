@@ -133,3 +133,5 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 2026-07-26 已完成未发布 API 收敛复验：显式 Cards/Points Renderer 下，Points 1000/2000 与 Cards 500/2000 均保持单 Canvas、60 FPS、主体 1 Draw Call；Points 2000 的球体/圆柱连续快速中断稳定，Cards 2000 产品横卡 Atlas build 完成后恢复 60 FPS，控制台无 error。
 
 2026-07-26 已完成运行时容量复用复验：Cards/Points 的 500/1000/2000 项均保持 60 FPS、主体 1 Draw Call，容量分别进入 512/1024/2048 桶；同容量档球体/圆柱切换的 `geometryBuilds` 保持 1，`attributeReuses` 增长且无资源累积。默认 Cards 2000/high 的 steady、transition-stress、连续 Atlas 更新 P95 分别为 17.60/17.46/17.50ms，均无 33ms 长帧；控制台无 error。
+
+2026-07-26 已完成高频交互合帧复验：Cards 2000/high 在约 240Hz 合成指针输入下，3 秒 707 次事件合并为 180 次拾取，减少 74.5%，保持 59.99 FPS、P95 17.70ms、0 个 33ms 长帧和 1 Draw Call。Points 2000 保持主体 1 Draw Call，控制台无 error。
