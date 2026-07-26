@@ -1,5 +1,6 @@
 import {
   MotionStage,
+  cardsRenderer,
   sphere,
   type StageExtension,
   type StageExtensionHandle,
@@ -10,7 +11,12 @@ import '../shared.css'
 
 const container = document.querySelector<HTMLElement>('#stage')!
 const status = document.querySelector<HTMLElement>('#status')!
-const stage = new MotionStage({ container, quality: 'auto', adaptivePerformance: true })
+const stage = new MotionStage({
+  container,
+  renderer: cardsRenderer(),
+  quality: 'auto',
+  adaptivePerformance: true,
+})
 
 await stage.setItems(Array.from({ length: 180 }, (_, index) => ({
   id: `card-${index}`,

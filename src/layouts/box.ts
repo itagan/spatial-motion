@@ -1,4 +1,5 @@
 import type { Layout, Transform } from '../core/types.js'
+import { defineLayout } from './defineLayout.js'
 
 export interface BoxOptions {
   width?: number
@@ -36,7 +37,7 @@ export function box(options: BoxOptions = {}): Layout {
   const edgePadding = Math.max(0, finite(options.edgePadding, 0))
   const faces = createFaces(width, height, depth)
 
-  return {
+  return defineLayout({
     name: 'box',
     orientation,
     calculate(count): Transform[] {
@@ -57,7 +58,7 @@ export function box(options: BoxOptions = {}): Layout {
       ) * density
       return plans.flatMap((plan) => createFaceTransforms(plan, sharedScale, orientation))
     },
-  }
+  })
 }
 
 export function calculateBoxFaceDistribution(

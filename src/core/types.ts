@@ -1,8 +1,8 @@
-export interface MotionItem {
+export interface MotionItem<TMeta = unknown> {
   id: string
   image?: string
   title?: string
-  meta?: unknown
+  meta?: TMeta
 }
 
 export interface CardStyle {
@@ -42,9 +42,9 @@ export interface CardDrawBounds {
   height: number
 }
 
-export type DrawCard = (
+export type DrawCard<TMeta = unknown> = (
   context: CanvasRenderingContext2D,
-  item: MotionItem,
+  item: MotionItem<TMeta>,
   bounds: CardDrawBounds,
   resolvedStyle: Readonly<CardStyle>,
 ) => void | Promise<void>
@@ -62,14 +62,16 @@ export interface PreparedCardContent {
   draw(context: CardContentDrawContext): void | Promise<void>
 }
 
-export interface CardContentRenderer {
+export interface CardContentRenderer<TMeta = unknown> {
   prepare(
-    item: Readonly<MotionItem>,
+    item: Readonly<MotionItem<TMeta>>,
     resolvedStyle: Readonly<CardStyle>,
   ): PreparedCardContent
 }
 
-export type ResolveCardStyle = (item: Readonly<MotionItem>) => CardStyle | undefined
+export type ResolveCardStyle<TMeta = unknown> = (
+  item: Readonly<MotionItem<TMeta>>,
+) => CardStyle | undefined
 
 export interface Transform {
   x: number
@@ -89,10 +91,10 @@ export interface LayoutContext {
   viewportWidth?: number
   /** Camera-visible height in world units at the default layout plane. */
   viewportHeight?: number
-  /** Normalized shared card width. The longest card edge is 1. */
-  cardWidth?: number
-  /** Normalized shared card height. The longest card edge is 1. */
-  cardHeight?: number
+  /** Normalized shared item width. The longest item edge is 1. */
+  itemWidth?: number
+  /** Normalized shared item height. The longest item edge is 1. */
+  itemHeight?: number
 }
 
 export interface Layout {
@@ -101,6 +103,14 @@ export interface Layout {
   readonly hideBackHemisphere?: boolean
   readonly hemisphereEdgeFade?: number
   calculate(count: number, context: LayoutContext): Transform[]
+}
+
+export interface LayoutDefinition {
+  readonly name: string
+  readonly orientation?: 'surface' | 'camera'
+  readonly hideBackHemisphere?: boolean
+  readonly hemisphereEdgeFade?: number
+  readonly calculate: (count: number, context: LayoutContext) => Transform[]
 }
 
 export interface TransitionOptions {

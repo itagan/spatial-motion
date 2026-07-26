@@ -1,4 +1,5 @@
 import type { Layout, Transform } from '../core/types.js'
+import { defineLayout } from './defineLayout.js'
 
 export interface SphereOptions {
   radius?: number
@@ -45,7 +46,7 @@ export function sphere(options: SphereOptions = {}): Layout {
   const legacyLatitudeRange = options.minLatitude === undefined
     && options.maxLatitude === undefined
     && poleMode === 'include'
-  return {
+  return defineLayout({
     name: 'sphere',
     orientation: orientation === 'camera' ? 'camera' : 'surface',
     hideBackHemisphere: orientation === 'camera',
@@ -120,7 +121,7 @@ export function sphere(options: SphereOptions = {}): Layout {
 
       return transforms
     },
-  }
+  })
 }
 
 function calculateFibonacciSphere(
@@ -163,17 +164,17 @@ function resolveRadius(
   context: {
     viewportWidth?: number
     viewportHeight?: number
-    cardWidth?: number
-    cardHeight?: number
+    itemWidth?: number
+    itemHeight?: number
   },
 ): number {
   const width = context.viewportWidth
   const height = context.viewportHeight
   if (fit !== 'contain' || !positiveFinite(width) || !positiveFinite(height)) return fallback
   const availableDiameter = Math.min(width, height) * (1 - padding * 2)
-  const cardWidth = positive(context.cardWidth, 1)
-  const cardHeight = positive(context.cardHeight, 1)
-  const halfDiagonal = Math.hypot(cardWidth, cardHeight) / 2
+  const itemWidth = positive(context.itemWidth, 1)
+  const itemHeight = positive(context.itemHeight, 1)
+  const halfDiagonal = Math.hypot(itemWidth, itemHeight) / 2
   return Math.max(0.1, availableDiameter / 2 - halfDiagonal)
 }
 

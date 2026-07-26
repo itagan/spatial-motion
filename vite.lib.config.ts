@@ -14,10 +14,13 @@ export default defineConfig({
     lib: {
       entry: {
         index: new URL('./src/index.ts', import.meta.url).pathname,
+        'core/index': new URL('./src/core/index.ts', import.meta.url).pathname,
         'layouts/index': new URL('./src/layouts/index.ts', import.meta.url).pathname,
         'effects/index': new URL('./src/effects/index.ts', import.meta.url).pathname,
         'performance/index': new URL('./src/performance/index.ts', import.meta.url).pathname,
         'card-template/index': new URL('./src/card-template/index.ts', import.meta.url).pathname,
+        'renderers/cards/index': new URL('./src/renderers/cards/index.ts', import.meta.url).pathname,
+        'renderers/points/index': new URL('./src/renderers/points/index.ts', import.meta.url).pathname,
       },
       formats: ['es'],
     },

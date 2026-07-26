@@ -10,11 +10,11 @@ import type {
   ResolveCardStyle,
 } from '../core/types.js'
 
-export interface TextureAtlasOptions {
+export interface TextureAtlasOptions<TMeta = unknown> {
   cardStyle?: CardStyle
-  resolveCardStyle?: ResolveCardStyle
-  drawCard?: DrawCard
-  cardContent?: CardContentRenderer
+  resolveCardStyle?: ResolveCardStyle<TMeta>
+  drawCard?: DrawCard<TMeta>
+  cardContent?: CardContentRenderer<TMeta>
   aspectRatio?: number
   imageTimeout?: number
   maxTextureSize?: number
@@ -137,10 +137,10 @@ const loadImage = (
   })
 }
 
-export async function createTextureAtlas(
-  items: MotionItem[],
+export async function createTextureAtlas<TMeta = unknown>(
+  items: MotionItem<TMeta>[],
   cellSize = 64,
-  options: TextureAtlasOptions = {},
+  options: TextureAtlasOptions<TMeta> = {},
 ): Promise<TextureAtlasResult> {
   const startedAt = now()
   const metrics = resolveAtlasMetrics(
@@ -229,11 +229,11 @@ export async function createTextureAtlas(
   return atlas
 }
 
-export async function createTextureAtlasPatch(
-  items: MotionItem[],
+export async function createTextureAtlasPatch<TMeta = unknown>(
+  items: MotionItem<TMeta>[],
   indices: number[],
   cellSize: number,
-  options: TextureAtlasOptions = {},
+  options: TextureAtlasOptions<TMeta> = {},
 ): Promise<TextureAtlasPatch> {
   const startedAt = now()
   const uniqueIndices = [...new Set(indices)].filter((index) => index >= 0 && index < items.length)
@@ -352,11 +352,11 @@ function drawPatchToCanvas(
   })
 }
 
-async function renderCell(
-  item: MotionItem,
+async function renderCell<TMeta>(
+  item: MotionItem<TMeta>,
   cellWidth: number,
   cellHeight: number,
-  options: TextureAtlasOptions,
+  options: TextureAtlasOptions<TMeta>,
   imageResult: ImageLoadResult | null,
   prepared: {
     content?: PreparedCardContent
@@ -658,7 +658,10 @@ function wrapTitle(
   return lines.length ? lines : ['']
 }
 
-function resolveCardStyle(item: MotionItem, options: TextureAtlasOptions): CardStyle {
+function resolveCardStyle<TMeta>(
+  item: MotionItem<TMeta>,
+  options: TextureAtlasOptions<TMeta>,
+): CardStyle {
   const base = options.cardStyle ?? {}
   let override: CardStyle | undefined
   try {

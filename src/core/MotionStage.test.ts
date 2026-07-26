@@ -1,13 +1,30 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Object3D } from 'three'
+import {
+  BufferGeometry,
+  Float32BufferAttribute,
+  InstancedMesh,
+  LineBasicMaterial,
+  LineSegments,
+  Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+  Object3D,
+  PlaneGeometry,
+  ShaderMaterial,
+} from 'three'
 import type { Layout, LayoutContext, MotionItem, Transform } from './types'
 import type { StageExtensionContext } from './extensions'
 import { MotionStage } from './MotionStage'
 import { TunnelEffect } from '../effects/TunnelEffect'
 import { radialBurst } from '../effects/RadialBurstEffect'
 import type { StreamingEffect } from '../effects/types'
+import {
+  type MotionRenderer,
+  type MotionRendererFactory,
+} from '../renderers/MotionRenderer'
+import { cardsRenderer } from '../renderers/cards'
 
 const stageMocks = vi.hoisted(() => ({
   cards: [] as Array<Record<string, ReturnType<typeof vi.fn>>>,
@@ -17,12 +34,16 @@ const stageMocks = vi.hoisted(() => ({
 
 vi.mock('../renderers/InstancedCardRenderer', () => ({
   InstancedCardRenderer: class MockInstancedCardRenderer {
+    descriptor = {
+      itemBounds: { kind: 'quad', width: 1, height: 1, facing: 'layout' },
+    }
     setItems = vi.fn(async () => true)
     updateItems = vi.fn(async () => true)
     setTransforms = vi.fn()
     prepareTransition = vi.fn()
     setProgress = vi.fn()
-    setGroupRotation = vi.fn()
+    setVisualState = vi.fn()
+    prepareVisualTransition = vi.fn()
     setOrientation = vi.fn()
     setHideBackHemisphere = vi.fn()
     setHemisphereEdgeFade = vi.fn()
@@ -32,26 +53,55 @@ vi.mock('../renderers/InstancedCardRenderer', () => ({
     setVisibleRatio = vi.fn()
     setHoverIndex = vi.fn()
     refreshTexture = vi.fn()
+    refreshResources = vi.fn()
+    resize = vi.fn()
+    capabilities = {
+      patch: { updateItems: this.updateItems },
+      visual: {
+        setVisualState: this.setVisualState,
+        prepareVisualTransition: this.prepareVisualTransition,
+      },
+      highlight: { setHighlightIndex: this.setHoverIndex },
+      viewport: { resize: this.resize },
+      resourceRecovery: { refreshResources: this.refreshResources },
+      streamingEffects: {
+        enable: this.enableEffect,
+        disable: this.disableEffect,
+        setTime: this.setEffectTime,
+      },
+    }
     getStats = vi.fn(() => ({
       instanceCount: 0,
       submittedInstanceCount: 0,
-      textureBytes: 0,
-      atlasBuilds: 0,
-      atlasPatches: 0,
-      atlasDiscardedBuilds: 0,
-      atlasDiscardedPatches: 0,
-      atlasCellsUpdated: 0,
-      atlasBuildMs: 0,
-      atlasPatchMs: 0,
-      atlasDrawMs: 0,
-      imageLoadMs: 0,
-      imageRequests: 0,
-      imageFailures: 0,
-      estimatedTextureUploadBytes: 0,
+      gpuBytes: 0,
+      metrics: {
+        textureBytes: 0,
+        atlasBuilds: 0,
+        atlasPatches: 0,
+        atlasDiscardedBuilds: 0,
+        atlasDiscardedPatches: 0,
+        atlasCellsUpdated: 0,
+        atlasBuildMs: 0,
+        atlasPatchMs: 0,
+        atlasDrawMs: 0,
+        imageLoadMs: 0,
+        imageRequests: 0,
+        imageFailures: 0,
+        estimatedTextureUploadBytes: 0,
+      },
     }))
     dispose = vi.fn()
 
     constructor(_scene: unknown, options: unknown) {
+      const aspectRatio = (options as { aspectRatio?: number }).aspectRatio ?? 1
+      this.descriptor = {
+        itemBounds: {
+          kind: 'quad',
+          width: aspectRatio >= 1 ? 1 : aspectRatio,
+          height: aspectRatio >= 1 ? 1 / aspectRatio : 1,
+          facing: 'layout',
+        },
+      }
       stageMocks.cards.push(this as unknown as Record<string, ReturnType<typeof vi.fn>>)
       stageMocks.cardOptions.push(options)
     }
@@ -140,7 +190,14 @@ function createStage(options: Partial<ConstructorParameters<typeof MotionStage>[
     clientWidth: { value: 100 },
   })
   document.body.appendChild(container)
-  return new MotionStage({ container, quality: 'high', adaptivePerformance: false, ...options })
+  const renderer = options.renderer ?? cardsRenderer()
+  return new MotionStage({
+    container,
+    quality: 'high',
+    adaptivePerformance: false,
+    ...options,
+    renderer,
+  })
 }
 
 function currentCards() {
@@ -153,6 +210,171 @@ function currentRenderer() {
   const renderer = stageMocks.webglRenderers.at(-1)
   if (!renderer) throw new Error('WebGL renderer mock was not created')
   return renderer as { render: ReturnType<typeof vi.fn> }
+}
+
+function mockMotionRenderer(overrides: Partial<MotionRenderer> = {}): MotionRenderer {
+  const patch = vi.fn(async () => true)
+  const setVisualState = vi.fn()
+  const prepareVisualTransition = vi.fn()
+  const setHighlightIndex = vi.fn()
+  const resize = vi.fn()
+  const refreshResources = vi.fn()
+  return {
+    descriptor: {
+      itemBounds: { kind: 'disc', diameter: 1, facing: 'camera' },
+    },
+    capabilities: {
+      patch: { updateItems: patch },
+      visual: { setVisualState, prepareVisualTransition },
+      highlight: { setHighlightIndex },
+      viewport: { resize },
+      resourceRecovery: { refreshResources },
+    },
+    setItems: vi.fn(async () => true),
+    setTransforms: vi.fn(),
+    prepareTransition: vi.fn(),
+    setProgress: vi.fn(),
+    setVisibleRatio: vi.fn(),
+    getStats: vi.fn(() => ({ instanceCount: 1, submittedInstanceCount: 1 })),
+    dispose: vi.fn(),
+    ...overrides,
+  }
+}
+
+function createCustomStage(
+  factory: MotionRendererFactory,
+  options: Omit<
+    Partial<ConstructorParameters<typeof MotionStage>[0]>,
+    'container' | 'renderer'
+  > = {},
+) {
+  const container = document.createElement('div')
+  Object.defineProperties(container, {
+    clientHeight: { value: 100 },
+    clientWidth: { value: 100 },
+  })
+  document.body.appendChild(container)
+  return {
+    container,
+    stage: new MotionStage({
+      container,
+      renderer: factory,
+      quality: 'high',
+      adaptivePerformance: false,
+      ...options,
+    }),
+  }
+}
+
+function lineRendererFixture() {
+  const geometry = new BufferGeometry()
+  const material = new LineBasicMaterial()
+  const lines = new LineSegments(geometry, material)
+  const disposeGeometry = vi.spyOn(geometry, 'dispose')
+  const disposeMaterial = vi.spyOn(material, 'dispose')
+  let count = 0
+  const setItems = vi.fn(async (items: MotionItem[]) => {
+    count = items.length
+    geometry.setAttribute('position', new Float32BufferAttribute(new Float32Array(count * 6), 3))
+    return true
+  })
+  const setTransforms = vi.fn((transforms: Transform[]) => {
+    const positions = geometry.getAttribute('position')
+    transforms.forEach((item, index) => {
+      positions.setXYZ(index * 2, item.x - 0.25, item.y, item.z)
+      positions.setXYZ(index * 2 + 1, item.x + 0.25, item.y, item.z)
+    })
+    positions.needsUpdate = true
+  })
+  const factory: MotionRendererFactory = ({ root }) => {
+    root.add(lines)
+    return {
+      descriptor: { itemBounds: null },
+      capabilities: {},
+      setItems,
+      setTransforms,
+      prepareTransition: vi.fn(),
+      setProgress: vi.fn(),
+      setVisibleRatio: vi.fn(),
+      getStats: () => ({
+        instanceCount: count,
+        submittedInstanceCount: count,
+        gpuBytes: geometry.getAttribute('position')?.array.byteLength ?? 0,
+      }),
+      dispose() {
+        root.remove(lines)
+        geometry.dispose()
+        material.dispose()
+      },
+    }
+  }
+  return {
+    setItems,
+    setTransforms,
+    disposeGeometry,
+    disposeMaterial,
+    factory,
+  }
+}
+
+function shapeRendererFixture() {
+  const geometry = new PlaneGeometry(1, 0.5)
+  const material = new MeshBasicMaterial()
+  const shapes = new InstancedMesh(geometry, material, 2000)
+  shapes.count = 0
+  const matrix = new Matrix4()
+  const patch = vi.fn(async () => true)
+  const highlight = vi.fn()
+  const refreshResources = vi.fn()
+  const disposeGeometry = vi.spyOn(geometry, 'dispose')
+  const disposeMaterial = vi.spyOn(material, 'dispose')
+  const factory: MotionRendererFactory = ({ root }) => {
+    root.add(shapes)
+    return {
+      descriptor: {
+        itemBounds: { kind: 'quad', width: 1, height: 0.5, facing: 'camera' },
+      },
+      capabilities: {
+        patch: { updateItems: patch },
+        highlight: { setHighlightIndex: highlight },
+        resourceRecovery: { refreshResources },
+      },
+      async setItems(items) {
+        shapes.count = items.length
+        return true
+      },
+      setTransforms(transforms) {
+        transforms.forEach((item, index) => {
+          matrix.makeScale(item.scale, item.scale, item.scale)
+          matrix.setPosition(item.x, item.y, item.z)
+          shapes.setMatrixAt(index, matrix)
+        })
+        shapes.instanceMatrix.needsUpdate = true
+      },
+      prepareTransition: vi.fn(),
+      setProgress: vi.fn(),
+      setVisibleRatio: vi.fn(),
+      getStats: () => ({
+        instanceCount: shapes.count,
+        submittedInstanceCount: shapes.count,
+        gpuBytes: geometry.getAttribute('position').array.byteLength
+          + shapes.instanceMatrix.array.byteLength,
+      }),
+      dispose() {
+        root.remove(shapes)
+        geometry.dispose()
+        material.dispose()
+      },
+    }
+  }
+  return {
+    patch,
+    highlight,
+    refreshResources,
+    disposeGeometry,
+    disposeMaterial,
+    factory,
+  }
 }
 
 describe('MotionStage', () => {
@@ -170,17 +392,35 @@ describe('MotionStage', () => {
     vi.unstubAllGlobals()
   })
 
+  it('requires an explicit renderer factory before allocating WebGL resources', () => {
+    const container = document.createElement('div')
+    expect(() => new MotionStage({ container } as never)).toThrow(
+      'MotionStage renderer must be a renderer factory',
+    )
+    expect(stageMocks.webglRenderers).toHaveLength(0)
+  })
+
+  it('initializes constructor items through the renderer and exposes readiness', async () => {
+    const stage = createStage({ items: [{ id: 'initial', meta: { score: 7 } }] })
+    await stage.ready
+    expect(currentCards().setItems).toHaveBeenCalledWith([
+      { id: 'initial', meta: { score: 7 } },
+    ])
+    expect(stage.getPerformanceStats().inputItems).toBe(1)
+    stage.destroy()
+  })
+
   it('rejects ambiguous card content configuration before allocating WebGL resources', () => {
-    expect(() => createStage({
-      drawCard: () => {},
-      cardContent: { prepare: () => ({ draw: () => {} }) },
-    })).toThrow('cardContent and drawCard cannot be used together')
+    expect(() => cardsRenderer({
+      draw: () => {},
+      content: { prepare: () => ({ draw: () => {} }) },
+    })).toThrow('content and draw cannot be used together')
     expect(stageMocks.webglRenderers).toHaveLength(0)
   })
 
   it('passes a card content renderer to the shared Atlas renderer', () => {
     const cardContent = { prepare: vi.fn(() => ({ draw: vi.fn() })) }
-    const stage = createStage({ cardContent })
+    const stage = createStage({ renderer: cardsRenderer({ content: cardContent }) })
     expect(stageMocks.cardOptions.at(-1)).toMatchObject({ cardContent })
     stage.destroy()
   })
@@ -216,7 +456,8 @@ describe('MotionStage', () => {
       ...cards.getStats(),
       instanceCount: 500,
       submittedInstanceCount: 500,
-      textureBytes: 1_048_576,
+      gpuBytes: 1_048_576,
+      metrics: { textureBytes: 1_048_576 },
     })
     await stage.setItems(Array.from({ length: 520 }, (_, index) => ({ id: `item-${index}` })))
 
@@ -225,16 +466,16 @@ describe('MotionStage', () => {
       quality: 'low',
       qualityMode: 'low',
       inputItems: 520,
-      renderedItems: 500,
-      submittedItems: 500,
-      drawCalls: 1,
-      triangles: 2,
-      textureBytes: 1_048_576,
+      render: { drawCalls: 1, triangles: 2 },
+      renderer: {
+        instanceCount: 500,
+        submittedInstanceCount: 500,
+        gpuBytes: 1_048_576,
+        metrics: { textureBytes: 1_048_576 },
+      },
       pixelRatio: 1.5,
       paused: false,
       frameTimeP95: 0,
-      atlasBuilds: 0,
-      atlasPatches: 0,
     })
 
     expect(stage.getPerformanceEnvironment()).toMatchObject({
@@ -947,7 +1188,7 @@ describe('MotionStage', () => {
     expect(extensionPause).toHaveBeenCalledOnce()
 
     canvas.dispatchEvent(new Event('webglcontextrestored'))
-    expect(cards.refreshTexture).toHaveBeenCalledOnce()
+    expect(cards.refreshResources).toHaveBeenCalledOnce()
     expect(stage.getPerformanceStats()).toMatchObject({ paused: false, contextLost: false })
     expect(contextChanges).toHaveBeenLastCalledWith('restored')
     expect(extensionResume).toHaveBeenCalledOnce()
@@ -1093,7 +1334,10 @@ describe('MotionStage', () => {
     const secondLayout = layout(() => [transform({ x: 5 })], 'second')
 
     const firstTransition = stage.to(firstLayout, { duration: 100 })
-    expect(cards.prepareTransition.mock.calls.at(-1)?.slice(2)).toEqual([0, 1, 0, 0, 0, 0])
+    expect(cards.prepareVisualTransition.mock.calls.at(-1)).toEqual([
+      { billboard: 0, hideBackHemisphere: 0, hemisphereEdgeFade: 0 },
+      { billboard: 1, hideBackHemisphere: 0, hemisphereEdgeFade: 0 },
+    ])
     const secondTransition = stage.to(secondLayout, { duration: 0 })
     callbacks.at(-1)?.(100)
 
@@ -1115,7 +1359,7 @@ describe('MotionStage', () => {
     await stage.to(baseLayout, { duration: 0 })
     cards.disableEffect.mockClear()
 
-    expect(await stage.enterTunnel(new TunnelEffect(), { duration: 0 })).toBe(true)
+    expect(await stage.enterEffect(new TunnelEffect(), { duration: 0 })).toBe(true)
     expect(cards.enableEffect).toHaveBeenCalledOnce()
     expect(await stage.to(baseLayout, { duration: 0 })).toBe(true)
     expect(cards.disableEffect).toHaveBeenCalledOnce()
@@ -1223,7 +1467,10 @@ describe('MotionStage', () => {
   it('passes camera-visible world dimensions to layouts', async () => {
     let received: LayoutContext | undefined
     const resolveCardStyle = vi.fn(() => ({ borderColor: '#ffd700' }))
-    const stage = createStage({ cameraZ: 18, cardAspectRatio: 0.75, resolveCardStyle })
+    const stage = createStage({
+      cameraZ: 18,
+      renderer: cardsRenderer({ aspectRatio: 0.75, resolveStyle: resolveCardStyle }),
+    })
     await stage.setItems([{ id: 'a' }])
     await stage.to({
       name: 'context-reader',
@@ -1237,8 +1484,8 @@ describe('MotionStage', () => {
     expect(received.viewportWidth).toBeGreaterThan(0)
     expect(received.viewportHeight).toBeGreaterThan(0)
     expect(received.viewportWidth).toBeCloseTo(received.viewportHeight ?? 0)
-    expect(received.cardWidth).toBe(0.75)
-    expect(received.cardHeight).toBe(1)
+    expect(received.itemWidth).toBe(0.75)
+    expect(received.itemHeight).toBe(1)
     expect(stageMocks.cardOptions.at(-1)).toMatchObject({
       aspectRatio: 0.75,
       resolveCardStyle,
@@ -1247,7 +1494,7 @@ describe('MotionStage', () => {
   })
 
   it('uses the normalized card aspect ratio for billboard and surface picking', async () => {
-    const billboard = createStage({ cardAspectRatio: 0.25 })
+    const billboard = createStage({ renderer: cardsRenderer({ aspectRatio: 0.25 }) })
     await billboard.setItems([{ id: 'portrait' }])
     await billboard.to(layout(() => [transform()]), { duration: 0 })
 
@@ -1255,7 +1502,7 @@ describe('MotionStage', () => {
     expect(billboard.pick(50, 52)?.item.id).toBe('portrait')
     billboard.destroy()
 
-    const surface = createStage({ cardAspectRatio: 0.25 })
+    const surface = createStage({ renderer: cardsRenderer({ aspectRatio: 0.25 }) })
     await surface.setItems([{ id: 'portrait' }])
     await surface.to({
       name: 'surface',
@@ -1267,11 +1514,221 @@ describe('MotionStage', () => {
     surface.destroy()
   })
 
+  it('runs an injected disc renderer and falls back to a static effect frame', async () => {
+    const renderer = mockMotionRenderer()
+    let root: Object3D | undefined
+    let signal: AbortSignal | undefined
+    const { stage } = createCustomStage((context) => {
+      root = context.root
+      signal = context.signal
+      return renderer
+    })
+    await stage.setItems([{ id: 'point' }])
+    await stage.to(layout(() => [transform()]), { duration: 0 })
+
+    expect(stageMocks.cards).toHaveLength(0)
+    expect(renderer.capabilities.viewport?.resize).toHaveBeenCalled()
+    expect(stage.pick(52, 50)?.item.id).toBe('point')
+    expect(stage.pick(58, 50)).toBeNull()
+    stage.setRotation(0.25, 0.5)
+    expect(root?.rotation.x).toBeCloseTo(0.25)
+    expect(root?.rotation.y).toBeCloseTo(0.5)
+
+    expect(await stage.enterEffect(radialBurst(), { duration: 0 })).toBe(true)
+    expect(renderer.capabilities.streamingEffects).toBeUndefined()
+    expect(stage.getPerformanceStats()).toMatchObject({
+      effect: null,
+      renderer: { metrics: {} },
+    })
+
+    stage.destroy()
+    expect(signal?.aborted).toBe(true)
+    expect(renderer.dispose).toHaveBeenCalledOnce()
+    expect(root?.parent).toBeNull()
+  })
+
+  it('updates, restores quality, highlights, and refreshes an injected renderer', async () => {
+    const renderer = mockMotionRenderer({
+      getStats: vi.fn(() => ({ instanceCount: 500, submittedInstanceCount: 500 })),
+    })
+    const { container, stage } = createCustomStage(() => renderer, {
+      hoverEffect: 'highlight',
+    })
+    const data = Array.from({ length: 600 }, (_value, index) => ({ id: `point-${index}` }))
+    await stage.setItems(data)
+    await stage.updateItem('point-0', { meta: { color: '#fff' } })
+    stage.setQuality('low')
+    await Promise.resolve()
+    container.querySelector('canvas')?.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
+    container.querySelector('canvas')?.dispatchEvent(new Event('webglcontextrestored'))
+
+    expect(renderer.capabilities.patch?.updateItems).toHaveBeenCalled()
+    expect(renderer.setVisibleRatio).toHaveBeenCalled()
+    expect(renderer.capabilities.resourceRecovery?.refreshResources).toHaveBeenCalledOnce()
+    stage.focusItem('point-0')
+    expect(renderer.capabilities.highlight?.setHighlightIndex).toHaveBeenLastCalledWith(0)
+    stage.destroy()
+  })
+
+  it('supports a minimal LineSegments renderer and restores state after full-update fallback', async () => {
+    const fixture = lineRendererFixture()
+    const { stage } = createCustomStage(fixture.factory)
+    await stage.setItems([{ id: 'line', title: 'before' }])
+    await stage.to(layout(() => [transform({ x: 2 })]), { duration: 0 })
+    await expect(stage.updateItem('line', { title: 'after' })).resolves.toBe(true)
+
+    expect(fixture.setItems).toHaveBeenCalledTimes(2)
+    expect(fixture.setTransforms).toHaveBeenLastCalledWith([
+      expect.objectContaining({ x: 2 }),
+    ])
+    expect(stage.pick(50, 50)).toBeNull()
+    expect(stage.focusItem('line')).toBe(true)
+    stage.destroy()
+    expect(fixture.disposeGeometry).toHaveBeenCalledOnce()
+    expect(fixture.disposeMaterial).toHaveBeenCalledOnce()
+  })
+
+  it('lets only the newest asynchronous no-patch fallback update Stage data', async () => {
+    const first = deferred<boolean>()
+    const second = deferred<boolean>()
+    const renderer = mockMotionRenderer({ capabilities: {} })
+    const setItems = renderer.setItems as ReturnType<typeof vi.fn>
+    setItems
+      .mockResolvedValueOnce(true)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+    const { stage } = createCustomStage(() => renderer)
+    await stage.setItems([{ id: 'point', title: 'initial' }])
+    await stage.to(layout(() => [transform()]), { duration: 0 })
+
+    const older = stage.updateItem('point', { title: 'older' }, {
+      layout: layout(() => [transform()], 'older'),
+      duration: 0,
+    })
+    const newer = stage.updateItem('point', { title: 'newer' }, {
+      layout: layout(() => [transform()], 'newer'),
+      duration: 0,
+    })
+    second.resolve(true)
+    await expect(newer).resolves.toBe(true)
+    first.resolve(true)
+    await expect(older).resolves.toBe(false)
+    expect(stage.pick(50, 50)?.item.title).toBe('newer')
+    stage.destroy()
+  })
+
+  it('supports a partially capable batched Shape renderer without changing Stage behavior', async () => {
+    const fixture = shapeRendererFixture()
+    const { container, stage } = createCustomStage(fixture.factory, {
+      hoverEffect: 'highlight',
+    })
+    await stage.setItems([{ id: 'shape', title: 'Shape' }])
+    await stage.to(layout(() => [transform()]), { duration: 0 })
+    await stage.updateItem('shape', { title: 'Updated' })
+
+    expect(fixture.patch).toHaveBeenCalledOnce()
+    expect(stage.pick(50, 50)?.item.id).toBe('shape')
+    stage.focusItem('shape')
+    expect(fixture.highlight).toHaveBeenLastCalledWith(0)
+    container.querySelector('canvas')?.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
+    container.querySelector('canvas')?.dispatchEvent(new Event('webglcontextrestored'))
+    expect(fixture.refreshResources).toHaveBeenCalledOnce()
+    expect(stage.getPerformanceStats().renderer.gpuBytes).toBeGreaterThan(0)
+
+    stage.destroy()
+    expect(fixture.disposeGeometry).toHaveBeenCalledOnce()
+    expect(fixture.disposeMaterial).toHaveBeenCalledOnce()
+  })
+
+  it('normalizes renderer metrics and rejects incomplete optional capabilities', () => {
+    const metrics = Object.fromEntries(
+      Array.from({ length: 70 }, (_value, index) => [
+        `metric-${index}`,
+        index === 0 ? Number.NaN : index === 1 ? -2 : index,
+      ]),
+    )
+    const renderer = mockMotionRenderer({
+      getStats: vi.fn(() => ({
+        instanceCount: Number.NaN,
+        submittedInstanceCount: -1,
+        gpuBytes: Number.POSITIVE_INFINITY,
+        metrics,
+      })),
+    })
+    const { stage } = createCustomStage(() => renderer)
+    const stats = stage.getPerformanceStats()
+    expect(stats).toMatchObject({
+      renderer: {
+        instanceCount: 0,
+        submittedInstanceCount: 0,
+        gpuBytes: 0,
+      },
+    })
+    expect(Object.keys(stats.renderer.metrics)).toHaveLength(64)
+    expect(Object.values(stats.renderer.metrics).every((value) => value >= 0)).toBe(true)
+    stage.destroy()
+
+    const partial = mockMotionRenderer({
+      capabilities: {
+        visual: { setVisualState: vi.fn() } as never,
+      },
+    })
+    expect(() => createCustomStage(() => partial)).toThrow(
+      'Motion renderer capability visual is missing method: prepareVisualTransition',
+    )
+    expect(partial.dispose).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    ['patch', {}, 'updateItems'],
+    ['visual', { setVisualState: vi.fn() }, 'prepareVisualTransition'],
+    ['highlight', {}, 'setHighlightIndex'],
+    ['viewport', {}, 'resize'],
+    ['resourceRecovery', {}, 'refreshResources'],
+    ['streamingEffects', { enable: vi.fn(), disable: vi.fn() }, 'setTime'],
+  ] as const)('rejects an incomplete %s renderer capability', (name, capability, missing) => {
+    const renderer = mockMotionRenderer({
+      capabilities: { [name]: capability },
+    })
+    expect(() => createCustomStage(() => renderer)).toThrow(
+      `Motion renderer capability ${name} is missing method: ${missing}`,
+    )
+    expect(renderer.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('cleans up WebGL and renderer resources when a factory or protocol fails', () => {
+    const failure = new Error('factory failed')
+    const geometry = new BufferGeometry()
+    const material = new ShaderMaterial()
+    const disposeGeometry = vi.spyOn(geometry, 'dispose')
+    const disposeMaterial = vi.spyOn(material, 'dispose')
+    expect(() => createCustomStage(() => {
+      throw failure
+    })).toThrow(failure)
+    expect(stageMocks.webglRenderers.at(-1)?.dispose).toHaveBeenCalledOnce()
+    expect(document.querySelectorAll('canvas')).toHaveLength(0)
+
+    expect(() => createCustomStage(({ root }) => {
+      root.add(new Mesh(geometry, material))
+      throw failure
+    })).toThrow(failure)
+    expect(disposeGeometry).toHaveBeenCalledOnce()
+    expect(disposeMaterial).toHaveBeenCalledOnce()
+
+    const partial = { dispose: vi.fn() }
+    expect(() => createCustomStage(() => partial as never)).toThrow(
+      'Motion renderer is missing required method: setItems',
+    )
+    expect(partial.dispose).toHaveBeenCalledOnce()
+    expect(stageMocks.webglRenderers.at(-1)?.dispose).toHaveBeenCalledOnce()
+    expect(document.querySelectorAll('canvas')).toHaveLength(0)
+  })
+
   it('clamps invalid and extreme Stage card aspect ratios', () => {
-    const wide = createStage({ cardAspectRatio: 10 })
+    const wide = createStage({ renderer: cardsRenderer({ aspectRatio: 10 }) })
     expect(stageMocks.cardOptions.at(-1)).toMatchObject({ aspectRatio: 4 })
     wide.destroy()
-    const fallback = createStage({ cardAspectRatio: Number.NaN })
+    const fallback = createStage({ renderer: cardsRenderer({ aspectRatio: Number.NaN }) })
     expect(stageMocks.cardOptions.at(-1)).toMatchObject({ aspectRatio: 1 })
     fallback.destroy()
   })

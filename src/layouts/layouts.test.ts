@@ -159,7 +159,11 @@ describe('layouts', () => {
     expect(radius).toBeCloseTo(3.6 - squareHalfDiagonal)
     expect(radius + squareHalfDiagonal)
       .toBeLessThanOrEqual(viewport.viewportHeight / 2 * (1 - padding * 2))
-    const portraitContext = { ...viewport, cardWidth: 0.5, cardHeight: 1 }
+    const portraitContext = {
+      ...viewport,
+      itemWidth: 0.5,
+      itemHeight: 1,
+    }
     const portrait = sphere({ fit: 'contain', viewportPadding: padding })
       .calculate(120, portraitContext)
     const portraitRadius = Math.hypot(portrait[0].x, portrait[0].y, portrait[0].z)

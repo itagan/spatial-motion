@@ -47,10 +47,55 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "default": "./dist/core/index.js"
+    },
     "./layouts": {
       "types": "./dist/layouts/index.d.ts",
       "import": "./dist/layouts/index.js",
       "default": "./dist/layouts/index.js"
+    },
+    "./layouts/sphere": {
+      "types": "./dist/layouts/sphere.d.ts",
+      "import": "./dist/layouts/sphere.js",
+      "default": "./dist/layouts/sphere.js"
+    },
+    "./layouts/cylinder": {
+      "types": "./dist/layouts/cylinder.d.ts",
+      "import": "./dist/layouts/cylinder.js",
+      "default": "./dist/layouts/cylinder.js"
+    },
+    "./layouts/grid": {
+      "types": "./dist/layouts/grid.d.ts",
+      "import": "./dist/layouts/grid.js",
+      "default": "./dist/layouts/grid.js"
+    },
+    "./layouts/ring": {
+      "types": "./dist/layouts/ring.d.ts",
+      "import": "./dist/layouts/ring.js",
+      "default": "./dist/layouts/ring.js"
+    },
+    "./layouts/helix": {
+      "types": "./dist/layouts/helix.d.ts",
+      "import": "./dist/layouts/helix.js",
+      "default": "./dist/layouts/helix.js"
+    },
+    "./layouts/cone": {
+      "types": "./dist/layouts/cone.d.ts",
+      "import": "./dist/layouts/cone.js",
+      "default": "./dist/layouts/cone.js"
+    },
+    "./layouts/box": {
+      "types": "./dist/layouts/box.d.ts",
+      "import": "./dist/layouts/box.js",
+      "default": "./dist/layouts/box.js"
+    },
+    "./layouts/scatter": {
+      "types": "./dist/layouts/scatter.d.ts",
+      "import": "./dist/layouts/scatter.js",
+      "default": "./dist/layouts/scatter.js"
     },
     "./effects": {
       "types": "./dist/effects/index.d.ts",
@@ -66,6 +111,16 @@
       "types": "./dist/card-template/index.d.ts",
       "import": "./dist/card-template/index.js",
       "default": "./dist/card-template/index.js"
+    },
+    "./renderers/cards": {
+      "types": "./dist/renderers/cards/index.d.ts",
+      "import": "./dist/renderers/cards/index.js",
+      "default": "./dist/renderers/cards/index.js"
+    },
+    "./renderers/points": {
+      "types": "./dist/renderers/points/index.d.ts",
+      "import": "./dist/renderers/points/index.js",
+      "default": "./dist/renderers/points/index.js"
     },
     "./package.json": "./package.json"
   },

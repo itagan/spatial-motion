@@ -83,7 +83,7 @@ npm run pack:check
 
 ### `src/renderers`
 
-渲染器负责实例缓冲、Shader、纹理图集、拾取所需投影数据和 GPU 资源释放。这里属于内部实现，不是稳定公共子路径。
+渲染器负责批量协议、实例缓冲、Shader、纹理图集、拾取边界和 GPU 资源释放。只有 `renderers/cards` 与 `renderers/points` 是稳定公共子路径，其余文件保持内部。
 
 修改这里时要重点验证：单 Draw Call、Buffer 更新频率、纹理图集复用、图片异步加载失效后的释放、拾取遮挡规则和 `destroy()` 后资源状态。
 
@@ -104,13 +104,13 @@ npm run pack:check
 5. 扩展 `scripts/verify-package.mjs` 的运行时和类型消费者检查。
 6. 运行 `npm run pack:check`，确认深层内部路径仍不可导入。
 
-当前自动化硬预算：库 JavaScript gzip 合计不超过 40 KB，npm tarball 不超过 150 KB，仅消费布局的 Tree Shaking 产物不超过 8 KB。预算变化属于需要明确讨论的工程决策。
+当前自动化硬预算：主库 JavaScript gzip 不超过 40 KB，按需模板与 Points Renderer 各不超过 12 KB，npm tarball 不超过 150 KB，仅消费布局的 Tree Shaking 产物不超过 8 KB。预算变化属于需要明确讨论的工程决策。
 
 npm tarball 只携带运行时 `dist`、README、CHANGELOG、LICENSE、PUBLIC_API 和 COMPATIBILITY。ROADMAP、DEVELOPMENT、OPTIMIZATION、RELEASE、VISUAL_QA 与 examples 保留在源码仓库，不增加安装包体积。
 
 本地 `dist` 会生成声明映射便于源码跳转，但 npm tarball 排除 `.d.ts.map`；类型声明和 JavaScript source map 仍随包提供。该发布裁剪属于包体积控制，不应通过提高 150 KB 预算替代。
 
-v1.x 的稳定入口和 SemVer 规则记录在 `docs/PUBLIC_API.md`。`card-template` 是按需入口，模板代码不得被主入口运行时代码引用；包检查分别执行 40 KB 主库与 12 KB 模板 gzip 门禁。正式发布严格按照 `docs/RELEASE.md` 执行；准备发布的代码变更不自动授权 npm publish、tag 或 GitHub Release。
+准备冻结的首版入口记录在 `docs/PUBLIC_API.md`。`core`、逐布局、Cards、Points 与 `card-template` 都必须通过真实消费者验证；包检查执行 40 KB 主库、12 KB 模板和 12 KB Points gzip 门禁。正式发布严格按照 `docs/RELEASE.md` 执行；准备发布的代码变更不自动授权 npm publish、tag 或 GitHub Release。
 
 ## 测试策略
 

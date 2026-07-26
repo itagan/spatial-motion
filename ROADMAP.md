@@ -89,6 +89,14 @@
 
 候选方向尚未排序，实施前需要确认目标用户、API 边界和维护成本。
 
+### 批量渲染器与按需 Core
+
+- [x] `MotionStage` 通过显式 Renderer Factory 编排布局、时钟、旋转、交互和质量。
+- [x] Cards 与 Points 升级为稳定按需入口，Core 不携带 Atlas、Points 或内置布局。
+- [x] 核心协议拆分可选能力，并用内部 Line/Shape 批量夹具验证。
+- [x] `defineLayout()`、通用 `itemWidth/itemHeight` 与逐布局入口完成。
+- [ ] 收集自定义 Renderer/Layout 案例，完成发布候选 API freeze。
+
 ### CSS3D 可选渲染器
 
 - [ ] 评估需要真实 DOM 内容、可访问性或复杂 HTML 卡片的使用场景。

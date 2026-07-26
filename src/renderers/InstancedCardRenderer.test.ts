@@ -130,13 +130,16 @@ describe('InstancedCardRenderer item loading', () => {
     expect(renderer.getStats()).toMatchObject({
       instanceCount: 1,
       submittedInstanceCount: 1,
-      textureBytes: 87_382,
-      atlasBuilds: 1,
-      atlasPatches: 0,
-      atlasCellsUpdated: 1,
-      imageRequests: 1,
-      estimatedTextureUploadBytes: 65_536,
+      metrics: {
+        textureBytes: 87_382,
+        atlasBuilds: 1,
+        atlasPatches: 0,
+        atlasCellsUpdated: 1,
+        imageRequests: 1,
+        estimatedTextureUploadBytes: 65_536,
+      },
     })
+    expect(renderer.getStats().gpuBytes).toBeGreaterThan(87_382)
     renderer.refreshTexture()
     expect(currentAtlas.texture.needsUpdate).toBe(true)
     renderer.dispose()
@@ -150,6 +153,20 @@ describe('InstancedCardRenderer item loading', () => {
 
     await renderer.setItems([{ id: 'wide' }])
 
+    expect(Object.keys(renderer.capabilities).sort()).toEqual([
+      'highlight',
+      'patch',
+      'resourceRecovery',
+      'streamingEffects',
+      'viewport',
+      'visual',
+    ])
+    expect(renderer.descriptor.itemBounds).toEqual({
+      kind: 'quad',
+      width: 1,
+      height: 0.25,
+      facing: 'layout',
+    })
     const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
     const positions = Array.from(mesh.geometry.getAttribute('position').array)
     const xs = positions.filter((_value, index) => index % 3 === 0)
@@ -236,7 +253,14 @@ describe('InstancedCardRenderer item loading', () => {
       opacity: 1,
     }
 
-    renderer.prepareTransition([transform], [transform], 0, 1, 0, 1, 0.05, 0.1)
+    renderer.prepareTransition(
+      [transform],
+      [transform],
+    )
+    renderer.prepareVisualTransition(
+      { billboard: 0, hideBackHemisphere: 0, hemisphereEdgeFade: 0.05 },
+      { billboard: 1, hideBackHemisphere: 1, hemisphereEdgeFade: 0.1 },
+    )
     renderer.setProgress(0.5)
 
     const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
@@ -287,9 +311,11 @@ describe('InstancedCardRenderer item loading', () => {
 
     expect(atlasMock.applyPatch).toHaveBeenCalledOnce()
     expect(renderer.getStats()).toMatchObject({
-      atlasBuilds: 1,
-      atlasPatches: 1,
-      atlasDiscardedPatches: 1,
+      metrics: {
+        atlasBuilds: 1,
+        atlasPatches: 1,
+        atlasDiscardedPatches: 1,
+      },
     })
     expect(scene.children[0]).toBe(mesh)
     renderer.dispose()

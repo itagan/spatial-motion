@@ -4,9 +4,9 @@ import {
   InstancedBufferAttribute,
   InstancedBufferGeometry,
   Mesh,
+  Object3D,
   PlaneGeometry,
   Quaternion,
-  Scene,
   ShaderMaterial,
   Vector4,
 } from 'three'
@@ -21,30 +21,22 @@ import {
   type TextureAtlasPatch,
   type TextureAtlasResult,
 } from './textureAtlas.js'
+import type {
+  MotionRenderer,
+  MotionRendererCapabilities,
+  MotionRendererDescriptor,
+  MotionRendererStats,
+  MotionRendererViewport,
+  MotionRendererVisualState,
+} from './MotionRenderer.js'
 
-export interface CardRendererStats {
-  instanceCount: number
-  submittedInstanceCount: number
-  textureBytes: number
-  atlasBuilds: number
-  atlasPatches: number
-  atlasDiscardedBuilds: number
-  atlasDiscardedPatches: number
-  atlasCellsUpdated: number
-  atlasBuildMs: number
-  atlasPatchMs: number
-  atlasDrawMs: number
-  imageLoadMs: number
-  imageRequests: number
-  imageFailures: number
-  estimatedTextureUploadBytes: number
-}
-
-interface CardRendererOptions extends TextureAtlasOptions {
+export interface CardRendererOptions<TMeta = unknown> extends TextureAtlasOptions<TMeta> {
   cellSize?: number
 }
 
-export class InstancedCardRenderer {
+export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
+  readonly capabilities: MotionRendererCapabilities<TMeta>
+  readonly descriptor: MotionRendererDescriptor
   private mesh: Mesh<InstancedBufferGeometry, ShaderMaterial> | null = null
   private instanceCapacity = 0
   private material: ShaderMaterial | null = null
@@ -69,11 +61,38 @@ export class InstancedCardRenderer {
   private readonly imageCache: TextureAtlasImageCache
   private atlasAbortController: AbortController | null = null
 
-  constructor(private readonly scene: Scene, private readonly atlasOptions: CardRendererOptions = {}) {
+  constructor(
+    private readonly root: Object3D,
+    private readonly atlasOptions: CardRendererOptions<TMeta> = {},
+  ) {
     this.imageCache = new TextureAtlasImageCache(normalizeImageCacheSize(atlasOptions.imageCacheSize))
+    const aspectRatio = resolveAspectRatio(atlasOptions.aspectRatio)
+    this.descriptor = {
+      itemBounds: {
+        kind: 'quad',
+        width: aspectRatio >= 1 ? 1 : aspectRatio,
+        height: aspectRatio >= 1 ? 1 / aspectRatio : 1,
+        facing: 'layout',
+      },
+    }
+    this.capabilities = {
+      patch: { updateItems: (items, changedIndices) => this.updateItems(items, changedIndices) },
+      visual: {
+        setVisualState: (state) => this.setVisualState(state),
+        prepareVisualTransition: (from, to) => this.prepareVisualTransition(from, to),
+      },
+      highlight: { setHighlightIndex: (index) => this.setHoverIndex(index) },
+      viewport: { resize: (viewport) => this.resize(viewport) },
+      resourceRecovery: { refreshResources: () => this.refreshResources() },
+      streamingEffects: {
+        enable: (data) => this.enableEffect(data),
+        disable: () => this.disableEffect(),
+        setTime: (elapsedSeconds) => this.setEffectTime(elapsedSeconds),
+      },
+    }
   }
 
-  async setItems(items: MotionItem[]): Promise<boolean> {
+  async setItems(items: MotionItem<TMeta>[]): Promise<boolean> {
     const fingerprint = createItemsFingerprint(items, this.atlasOptions)
     if (this.mesh && fingerprint === this.itemsFingerprint && !this.atlasAbortController) return true
     const { controller, generation, options } = this.beginAtlasOperation()
@@ -318,7 +337,7 @@ export class InstancedCardRenderer {
     this.mesh = new Mesh(geometry, this.material)
     this.instanceCapacity = items.length
     this.mesh.frustumCulled = false
-    this.scene.add(this.mesh)
+    this.root.add(this.mesh)
     this.itemsFingerprint = fingerprint
     this.textureBytes = Math.ceil(atlas.width * atlas.height * 4 * 4 / 3)
     this.atlasBuilds += 1
@@ -333,7 +352,7 @@ export class InstancedCardRenderer {
     return true
   }
 
-  async updateItems(items: MotionItem[], changedIndices: number[]): Promise<boolean> {
+  async updateItems(items: MotionItem<TMeta>[], changedIndices: number[]): Promise<boolean> {
     if (!this.mesh || !this.atlas || items.length !== this.instanceCapacity) {
       return this.setItems(items)
     }
@@ -374,12 +393,6 @@ export class InstancedCardRenderer {
   prepareTransition(
     from: Transform[],
     to: Transform[],
-    fromBillboard?: number,
-    toBillboard?: number,
-    fromHideBackHemisphere?: number,
-    toHideBackHemisphere?: number,
-    fromHemisphereEdgeFade?: number,
-    toHemisphereEdgeFade?: number,
   ): void {
     if (!this.mesh) return
     const count = Math.min(from.length, to.length, this.instanceCapacity)
@@ -398,15 +411,6 @@ export class InstancedCardRenderer {
     }
 
     const geometry = this.mesh.geometry
-    if (this.material) {
-      const uniforms = this.material.uniforms
-      uniforms.fromBillboard.value = fromBillboard ?? uniforms.toBillboard.value
-      uniforms.toBillboard.value = toBillboard ?? uniforms.toBillboard.value
-      uniforms.fromHideBackHemisphere.value = fromHideBackHemisphere ?? uniforms.toHideBackHemisphere.value
-      uniforms.toHideBackHemisphere.value = toHideBackHemisphere ?? uniforms.toHideBackHemisphere.value
-      uniforms.fromHemisphereEdgeFade.value = fromHemisphereEdgeFade ?? uniforms.toHemisphereEdgeFade.value
-      uniforms.toHemisphereEdgeFade.value = toHemisphereEdgeFade ?? uniforms.toHemisphereEdgeFade.value
-    }
     geometry.setAttribute('fromPosition', new InstancedBufferAttribute(fromPosition, 3))
     geometry.setAttribute('toPosition', new InstancedBufferAttribute(toPosition, 3))
     geometry.setAttribute('fromQuaternion', new InstancedBufferAttribute(fromQuaternion, 4))
@@ -419,12 +423,22 @@ export class InstancedCardRenderer {
     this.setProgress(0)
   }
 
-  setProgress(progress: number): void {
-    if (this.material) this.material.uniforms.progress.value = progress
+  prepareVisualTransition(
+    from: MotionRendererVisualState,
+    to: MotionRendererVisualState,
+  ): void {
+    if (!this.material) return
+    const uniforms = this.material.uniforms
+    uniforms.fromBillboard.value = from.billboard
+    uniforms.toBillboard.value = to.billboard
+    uniforms.fromHideBackHemisphere.value = from.hideBackHemisphere
+    uniforms.toHideBackHemisphere.value = to.hideBackHemisphere
+    uniforms.fromHemisphereEdgeFade.value = from.hemisphereEdgeFade
+    uniforms.toHemisphereEdgeFade.value = to.hemisphereEdgeFade
   }
 
-  setGroupRotation(x: number, y: number): void {
-    if (this.mesh) this.mesh.rotation.set(x, y, 0)
+  setProgress(progress: number): void {
+    if (this.material) this.material.uniforms.progress.value = progress
   }
 
   setOrientation(orientation: 'surface' | 'camera'): void {
@@ -445,6 +459,17 @@ export class InstancedCardRenderer {
     if (!this.material) return
     this.material.uniforms.fromHemisphereEdgeFade.value = amount
     this.material.uniforms.toHemisphereEdgeFade.value = amount
+  }
+
+  setVisualState(state: MotionRendererVisualState): void {
+    if (!this.material) return
+    const uniforms = this.material.uniforms
+    uniforms.fromBillboard.value = state.billboard
+    uniforms.toBillboard.value = state.billboard
+    uniforms.fromHideBackHemisphere.value = state.hideBackHemisphere
+    uniforms.toHideBackHemisphere.value = state.hideBackHemisphere
+    uniforms.fromHemisphereEdgeFade.value = state.hemisphereEdgeFade
+    uniforms.toHemisphereEdgeFade.value = state.hemisphereEdgeFade
   }
 
   enableEffect(data: StreamingEffectGpuData): void {
@@ -485,6 +510,8 @@ export class InstancedCardRenderer {
     if (this.material) this.material.uniforms.hoverIndex.value = index ?? -1
   }
 
+  resize(_viewport: MotionRendererViewport): void {}
+
   refreshTexture(): void {
     if (this.atlas) {
       this.atlas.initialized = false
@@ -494,23 +521,30 @@ export class InstancedCardRenderer {
     }
   }
 
-  getStats(): CardRendererStats {
+  refreshResources(): void {
+    this.refreshTexture()
+  }
+
+  getStats(): MotionRendererStats {
     return {
       instanceCount: this.mesh ? this.instanceCapacity : 0,
       submittedInstanceCount: this.mesh?.geometry.instanceCount ?? 0,
-      textureBytes: this.textureBytes,
-      atlasBuilds: this.atlasBuilds,
-      atlasPatches: this.atlasPatches,
-      atlasDiscardedBuilds: this.atlasDiscardedBuilds,
-      atlasDiscardedPatches: this.atlasDiscardedPatches,
-      atlasCellsUpdated: this.atlasCellsUpdated,
-      atlasBuildMs: this.atlasBuildMs,
-      atlasPatchMs: this.atlasPatchMs,
-      atlasDrawMs: this.atlasDrawMs,
-      imageLoadMs: this.imageLoadMs,
-      imageRequests: this.imageRequests,
-      imageFailures: this.imageFailures,
-      estimatedTextureUploadBytes: this.estimatedTextureUploadBytes,
+      gpuBytes: this.textureBytes + geometryByteLength(this.mesh?.geometry),
+      metrics: {
+        textureBytes: this.textureBytes,
+        atlasBuilds: this.atlasBuilds,
+        atlasPatches: this.atlasPatches,
+        atlasDiscardedBuilds: this.atlasDiscardedBuilds,
+        atlasDiscardedPatches: this.atlasDiscardedPatches,
+        atlasCellsUpdated: this.atlasCellsUpdated,
+        atlasBuildMs: this.atlasBuildMs,
+        atlasPatchMs: this.atlasPatchMs,
+        atlasDrawMs: this.atlasDrawMs,
+        imageLoadMs: this.imageLoadMs,
+        imageRequests: this.imageRequests,
+        imageFailures: this.imageFailures,
+        estimatedTextureUploadBytes: this.estimatedTextureUploadBytes,
+      },
     }
   }
 
@@ -525,7 +559,7 @@ export class InstancedCardRenderer {
   private beginAtlasOperation(): {
     controller: AbortController
     generation: number
-    options: TextureAtlasOptions
+    options: TextureAtlasOptions<TMeta>
   } {
     this.atlasAbortController?.abort()
     const controller = new AbortController()
@@ -543,7 +577,7 @@ export class InstancedCardRenderer {
 
   private disposeCurrent(): void {
     if (!this.mesh) return
-    this.scene.remove(this.mesh)
+    this.root.remove(this.mesh)
     this.mesh.geometry.dispose()
     const texture = this.material?.uniforms.atlas?.value as { dispose?: () => void } | undefined
     texture?.dispose?.()
@@ -580,6 +614,13 @@ function normalizeImageCacheSize(value: number | undefined): number {
   return Math.min(1024, Math.max(0, Math.floor(Number.isFinite(value) ? value as number : 128)))
 }
 
+function geometryByteLength(geometry: InstancedBufferGeometry | undefined): number {
+  if (!geometry) return 0
+  const attributes = Object.values(geometry.attributes)
+    .reduce((total, attribute) => total + attribute.array.byteLength, 0)
+  return attributes + (geometry.index?.array.byteLength ?? 0)
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError'
 }
@@ -597,7 +638,10 @@ function setVector4(target: Vector4, values: Float32Array, offset: number): void
   target.set(values[offset], values[offset + 1], values[offset + 2], values[offset + 3])
 }
 
-function createItemsFingerprint(items: MotionItem[], options: TextureAtlasOptions): string {
+function createItemsFingerprint<TMeta>(
+  items: MotionItem<TMeta>[],
+  options: TextureAtlasOptions<TMeta>,
+): string {
   return items
     .map((item) => {
       let meta = ''

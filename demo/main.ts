@@ -1,5 +1,6 @@
 import {
   MotionStage,
+  cardsRenderer,
   createLayout,
   linearShooter,
   radialBurst,
@@ -66,12 +67,14 @@ const stage = new MotionStage({
   },
   hoverEffect: 'highlight',
   motionPreference: 'auto',
-  cardStyle: {
-    shape: 'circle',
-    borderWidth: 2,
-    borderColor: 'rgba(245, 215, 122, .9)',
-    backgroundColor: '#111827',
-  },
+  renderer: cardsRenderer({
+    style: {
+      shape: 'circle',
+      borderWidth: 2,
+      borderColor: 'rgba(245, 215, 122, .9)',
+      backgroundColor: '#111827',
+    },
+  }),
   onExtensionError(error, extension) {
     console.error(`Stage extension failed: ${extension.name ?? 'anonymous'}`, error)
   },
@@ -339,7 +342,8 @@ const updateFps = (now: number) => {
   if (now - measuredAt >= 1000) {
     document.querySelector('#fps')!.textContent = `${Math.round((frames * 1000) / (now - measuredAt))} FPS`
     const stats = stage.getPerformanceStats()
-    document.querySelector('#render-stats')!.textContent = `${stats.drawCalls} CALL · ${stats.atlasBuilds} ATLAS`
+    document.querySelector('#render-stats')!.textContent =
+      `${stats.render.drawCalls} CALL · ${stats.renderer.metrics.atlasBuilds ?? 0} ATLAS`
     const activeExtensions = stage.getExtensionStats().filter(({ active }) => active)
     const enabledExtensions = activeExtensions.filter(({ enabled }) => enabled).length
     const extensionP95 = Math.max(0, ...activeExtensions.map(({ updateTimeP95 }) => updateTimeP95))

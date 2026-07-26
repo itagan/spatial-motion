@@ -1,4 +1,5 @@
 import type { Layout, Transform } from '../core/types.js'
+import { defineLayout } from './defineLayout.js'
 
 export interface CylinderOptions {
   radius?: number
@@ -18,7 +19,7 @@ export function cylinder(options: CylinderOptions = {}): Layout {
   const fullCircle = Math.abs(arcAngle - Math.PI * 2) < 1e-8
   const density = Math.max(0, finite(options.density, 0.78))
   const orientation = options.orientation ?? 'surface'
-  return {
+  return defineLayout({
     name: 'cylinder',
     orientation,
     calculate(count): Transform[] {
@@ -61,7 +62,7 @@ export function cylinder(options: CylinderOptions = {}): Layout {
       })
       return transforms
     },
-  }
+  })
 }
 
 function distributeRows(count: number, rows: number): number[] {

@@ -49,14 +49,17 @@ export function defineCardTemplate<TMeta = unknown>(
     item: Readonly<CardTemplateItem<TMeta>>,
     helpers: typeof templateHelpers,
   ) => CardTemplateResult,
-  options: DefineCardTemplateOptions = {},
-): CardContentRenderer {
+  options: DefineCardTemplateOptions<TMeta> = {},
+): CardContentRenderer<TMeta> {
   const classStyles = Object.fromEntries(Object.entries(options.styles ?? {}).map(([name, style]) => [
     name,
     validateStyle(style),
   ]))
   return {
-    prepare(item: Readonly<MotionItem>, _resolvedStyle: Readonly<CardStyle>): PreparedCardContent {
+    prepare(
+      item: Readonly<MotionItem<TMeta>>,
+      _resolvedStyle: Readonly<CardStyle>,
+    ): PreparedCardContent {
       let nodes: RuntimeNode[]
       try {
         nodes = resolveTemplate(render(item as Readonly<CardTemplateItem<TMeta>>, templateHelpers))

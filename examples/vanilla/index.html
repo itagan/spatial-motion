@@ -8,24 +8,53 @@
   <body>
     <main id="app" class="example">
       <header>
-        <div><h1>Vanilla 卡片自定义</h1><p>默认样式、统一宽高比与按需 ES6 模板渲染。</p></div>
+        <div><h1>Vanilla 卡片自定义</h1><p>基础绘制、源码配方和卡片比例彼此独立。</p></div>
         <span id="status" class="status">starting</span>
       </header>
       <section id="stage" class="stage" aria-label="Vanilla Spatial Motion stage"></section>
       <footer>
-        <div class="controls">
-          <button data-layout="sphere">球体</button>
-          <button data-layout="cylinder">圆柱</button>
-          <button data-card="avatar">1:1 头像</button>
-          <button data-card="profile">3:4 人物卡</button>
-          <button data-card="landscape">16:9 信息卡</button>
-          <button data-card="template-product">模板 · 产品</button>
-          <button data-card="template-profile">模板 · 人物</button>
-          <button data-card="template-metric">模板 · 指标</button>
-          <button id="pause">暂停</button>
-          <button id="resume">恢复</button>
+        <div class="controls" aria-label="演示控制">
+          <div class="control-group">
+            <span class="control-label">布局</span>
+            <button data-layout="sphere">球体</button>
+            <button data-layout="cylinder">圆柱</button>
+          </div>
+          <div class="control-group">
+            <span class="control-label">渲染器</span>
+            <button data-renderer="cards">Cards</button>
+            <button data-renderer="points">Points</button>
+          </div>
+          <div class="control-group">
+            <span class="control-label">内容</span>
+            <button data-content="default">基础卡片</button>
+            <button data-content="product">产品配方</button>
+            <button data-content="profile">人物配方</button>
+            <button data-content="metric">指标配方</button>
+            <button data-content="canvas">Canvas 绘制</button>
+          </div>
+          <div class="control-group">
+            <span class="control-label">比例</span>
+            <button data-aspect="square">1:1</button>
+            <button data-aspect="portrait">3:4</button>
+            <button data-aspect="landscape">16:9</button>
+          </div>
+          <div class="control-group">
+            <span class="control-label">运行</span>
+            <button id="pause">暂停</button>
+            <button id="resume">恢复</button>
+          </div>
         </div>
-        <p>核心库不依赖框架。</p>
+        <div class="recipe-meta">
+          <p>产品、人物和指标仅为可复制源码配方，不是公共预设 API。</p>
+          <details class="recipe-source">
+            <summary>查看 ES6 源码</summary>
+            <div class="recipe-source-toolbar">
+              <span>当前内容写法</span>
+              <button id="copy-recipe" type="button">复制源码</button>
+            </div>
+            <pre><code id="recipe-source"></code></pre>
+          </details>
+        </div>
       </footer>
     </main>
     <script type="module" src="./main.ts"></script>

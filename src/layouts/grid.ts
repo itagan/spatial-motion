@@ -1,4 +1,5 @@
 import type { Layout, Transform } from '../core/types.js'
+import { defineLayout } from './defineLayout.js'
 
 export interface GridOptions {
   columns?: number
@@ -9,7 +10,7 @@ export interface GridOptions {
 export function grid(options: GridOptions = {}): Layout {
   const gap = options.gap ?? 1.3
   const fit = options.fit ?? 'fixed'
-  return {
+  return defineLayout({
     name: 'grid',
     calculate(count, context): Transform[] {
       if (count <= 0) return []
@@ -27,7 +28,7 @@ export function grid(options: GridOptions = {}): Layout {
         opacity: 1,
       }))
     },
-  }
+  })
 }
 
 function fittedGrid(

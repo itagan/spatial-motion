@@ -1,17 +1,29 @@
-import { Euler, Group, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three'
+import {
+  Euler,
+  Group,
+  PerspectiveCamera,
+  Scene,
+  Vector3,
+  WebGLRenderer,
+  type Material,
+  type Object3D,
+  type Texture,
+} from 'three'
 import type {
-  CardContentRenderer,
-  CardStyle,
-  DrawCard,
   Layout,
   MotionItem,
   QualityLevel,
-  ResolveCardStyle,
   Transform,
   TransitionOptions,
 } from './types.js'
 import { easing, identityTransform, interpolateTransform } from './math.js'
-import { InstancedCardRenderer } from '../renderers/InstancedCardRenderer.js'
+import {
+  type MotionRenderer,
+  type MotionRendererFactory,
+  type MotionRendererPickShape,
+  type MotionRendererStats,
+  type MotionRendererVisualState,
+} from '../renderers/MotionRenderer.js'
 import { detectQuality, qualityProfiles } from '../performance/quality.js'
 import {
   AdaptivePerformanceManager,
@@ -25,38 +37,23 @@ import type {
   StageExtensionStats,
   StageViewport,
 } from './extensions.js'
-import { TunnelEffect } from '../effects/TunnelEffect.js'
-import { LinearShooterEffect } from '../effects/LinearShooterEffect.js'
 import type { StreamingEffect, StreamingEffectGpuData } from '../effects/types.js'
 
-export interface MotionStageOptions {
+export interface MotionStageOptions<TMeta = unknown> {
   container: HTMLElement
-  items?: MotionItem[]
+  items?: MotionItem<TMeta>[]
+  renderer: MotionRendererFactory<TMeta>
   quality?: QualityLevel | 'auto'
   cameraZ?: number
   adaptivePerformance?: boolean
   onQualityChange?: (quality: QualityLevel, stats: PerformanceStats) => void
-  onItemClick?: (item: MotionItem, index: number) => void
+  onItemClick?: (item: MotionItem<TMeta>, index: number) => void
   motionPreference?: MotionPreference
-  onItemHover?: (item: MotionItem | null, index: number | null) => void
-  onItemFocus?: (item: MotionItem | null, index: number | null) => void
+  onItemHover?: (item: MotionItem<TMeta> | null, index: number | null) => void
+  onItemFocus?: (item: MotionItem<TMeta> | null, index: number | null) => void
   hoverEffect?: 'none' | 'highlight'
   keyboardNavigation?: boolean
   ariaLabel?: string
-  cardStyle?: CardStyle
-  resolveCardStyle?: ResolveCardStyle
-  drawCard?: DrawCard
-  cardContent?: CardContentRenderer
-  /** Shared card width divided by height. The longest edge remains one world unit. */
-  cardAspectRatio?: number
-  /** Atlas pixels per card before GPU texture-size clamping. */
-  cardResolution?: number
-  /** Maximum time to wait for each image before drawing the fallback card. */
-  imageTimeout?: number
-  /** Maximum concurrent image requests per Stage. Defaults to 6. */
-  imageConcurrency?: number
-  /** Completed images retained per Stage for atlas redraws. Defaults to 128; 0 disables caching. */
-  imageCacheSize?: number
   /** Defaults used when an individual transition omits duration or easing. */
   transition?: TransitionOptions
   onContextChange?: (state: 'lost' | 'restored') => void
@@ -67,11 +64,11 @@ export interface UpdateItemsOptions extends TransitionOptions {
   layout?: Layout
 }
 
-export type MotionItemPatch = Partial<Omit<MotionItem, 'id'>>
+export type MotionItemPatch<TMeta = unknown> = Partial<Omit<MotionItem<TMeta>, 'id'>>
 
-export interface MotionItemUpdate {
+export interface MotionItemUpdate<TMeta = unknown> {
   id: string
-  patch: MotionItemPatch
+  patch: MotionItemPatch<TMeta>
 }
 
 export interface FocusItemsOptions extends TransitionOptions {
@@ -82,8 +79,8 @@ export interface FocusItemsOptions extends TransitionOptions {
   dimOpacity?: number
 }
 
-export interface PickResult {
-  item: MotionItem
+export interface PickResult<TMeta = unknown> {
+  item: MotionItem<TMeta>
   index: number
   distance: number
 }
@@ -120,12 +117,17 @@ export interface StageTransitionState {
 export interface StagePerformanceStats extends PerformanceStats {
   qualityMode: QualityMode
   inputItems: number
-  renderedItems: number
-  submittedItems: number
   visibleItems: number
-  drawCalls: number
-  triangles: number
-  textureBytes: number
+  render: Readonly<{
+    drawCalls: number
+    triangles: number
+  }>
+  renderer: Readonly<{
+    instanceCount: number
+    submittedInstanceCount: number
+    gpuBytes: number
+    metrics: Readonly<Record<string, number>>
+  }>
   pixelRatio: number
   paused: boolean
   effect: string | null
@@ -137,18 +139,6 @@ export interface StagePerformanceStats extends PerformanceStats {
   transformCalculations: number
   pickingMs: number
   pickOperations: number
-  atlasBuilds: number
-  atlasPatches: number
-  atlasDiscardedBuilds: number
-  atlasDiscardedPatches: number
-  atlasCellsUpdated: number
-  atlasBuildMs: number
-  atlasPatchMs: number
-  atlasDrawMs: number
-  imageLoadMs: number
-  imageRequests: number
-  imageFailures: number
-  estimatedTextureUploadBytes: number
   extensions: number
   extensionUpdateMs: number
 }
@@ -218,18 +208,22 @@ interface ActiveEffect {
   lastUpdatedAt: number
 }
 
-export class MotionStage {
+export class MotionStage<TMeta = unknown> {
+  readonly ready: Promise<void>
   private readonly scene = new Scene()
   private readonly camera: PerspectiveCamera
   private readonly renderer: WebGLRenderer
-  private readonly cards: InstancedCardRenderer
-  private readonly cardWidth: number
-  private readonly cardHeight: number
+  private readonly contentRoot: Group
+  private readonly contentRenderer: MotionRenderer<TMeta>
+  private readonly itemBounds: MotionRendererPickShape | null
+  private readonly contentAbortController = new AbortController()
+  private readonly itemWidth: number
+  private readonly itemHeight: number
   private readonly resizeObserver: ResizeObserver
   private readonly projectionVector = new Vector3()
   private readonly groupEuler = new Euler()
-  private items: MotionItem[] = []
-  private sourceItems: MotionItem[] = []
+  private items: MotionItem<TMeta>[] = []
+  private sourceItems: MotionItem<TMeta>[] = []
   private transforms: Transform[] = []
   private frameId = 0
   private lastFrame = 0
@@ -274,7 +268,7 @@ export class MotionStage {
   private pickingMs = 0
   private pickOperations = 0
   private pendingItemUpdateBatch: {
-    updates: MotionItemUpdate[]
+    updates: MotionItemUpdate<TMeta>[]
     resolve: Array<(applied: boolean) => void>
     reject: Array<(reason: unknown) => void>
   } | null = null
@@ -284,10 +278,11 @@ export class MotionStage {
   private extensionUpdateMs = 0
   private extensionSequence = 0
 
-  constructor(private readonly options: MotionStageOptions) {
-    if (options.cardContent && options.drawCard) {
-      throw new TypeError('cardContent and drawCard cannot be used together')
+  constructor(private readonly options: MotionStageOptions<TMeta>) {
+    if (typeof options.renderer !== 'function') {
+      throw new TypeError('MotionStage renderer must be a renderer factory')
     }
+    if (options.items) validateItems(options.items)
     this.motionPreference = options.motionPreference ?? 'auto'
     this.motionQuery = typeof matchMedia === 'function'
       ? matchMedia('(prefers-reduced-motion: reduce)')
@@ -300,9 +295,6 @@ export class MotionStage {
     this.qualityMode = options.quality ?? 'auto'
     this.quality = this.qualityMode === 'auto' ? detectQuality() : this.qualityMode
     this.performanceManager = new AdaptivePerformanceManager(this.quality)
-    const cardAspectRatio = resolveCardAspectRatio(options.cardAspectRatio)
-    this.cardWidth = cardAspectRatio >= 1 ? 1 : cardAspectRatio
-    this.cardHeight = cardAspectRatio >= 1 ? 1 / cardAspectRatio : 1
     const profile = qualityProfiles[this.quality]
     this.camera = new PerspectiveCamera(45, 1, 0.1, 100)
     this.camera.position.z = options.cameraZ ?? 18
@@ -330,19 +322,36 @@ export class MotionStage {
       this.motionQuery?.addEventListener('change', this.handleMotionPreferenceChange)
     }
     document.addEventListener('visibilitychange', this.handleVisibilityChange)
-    this.cards = new InstancedCardRenderer(this.scene, {
-      cardStyle: options.cardStyle,
-      resolveCardStyle: options.resolveCardStyle,
-      drawCard: options.drawCard,
-      cardContent: options.cardContent,
-      aspectRatio: cardAspectRatio,
-      cellSize: options.cardResolution,
-      imageTimeout: options.imageTimeout,
-      imageConcurrency: options.imageConcurrency,
-      imageCacheSize: options.imageCacheSize,
-      maxTextureSize: this.renderer.capabilities.maxTextureSize,
-      anisotropy: Math.min(4, this.renderer.capabilities.getMaxAnisotropy()),
-    })
+    this.contentRoot = new Group()
+    this.contentRoot.name = 'SpatialMotionContent'
+    this.scene.add(this.contentRoot)
+    let contentRenderer: MotionRenderer<TMeta> | null = null
+    try {
+      contentRenderer = options.renderer({
+        root: this.contentRoot,
+        maxTextureSize: this.renderer.capabilities.maxTextureSize,
+        maxAnisotropy: this.renderer.capabilities.getMaxAnisotropy(),
+        signal: this.contentAbortController.signal,
+      })
+      assertMotionRenderer(contentRenderer)
+    } catch (error) {
+      contentRenderer?.dispose?.()
+      this.contentAbortController.abort()
+      disposeObjectResources(this.contentRoot)
+      this.scene.remove(this.contentRoot)
+      this.cleanupCanvasAndListeners()
+      this.renderer.dispose()
+      this.renderer.domElement.remove()
+      throw error
+    }
+    this.contentRenderer = contentRenderer
+    this.itemBounds = contentRenderer.descriptor.itemBounds
+    this.itemWidth = this.itemBounds
+      ? this.itemBounds.kind === 'disc' ? this.itemBounds.diameter : this.itemBounds.width
+      : 1
+    this.itemHeight = this.itemBounds
+      ? this.itemBounds.kind === 'disc' ? this.itemBounds.diameter : this.itemBounds.height
+      : 1
     this.resizeObserver = new ResizeObserver(() => {
       if (!this.destroyed) this.resizeInternal()
     })
@@ -352,39 +361,38 @@ export class MotionStage {
       this.lastFrame = performance.now()
       this.frameId = requestAnimationFrame(this.render)
     }
+    this.ready = options.items ? this.setItemsInternal(options.items) : Promise.resolve()
   }
 
-  setItems(items: MotionItem[]): Promise<void> {
+  setItems(items: MotionItem<TMeta>[]): Promise<void> {
     this.assertActive()
     validateItems(items)
     return this.setItemsAfterPendingUpdates(items)
   }
 
-  private async setItemsAfterPendingUpdates(items: MotionItem[]): Promise<void> {
+  private async setItemsAfterPendingUpdates(items: MotionItem<TMeta>[]): Promise<void> {
     await this.flushPendingItemUpdates()
     return this.setItemsInternal(items)
   }
 
-  private async setItemsInternal(items: MotionItem[]): Promise<void> {
+  private async setItemsInternal(items: MotionItem<TMeta>[]): Promise<void> {
     const token = ++this.itemsToken
     this.cancelActiveTransition('interrupted')
     this.activeEffect = null
-    this.cards.disableEffect()
+    this.contentRenderer.capabilities.streamingEffects?.disable()
     const maxItems = qualityProfiles[this.quality].maxVisibleItems
     const nextItems = items.slice(0, maxItems)
     const nextTransforms = nextItems.map(identityTransform)
-    const applied = await this.cards.setItems(nextItems)
+    const applied = await this.contentRenderer.setItems(nextItems)
     if (!applied || token !== this.itemsToken || this.destroyed) return
     this.items = nextItems
     this.sourceItems = items.map((item) => ({ ...item }))
     this.inputItemCount = items.length
     this.transforms = nextTransforms
-    this.cards.setOrientation(this.currentOrientation)
-    this.cards.setHideBackHemisphere(this.hideBackHemisphere)
-    this.cards.setHemisphereEdgeFade(this.hemisphereEdgeFade)
-    this.cards.setTransforms(nextTransforms)
+    this.contentRenderer.capabilities.visual?.setVisualState(this.currentRendererVisualState())
+    this.contentRenderer.setTransforms(nextTransforms)
     this.visibleRatio = 1
-    this.cards.setVisibleRatio(this.visibleRatio)
+    this.contentRenderer.setVisibleRatio(this.visibleRatio)
     this.syncFocusedItem()
   }
 
@@ -456,7 +464,7 @@ export class MotionStage {
     this.transforms = this.resolveCurrentTransforms(now)
     if (this.activeEffect) {
       this.activeEffect = null
-      this.cards.disableEffect()
+      this.contentRenderer.capabilities.streamingEffects?.disable()
     }
     this.cancelActiveTransition('interrupted')
     const from = this.transforms
@@ -479,24 +487,22 @@ export class MotionStage {
     if (duration === 0) {
       this.transforms = target
       this.activeTransition = null
-      this.cards.setOrientation(targetOrientation)
-      this.cards.setHideBackHemisphere(targetHideBackHemisphere)
-      this.cards.setHemisphereEdgeFade(targetHemisphereEdgeFade)
-      this.cards.setTransforms(target)
+      this.contentRenderer.capabilities.visual?.setVisualState({
+        billboard: targetBillboard,
+        hideBackHemisphere: targetHideBack,
+        hemisphereEdgeFade: targetHemisphereEdgeFade,
+      })
+      this.contentRenderer.setTransforms(target)
       this.lastTransitionStatus = 'completed'
       this.lastTransitionLayout = layout.name
       return Promise.resolve({ completed: true, status: 'completed' })
     }
-    this.cards.prepareTransition(
-      from,
-      target,
-      visualState.billboard,
-      targetBillboard,
-      visualState.hideBackHemisphere,
-      targetHideBack,
-      visualState.hemisphereEdgeFade,
-      targetHemisphereEdgeFade,
-    )
+    this.contentRenderer.prepareTransition(from, target)
+    this.contentRenderer.capabilities.visual?.prepareVisualTransition(visualState, {
+      billboard: targetBillboard,
+      hideBackHemisphere: targetHideBack,
+      hemisphereEdgeFade: targetHemisphereEdgeFade,
+    })
     return new Promise<StageTransitionResult>((resolve) => {
       const transition: ActiveTransition = {
         from,
@@ -525,14 +531,6 @@ export class MotionStage {
     })
   }
 
-  enterTunnel(effect: TunnelEffect, options: TransitionOptions = {}): Promise<boolean> {
-    return this.enterEffect(effect, options)
-  }
-
-  enterLinearShooter(effect: LinearShooterEffect, options: TransitionOptions = {}): Promise<boolean> {
-    return this.enterEffect(effect, options)
-  }
-
   enterEffect(effect: StreamingEffect, options: TransitionOptions = {}): Promise<boolean> {
     this.assertActive()
     return this.enterStreamingEffect(effect, options)
@@ -557,34 +555,47 @@ export class MotionStage {
     if (!entered) return false
     if (this.reducedMotion) {
       this.transforms = target
-      this.cards.setTransforms(target)
+      this.contentRenderer.setTransforms(target)
+      return true
+    }
+    const streamingEffects = this.contentRenderer.capabilities.streamingEffects
+    if (!streamingEffects) {
+      this.transforms = target
+      this.contentRenderer.setTransforms(target)
       return true
     }
     const gpuData = effect.getGpuData()
-    this.cards.enableEffect(gpuData)
+    streamingEffects.enable(gpuData)
     this.activeEffect = { effect, gpuData, elapsedSeconds: 0, lastUpdatedAt: performance.now() }
     return true
   }
 
-  updateItems(items: MotionItem[], options: UpdateItemsOptions = {}): Promise<boolean> {
+  updateItems(items: MotionItem<TMeta>[], options: UpdateItemsOptions = {}): Promise<boolean> {
     this.assertActive()
     validateItems(items)
     return this.updateItemsAfterPendingUpdates(items, options)
   }
 
   private async updateItemsAfterPendingUpdates(
-    items: MotionItem[],
+    items: MotionItem<TMeta>[],
     options: UpdateItemsOptions,
   ): Promise<boolean> {
     await this.flushPendingItemUpdates()
     return this.updateItemsInternal(items, options)
   }
 
-  updateItem(id: string, patch: MotionItemPatch, options: UpdateItemsOptions = {}): Promise<boolean> {
+  updateItem(
+    id: string,
+    patch: MotionItemPatch<TMeta>,
+    options: UpdateItemsOptions = {},
+  ): Promise<boolean> {
     return this.updateItemsById([{ id, patch }], options)
   }
 
-  updateItemsById(updates: MotionItemUpdate[], options: UpdateItemsOptions = {}): Promise<boolean> {
+  updateItemsById(
+    updates: MotionItemUpdate<TMeta>[],
+    options: UpdateItemsOptions = {},
+  ): Promise<boolean> {
     this.assertActive()
     validateItemUpdates(updates)
     if (!updates.length) return Promise.resolve(true)
@@ -595,14 +606,14 @@ export class MotionStage {
   }
 
   private async updateItemsByIdAfterPendingUpdates(
-    updates: MotionItemUpdate[],
+    updates: MotionItemUpdate<TMeta>[],
     options: UpdateItemsOptions,
   ): Promise<boolean> {
     await this.flushPendingItemUpdates()
     return this.updateItemsByIdInternal(updates, options)
   }
 
-  private queueItemUpdates(updates: MotionItemUpdate[]): Promise<boolean> {
+  private queueItemUpdates(updates: MotionItemUpdate<TMeta>[]): Promise<boolean> {
     return new Promise<boolean>((resolve, reject) => {
       if (!this.pendingItemUpdateBatch) {
         this.pendingItemUpdateBatch = { updates: [], resolve: [], reject: [] }
@@ -618,7 +629,7 @@ export class MotionStage {
     const batch = this.pendingItemUpdateBatch
     if (!batch) return this.itemUpdateChain
     this.pendingItemUpdateBatch = null
-    const mergedPatches = new Map<string, MotionItemPatch>()
+    const mergedPatches = new Map<string, MotionItemPatch<TMeta>>()
     batch.updates.forEach(({ id, patch }) => {
       mergedPatches.set(id, { ...mergedPatches.get(id), ...patch })
     })
@@ -638,7 +649,7 @@ export class MotionStage {
   }
 
   private async updateItemsByIdInternal(
-    updates: MotionItemUpdate[],
+    updates: MotionItemUpdate<TMeta>[],
     options: UpdateItemsOptions,
   ): Promise<boolean> {
     if (!updates.length) return true
@@ -657,13 +668,17 @@ export class MotionStage {
       .map((item, index) => updatesById.has(item.id) ? index : -1)
       .filter((index) => index >= 0)
     const token = ++this.itemsToken
-    const applied = await this.cards.updateItems(nextItems, changedIndices)
+    const patch = this.contentRenderer.capabilities.patch
+    const applied = patch
+      ? await patch.updateItems(nextItems, changedIndices)
+      : await this.contentRenderer.setItems(nextItems)
     if (!applied || token !== this.itemsToken || this.destroyed) return false
     this.sourceItems = nextSource
     this.items = nextItems
     this.inputItemCount = nextSource.length
     this.visibleRatio = 1
-    this.cards.setVisibleRatio(this.visibleRatio)
+    if (!patch) this.restoreRendererStateAfterItems()
+    this.contentRenderer.setVisibleRatio(this.visibleRatio)
     this.syncFocusedItem()
 
     if (!options.layout) return true
@@ -676,7 +691,7 @@ export class MotionStage {
   }
 
   private async updateItemsInternal(
-    items: MotionItem[],
+    items: MotionItem<TMeta>[],
     options: UpdateItemsOptions,
     preserveEffect = false,
   ): Promise<boolean> {
@@ -688,10 +703,10 @@ export class MotionStage {
     this.cancelActiveTransition('interrupted')
     if (!preserveEffect) {
       this.activeEffect = null
-      this.cards.disableEffect()
+      this.contentRenderer.capabilities.streamingEffects?.disable()
     }
     this.transforms = current
-    this.cards.setTransforms(current)
+    this.contentRenderer.setTransforms(current)
 
     const maxItems = qualityProfiles[this.quality].maxVisibleItems
     const nextItems = items.slice(0, maxItems)
@@ -699,32 +714,30 @@ export class MotionStage {
       const previous = previousById.get(item.id)
       return previous ? { ...previous } : identityTransform()
     })
-    const applied = await this.cards.setItems(nextItems)
+    const applied = await this.contentRenderer.setItems(nextItems)
     if (!applied || token !== this.itemsToken || this.destroyed) return false
     this.items = nextItems
     this.sourceItems = items.map((item) => ({ ...item }))
     this.inputItemCount = items.length
     this.transforms = nextTransforms
-    this.cards.setOrientation(this.currentOrientation)
-    this.cards.setHideBackHemisphere(this.hideBackHemisphere)
-    this.cards.setHemisphereEdgeFade(this.hemisphereEdgeFade)
-    this.cards.setTransforms(nextTransforms)
+    this.contentRenderer.capabilities.visual?.setVisualState(this.currentRendererVisualState())
+    this.contentRenderer.setTransforms(nextTransforms)
     this.visibleRatio = 1
-    this.cards.setVisibleRatio(this.visibleRatio)
+    this.contentRenderer.setVisibleRatio(this.visibleRatio)
     this.syncFocusedItem()
 
     const targetLayout = options.layout ?? this.lastLayout
     if (currentEffect && this.activeEffect === currentEffect) {
       if (targetLayout) {
         this.transforms = targetLayout.calculate(this.items.length, this.context())
-        this.cards.setTransforms(this.transforms)
+        this.contentRenderer.setTransforms(this.transforms)
         if (options.layout) this.lastLayout = options.layout
       }
       const profile = qualityProfiles[this.quality]
       currentEffect.effect.prepare(this.items.length, profile.maxActiveEffectItems)
       currentEffect.gpuData = currentEffect.effect.getGpuData()
-      this.cards.enableEffect(currentEffect.gpuData)
-      this.cards.setEffectTime(currentEffect.elapsedSeconds)
+      this.contentRenderer.capabilities.streamingEffects?.enable(currentEffect.gpuData)
+      this.contentRenderer.capabilities.streamingEffects?.setTime(currentEffect.elapsedSeconds)
       return true
     }
     if (!targetLayout) return true
@@ -788,7 +801,11 @@ export class MotionStage {
     return this.transitionTo(this.lastLayout, options)
   }
 
-  pick(clientX: number, clientY: number, options: number | PickOptions = {}): PickResult | null {
+  pick(
+    clientX: number,
+    clientY: number,
+    options: number | PickOptions = {},
+  ): PickResult<TMeta> | null {
     this.assertActive()
     const startedAt = performance.now()
     try {
@@ -808,13 +825,19 @@ export class MotionStage {
     return true
   }
 
-  getFocusedItem(): MotionItem | null {
+  getFocusedItem(): MotionItem<TMeta> | null {
     this.assertActive()
     const index = this.focusedIndex()
     return index === null ? null : this.items[index]
   }
 
-  private pickInternal(clientX: number, clientY: number, options: number | PickOptions): PickResult | null {
+  private pickInternal(
+    clientX: number,
+    clientY: number,
+    options: number | PickOptions,
+  ): PickResult<TMeta> | null {
+    const itemBounds = this.itemBounds
+    if (!itemBounds) return null
     const rect = this.renderer.domElement.getBoundingClientRect()
     if (!rect.width || !rect.height) return null
     const transforms = this.resolveCurrentTransforms(performance.now())
@@ -823,8 +846,10 @@ export class MotionStage {
     const legacyRadius = typeof options === 'number' ? Math.max(0, options) : null
     const pickOptions = typeof options === 'number' ? {} : options
     const padding = Math.max(0, pickOptions.padding ?? 0)
-    const billboard = this.currentOrientation === 'camera' || Boolean(this.activeEffect)
-    const candidates: Array<PickResult & { depth: number }> = []
+    const billboard = itemBounds.facing === 'camera'
+      || this.currentOrientation === 'camera'
+      || Boolean(this.activeEffect)
+    const candidates: Array<PickResult<TMeta> & { depth: number }> = []
     const groupOrigin = new Vector3(0, 0, 0)
     const groupOriginViewZ = groupOrigin.clone().applyMatrix4(this.camera.matrixWorldInverse).z
 
@@ -845,8 +870,22 @@ export class MotionStage {
         return
       }
 
-      const halfWidth = Math.max(0, transform.scale) * this.cardWidth / 2
-      const halfHeight = Math.max(0, transform.scale) * this.cardHeight / 2
+      const halfWidth = Math.max(0, transform.scale) * this.itemWidth / 2
+      const halfHeight = Math.max(0, transform.scale) * this.itemHeight / 2
+      if (itemBounds.kind === 'disc') {
+        const right = new Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion)
+        const edge = this.projectToScreen(center.clone().addScaledVector(right, halfWidth), rect)
+        if (!edge) return
+        const radius = Math.hypot(edge.x - screenX, edge.y - screenY)
+        if (distance > radius + padding) return
+        candidates.push({
+          item: this.items[index],
+          index,
+          distance,
+          depth: center.distanceTo(this.camera.position),
+        })
+        return
+      }
       const corners = billboard
         ? this.billboardCorners(center, halfWidth, halfHeight)
         : this.surfaceCorners(center, halfWidth, halfHeight, transform)
@@ -914,7 +953,7 @@ export class MotionStage {
     this.assertActive()
     this.rotateX = x
     this.rotateY = y
-    this.cards.setGroupRotation(x, y)
+    this.contentRoot.rotation.set(x, y, 0)
   }
 
   timeline(): Timeline {
@@ -1006,9 +1045,10 @@ export class MotionStage {
     this.renderer.setSize(width, height, false)
     if (this.lastLayout && this.items.length && !this.activeTransition && !this.activeEffect) {
       this.transforms = this.lastLayout.calculate(this.items.length, this.context())
-      this.cards.setTransforms(this.transforms)
+      this.contentRenderer.setTransforms(this.transforms)
     }
     const viewport = this.extensionViewport()
+    this.contentRenderer.capabilities.viewport?.resize(viewport)
     for (const record of this.orderedExtensions()) {
       if (!record.active || !record.mounted || !record.enabled || !record.extension.resize) continue
       try {
@@ -1027,6 +1067,18 @@ export class MotionStage {
     cancelAnimationFrame(this.frameId)
     this.frameId = 0
     this.resizeObserver.disconnect()
+    this.cleanupCanvasAndListeners()
+    for (const wait of this.stageWaits) wait.complete(false)
+    this.stageWaits.clear()
+    for (const extension of this.orderedExtensions()) this.removeExtensionRecord(extension)
+    this.contentAbortController.abort()
+    this.contentRenderer.dispose()
+    this.scene.remove(this.contentRoot)
+    this.renderer.dispose()
+    this.renderer.domElement.remove()
+  }
+
+  private cleanupCanvasAndListeners(): void {
     this.renderer.domElement.removeEventListener('pointerup', this.handlePointerUp)
     this.renderer.domElement.removeEventListener('webglcontextlost', this.handleContextLost)
     this.renderer.domElement.removeEventListener('webglcontextrestored', this.handleContextRestored)
@@ -1037,12 +1089,6 @@ export class MotionStage {
     this.renderer.domElement.removeEventListener('keydown', this.handleKeyDown)
     this.renderer.domElement.removeEventListener('focus', this.handleCanvasFocus)
     this.renderer.domElement.removeEventListener('blur', this.handleCanvasBlur)
-    for (const wait of this.stageWaits) wait.complete(false)
-    this.stageWaits.clear()
-    for (const extension of this.orderedExtensions()) this.removeExtensionRecord(extension)
-    this.cards.dispose()
-    this.renderer.dispose()
-    this.renderer.domElement.remove()
   }
 
   getQuality(): QualityLevel {
@@ -1053,19 +1099,19 @@ export class MotionStage {
   getPerformanceStats(): StagePerformanceStats {
     this.assertActive()
     const performanceStats = this.performanceManager.getStats()
-    const cardStats = this.cards.getStats()
+    const rendererStats = normalizeRendererStats(this.contentRenderer.getStats())
     return {
       ...performanceStats,
       qualityMode: this.qualityMode,
       inputItems: this.inputItemCount,
-      renderedItems: cardStats.instanceCount,
-      submittedItems: cardStats.submittedInstanceCount,
       visibleItems: this.activeEffect
         ? countVisibleEffectItems(this.activeEffect.gpuData.speedFactors, this.visibleRatio)
-        : countVisibleItems(cardStats.instanceCount, this.visibleRatio),
-      drawCalls: this.renderer.info.render.calls,
-      triangles: this.renderer.info.render.triangles,
-      textureBytes: cardStats.textureBytes,
+        : countVisibleItems(rendererStats.instanceCount, this.visibleRatio),
+      render: Object.freeze({
+        drawCalls: this.renderer.info.render.calls,
+        triangles: this.renderer.info.render.triangles,
+      }),
+      renderer: Object.freeze(rendererStats),
       pixelRatio: this.renderer.getPixelRatio(),
       paused: this.isPaused(),
       effect: this.activeEffect?.effect.name ?? null,
@@ -1079,18 +1125,6 @@ export class MotionStage {
       transformCalculations: this.transformCalculations,
       pickingMs: this.pickingMs,
       pickOperations: this.pickOperations,
-      atlasBuilds: cardStats.atlasBuilds,
-      atlasPatches: cardStats.atlasPatches,
-      atlasDiscardedBuilds: cardStats.atlasDiscardedBuilds,
-      atlasDiscardedPatches: cardStats.atlasDiscardedPatches,
-      atlasCellsUpdated: cardStats.atlasCellsUpdated,
-      atlasBuildMs: cardStats.atlasBuildMs,
-      atlasPatchMs: cardStats.atlasPatchMs,
-      atlasDrawMs: cardStats.atlasDrawMs,
-      imageLoadMs: cardStats.imageLoadMs,
-      imageRequests: cardStats.imageRequests,
-      imageFailures: cardStats.imageFailures,
-      estimatedTextureUploadBytes: cardStats.estimatedTextureUploadBytes,
       extensions: this.extensions.size,
       extensionUpdateMs: this.extensionUpdateMs,
     }
@@ -1144,8 +1178,8 @@ export class MotionStage {
       height,
       viewportWidth: viewportHeight * (width / Math.max(1, height)),
       viewportHeight,
-      cardWidth: this.cardWidth,
-      cardHeight: this.cardHeight,
+      itemWidth: this.itemWidth,
+      itemHeight: this.itemHeight,
     }
   }
 
@@ -1164,11 +1198,7 @@ export class MotionStage {
     )
   }
 
-  private resolveCurrentVisualState(now: number): {
-    billboard: number
-    hideBackHemisphere: number
-    hemisphereEdgeFade: number
-  } {
+  private resolveCurrentVisualState(now: number): MotionRendererVisualState {
     if (this.activeEffect) return { billboard: 1, hideBackHemisphere: 0, hemisphereEdgeFade: 0 }
     if (!this.activeTransition) {
       return {
@@ -1189,6 +1219,46 @@ export class MotionStage {
     }
   }
 
+  private currentRendererVisualState(): MotionRendererVisualState {
+    return {
+      billboard: this.currentOrientation === 'camera' ? 1 : 0,
+      hideBackHemisphere: this.hideBackHemisphere ? 1 : 0,
+      hemisphereEdgeFade: this.hemisphereEdgeFade,
+    }
+  }
+
+  private restoreRendererStateAfterItems(): void {
+    const visual = this.contentRenderer.capabilities.visual
+    const transition = this.activeTransition
+    if (transition) {
+      const fromVisual: MotionRendererVisualState = {
+        billboard: transition.fromBillboard,
+        hideBackHemisphere: transition.fromHideBackHemisphere,
+        hemisphereEdgeFade: transition.fromHemisphereEdgeFade,
+      }
+      const toVisual: MotionRendererVisualState = {
+        billboard: transition.toBillboard,
+        hideBackHemisphere: transition.toHideBackHemisphere,
+        hemisphereEdgeFade: transition.toHemisphereEdgeFade,
+      }
+      this.contentRenderer.prepareTransition(transition.from, transition.to)
+      visual?.prepareVisualTransition(fromVisual, toVisual)
+      this.contentRenderer.setProgress(transition.easing(
+        this.transitionProgress(transition, performance.now()),
+      ))
+    } else {
+      visual?.setVisualState(this.currentRendererVisualState())
+      this.contentRenderer.setTransforms(this.transforms)
+    }
+    this.contentRenderer.setVisibleRatio(this.visibleRatio)
+    this.updateInteractionHighlight()
+    if (this.activeEffect) {
+      const streaming = this.contentRenderer.capabilities.streamingEffects
+      streaming?.enable(this.activeEffect.gpuData)
+      streaming?.setTime(this.activeEffect.elapsedSeconds)
+    }
+  }
+
   private transitionProgress(transition: ActiveTransition, now: number): number {
     const pendingMs = this.isPaused() ? 0 : Math.max(0, now - transition.lastUpdatedAt)
     return Math.min(1, (transition.elapsedMs + pendingMs) / transition.duration)
@@ -1205,7 +1275,7 @@ export class MotionStage {
     transition.elapsedMs += Math.max(0, now - transition.lastUpdatedAt)
     transition.lastUpdatedAt = now
     const progress = Math.min(1, transition.elapsedMs / transition.duration)
-    this.cards.setProgress(transition.easing(progress))
+    this.contentRenderer.setProgress(transition.easing(progress))
     if (progress < 1) return
     this.transforms = transition.to
     this.activeTransition = null
@@ -1240,11 +1310,11 @@ export class MotionStage {
     if (nextQuality) this.applyQuality(nextQuality)
     this.rotateX += this.rotateSpeedX * delta
     this.rotateY += this.rotateSpeedY * delta
-    this.cards.setGroupRotation(this.rotateX, this.rotateY)
+    this.contentRoot.rotation.set(this.rotateX, this.rotateY, 0)
     if (this.activeEffect) {
       this.activeEffect.elapsedSeconds += Math.max(0, now - this.activeEffect.lastUpdatedAt) / 1000
       this.activeEffect.lastUpdatedAt = now
-      this.cards.setEffectTime(this.activeEffect.elapsedSeconds)
+      this.contentRenderer.capabilities.streamingEffects?.setTime(this.activeEffect.elapsedSeconds)
     }
     this.updateExtensions(delta)
     this.frameCpuMs = performance.now() - frameCpuStartedAt
@@ -1263,7 +1333,7 @@ export class MotionStage {
     this.visibleRatio = this.items.length
       ? Math.min(1, targetCount / this.items.length)
       : 1
-    this.cards.setVisibleRatio(this.visibleRatio)
+    this.contentRenderer.setVisibleRatio(this.visibleRatio)
     this.syncFocusedItem()
     if (this.activeEffect) {
       const now = performance.now()
@@ -1271,8 +1341,8 @@ export class MotionStage {
       this.activeEffect.lastUpdatedAt = now
       this.activeEffect.effect.prepare(this.items.length, profile.maxActiveEffectItems)
       this.activeEffect.gpuData = this.activeEffect.effect.getGpuData()
-      this.cards.enableEffect(this.activeEffect.gpuData)
-      this.cards.setEffectTime(this.activeEffect.elapsedSeconds)
+      this.contentRenderer.capabilities.streamingEffects?.enable(this.activeEffect.gpuData)
+      this.contentRenderer.capabilities.streamingEffects?.setTime(this.activeEffect.elapsedSeconds)
     }
     this.notifyExtensions('qualityChange', quality)
     this.resizeInternal()
@@ -1496,7 +1566,7 @@ export class MotionStage {
   private readonly handleContextRestored = () => {
     if (this.destroyed || !this.pausedByContext) return
     this.pausedByContext = false
-    this.cards.refreshTexture()
+    this.contentRenderer.capabilities.resourceRecovery?.refreshResources()
     this.startRenderLoop()
     this.options.onContextChange?.('restored')
   }
@@ -1605,10 +1675,10 @@ export class MotionStage {
 
   private updateInteractionHighlight(): void {
     const index = (this.options.hoverEffect === 'highlight' ? this.hoveredIndex : null) ?? this.focusedIndex()
-    this.cards.setHoverIndex(index)
+    this.contentRenderer.capabilities.highlight?.setHighlightIndex(index)
   }
 
-  private updateAriaLabel(item: MotionItem | null, index: number | null): void {
+  private updateAriaLabel(item: MotionItem<TMeta> | null, index: number | null): void {
     if (!this.keyboardNavigation) return
     const detail = item && index !== null
       ? `: ${item.title?.trim() || item.id} (${index + 1} of ${this.items.length})`
@@ -1625,8 +1695,8 @@ export class MotionStage {
     if (!this.activeEffect) return
     this.transforms = this.activeEffect.effect.calculateTransforms(this.items.length, 0)
     this.activeEffect = null
-    this.cards.disableEffect()
-    this.cards.setTransforms(this.transforms)
+    this.contentRenderer.capabilities.streamingEffects?.disable()
+    this.contentRenderer.setTransforms(this.transforms)
   }
 
   private assertActive(): void {
@@ -1677,8 +1747,138 @@ interface ScreenPoint {
   y: number
 }
 
-function resolveCardAspectRatio(value: number | undefined): number {
-  return Number.isFinite(value) ? Math.min(4, Math.max(0.25, value as number)) : 1
+function assertMotionRenderer(value: unknown): asserts value is MotionRenderer {
+  if (!value || typeof value !== 'object') {
+    throw new TypeError('Motion renderer factory must return a MotionRenderer object')
+  }
+  const renderer = value as Partial<MotionRenderer>
+  const methods: Array<keyof MotionRenderer> = [
+    'setItems',
+    'setTransforms',
+    'prepareTransition',
+    'setProgress',
+    'setVisibleRatio',
+    'getStats',
+    'dispose',
+  ]
+  const missing = methods.find((method) => typeof renderer[method] !== 'function')
+  if (missing) throw new TypeError(`Motion renderer is missing required method: ${missing}`)
+  if (!renderer.descriptor || typeof renderer.descriptor !== 'object') {
+    throw new TypeError('Motion renderer must declare a descriptor')
+  }
+  if (!renderer.capabilities || typeof renderer.capabilities !== 'object') {
+    throw new TypeError('Motion renderer must declare capabilities')
+  }
+  validateCapability(renderer.capabilities.patch, 'patch', ['updateItems'])
+  validateCapability(renderer.capabilities.visual, 'visual', [
+    'setVisualState',
+    'prepareVisualTransition',
+  ])
+  validateCapability(renderer.capabilities.highlight, 'highlight', ['setHighlightIndex'])
+  validateCapability(renderer.capabilities.viewport, 'viewport', ['resize'])
+  validateCapability(renderer.capabilities.resourceRecovery, 'resourceRecovery', ['refreshResources'])
+  validateCapability(renderer.capabilities.streamingEffects, 'streamingEffects', [
+    'enable',
+    'disable',
+    'setTime',
+  ])
+  const shape = renderer.descriptor.itemBounds
+  if (shape === null) return
+  if (!shape || (shape.kind !== 'quad' && shape.kind !== 'disc')) {
+    throw new TypeError('Motion renderer descriptor must declare valid itemBounds or null')
+  }
+  if (shape.kind === 'disc') {
+    if (shape.facing !== 'camera' || !Number.isFinite(shape.diameter) || shape.diameter <= 0) {
+      throw new TypeError('Disc itemBounds must be camera-facing with a positive diameter')
+    }
+    return
+  }
+  if (
+    (shape.facing !== 'layout' && shape.facing !== 'camera')
+    || !Number.isFinite(shape.width)
+    || !Number.isFinite(shape.height)
+    || shape.width <= 0
+    || shape.height <= 0
+  ) {
+    throw new TypeError('Quad itemBounds must have a valid facing and positive width/height')
+  }
+}
+
+function validateCapability(
+  capability: unknown,
+  name: string,
+  methods: string[],
+): void {
+  if (capability === undefined) return
+  if (!capability || typeof capability !== 'object') {
+    throw new TypeError(`Motion renderer capability ${name} must be an object`)
+  }
+  const missing = methods.find((method) =>
+    typeof (capability as Record<string, unknown>)[method] !== 'function')
+  if (missing) {
+    throw new TypeError(`Motion renderer capability ${name} is missing method: ${missing}`)
+  }
+}
+
+interface NormalizedRendererStats {
+  instanceCount: number
+  submittedInstanceCount: number
+  gpuBytes: number
+  metrics: Readonly<Record<string, number>>
+}
+
+function normalizeRendererStats(stats: MotionRendererStats): NormalizedRendererStats {
+  const input = stats && typeof stats === 'object'
+    ? stats as Partial<MotionRendererStats>
+    : {}
+  const metricInput = input.metrics && typeof input.metrics === 'object'
+    ? input.metrics
+    : {}
+  const metrics = Object.fromEntries(
+    Object.entries(metricInput)
+      .slice(0, 64)
+      .map(([key, value]) => [key, finiteStat(value)]),
+  )
+  const instanceCount = finiteStat(input.instanceCount)
+  return {
+    instanceCount,
+    submittedInstanceCount: Math.min(instanceCount, finiteStat(input.submittedInstanceCount)),
+    gpuBytes: finiteStat(input.gpuBytes),
+    metrics: Object.freeze(metrics),
+  }
+}
+
+function finiteStat(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
+}
+
+function disposeObjectResources(root: Object3D): void {
+  const geometries = new Set<{ dispose(): void }>()
+  const materials = new Set<Material>()
+  const textures = new Set<Texture>()
+  root.traverse((object) => {
+    const renderable = object as Object3D & {
+      geometry?: { dispose(): void }
+      material?: Material | Material[]
+    }
+    if (renderable.geometry?.dispose) geometries.add(renderable.geometry)
+    const objectMaterials = Array.isArray(renderable.material)
+      ? renderable.material
+      : renderable.material
+        ? [renderable.material]
+        : []
+    objectMaterials.forEach((material) => {
+      materials.add(material)
+      Object.values(material).forEach((value) => {
+        if (value && typeof value === 'object' && (value as Texture).isTexture) {
+          textures.add(value as Texture)
+        }
+      })
+    })
+  })
+  textures.forEach((texture) => texture.dispose())
+  materials.forEach((material) => material.dispose())
+  geometries.forEach((geometry) => geometry.dispose())
 }
 
 const EXTENSION_SAMPLE_LIMIT = 120
@@ -1770,7 +1970,7 @@ function countVisibleEffectItems(speedFactors: Float32Array, ratio: number): num
   return visible
 }
 
-function validateItems(items: MotionItem[]): void {
+function validateItems<TMeta>(items: MotionItem<TMeta>[]): void {
   const ids = new Set<string>()
   items.forEach((item, index) => {
     if (!item.id.trim()) throw new Error(`MotionItem at index ${index} must have a non-empty id`)
@@ -1779,7 +1979,7 @@ function validateItems(items: MotionItem[]): void {
   })
 }
 
-function validateItemUpdates(updates: MotionItemUpdate[]): void {
+function validateItemUpdates<TMeta>(updates: MotionItemUpdate<TMeta>[]): void {
   const ids = new Set<string>()
   updates.forEach(({ id }, index) => {
     if (!id.trim()) throw new Error(`MotionItem update at index ${index} must have a non-empty id`)

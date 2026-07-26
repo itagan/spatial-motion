@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { MotionStage, radialBurst, sphere, tunnel, vortex, type MotionItem } from '@itagan/spatial-motion'
+import {
+  MotionStage,
+  cardsRenderer,
+  radialBurst,
+  sphere,
+  tunnel,
+  vortex,
+  type MotionItem,
+} from '@itagan/spatial-motion'
 import avatarAtlasUrl from './assets/avatar-atlas.jpg'
 import {
   createParticipantTemplateCsv,
@@ -88,17 +96,19 @@ onMounted(async () => {
     cameraZ: 18,
     transition: { duration: 900 },
     motionPreference: 'auto',
-    cardResolution: 96,
-    cardStyle: {
-      shape: 'rounded',
-      cornerRadius: 7,
-      borderWidth: 1,
-      borderColor: 'rgba(255, 244, 218, .46)',
-      backgroundColor: '#11101b',
-    },
+    renderer: cardsRenderer({
+      resolution: 96,
+      style: {
+        shape: 'rounded',
+        cornerRadius: 7,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 244, 218, .46)',
+        backgroundColor: '#11101b',
+      },
+      draw: drawParticipantCard,
+    }),
     ariaLabel: '抽奖参与者空间舞台',
     keyboardNavigation: false,
-    drawCard: drawParticipantCard,
     onQualityChange(level) {
       quality.value = level.toUpperCase()
     },
@@ -400,7 +410,7 @@ function updatePerformance(): void {
   if (!stage) return
   const stats = stage.getPerformanceStats()
   fps.value = stats.fps
-  drawCalls.value = stats.drawCalls
+  drawCalls.value = stats.render.drawCalls
   quality.value = stats.qualityMode.toUpperCase()
 }
 
