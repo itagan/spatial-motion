@@ -1,35 +1,59 @@
 import { MotionStage, cylinder, sphere } from '@itagan/spatial-motion'
 import { defineCardTemplate, html } from '@itagan/spatial-motion/card-template'
 import '../shared.css'
+import { recipeSources } from './recipeSources'
 
 const container = document.querySelector<HTMLElement>('#stage')!
 const status = document.querySelector<HTMLElement>('#status')!
+const recipeSource = document.querySelector<HTMLElement>('#recipe-source')!
+const copyRecipe = document.querySelector<HTMLButtonElement>('#copy-recipe')!
 let lastPicked = ''
-const requestedCard = new URLSearchParams(location.search).get('card')
-const requestedCount = Number(new URLSearchParams(location.search).get('count'))
-const patchDemo = new URLSearchParams(location.search).get('patch') === '1'
+const search = new URLSearchParams(location.search)
+const requestedCount = Number(search.get('count'))
+const patchDemo = search.get('patch') === '1'
 const itemCount = [500, 1000, 2000].includes(requestedCount) ? requestedCount : 120
-const cardMode = requestedCard === 'profile'
-  || requestedCard === 'landscape'
-  || requestedCard === 'template-product'
-  || requestedCard === 'template-profile'
-  || requestedCard === 'template-metric'
-  || requestedCard === 'canvas-metric'
-  ? requestedCard
-  : 'avatar'
-const cardAppearance = {
-  avatar: {
-    aspectRatio: 1,
-    style: {
+
+type ContentMode = 'default' | 'product' | 'profile' | 'metric' | 'canvas'
+type AspectMode = 'square' | 'portrait' | 'landscape'
+
+const legacyModes: Record<string, { content: ContentMode; aspect: AspectMode }> = {
+  avatar: { content: 'default', aspect: 'square' },
+  profile: { content: 'default', aspect: 'portrait' },
+  landscape: { content: 'default', aspect: 'landscape' },
+  'template-product': { content: 'product', aspect: 'square' },
+  'template-profile': { content: 'profile', aspect: 'portrait' },
+  'template-metric': { content: 'metric', aspect: 'landscape' },
+  'canvas-metric': { content: 'canvas', aspect: 'landscape' },
+}
+const legacyMode = legacyModes[search.get('card') ?? '']
+const requestedContent = search.get('content')
+const requestedAspect = search.get('aspect')
+const contentMode: ContentMode = requestedContent === 'default'
+  || requestedContent === 'product'
+  || requestedContent === 'profile'
+  || requestedContent === 'metric'
+  || requestedContent === 'canvas'
+  ? requestedContent
+  : legacyMode?.content ?? 'default'
+const aspectMode: AspectMode = requestedAspect === 'square'
+  || requestedAspect === 'portrait'
+  || requestedAspect === 'landscape'
+  ? requestedAspect
+  : legacyMode?.aspect ?? 'square'
+
+const aspectAppearance = {
+  square: {
+    ratio: 1,
+    defaultStyle: {
       shape: 'circle' as const,
       borderWidth: 2,
       borderColor: '#67e8f9',
       imageFit: 'cover' as const,
     },
   },
-  profile: {
-    aspectRatio: 0.75,
-    style: {
+  portrait: {
+    ratio: 0.75,
+    defaultStyle: {
       shape: 'rounded' as const,
       cornerRadius: 10,
       borderWidth: 2,
@@ -46,8 +70,8 @@ const cardAppearance = {
     },
   },
   landscape: {
-    aspectRatio: 16 / 9,
-    style: {
+    ratio: 16 / 9,
+    defaultStyle: {
       shape: 'rounded' as const,
       cornerRadius: 8,
       borderWidth: 2,
@@ -64,47 +88,54 @@ const cardAppearance = {
       },
     },
   },
-  'template-product': {
-    aspectRatio: 1,
-    style: {
-      shape: 'rounded' as const,
-      cornerRadius: 10,
-      borderWidth: 2,
-      borderColor: '#fb7185',
-      backgroundColor: '#1f1024',
-    },
+}[aspectMode]
+const contentStyles = {
+  product: {
+    shape: 'rounded' as const,
+    cornerRadius: 10,
+    borderWidth: 2,
+    borderColor: '#fb7185',
+    backgroundColor: '#1f1024',
   },
-  'template-profile': {
-    aspectRatio: 0.75,
-    style: {
-      shape: 'rounded' as const,
-      cornerRadius: 10,
-      borderWidth: 2,
-      borderColor: '#67e8f9',
-      backgroundColor: '#071827',
-    },
+  profile: {
+    shape: 'rounded' as const,
+    cornerRadius: 10,
+    borderWidth: 2,
+    borderColor: '#67e8f9',
+    backgroundColor: '#071827',
   },
-  'template-metric': {
-    aspectRatio: 16 / 9,
-    style: {
-      shape: 'rounded' as const,
-      cornerRadius: 8,
-      borderWidth: 2,
-      borderColor: '#a78bfa',
-      backgroundColor: '#130d2d',
-    },
+  metric: {
+    shape: 'rounded' as const,
+    cornerRadius: 8,
+    borderWidth: 2,
+    borderColor: '#a78bfa',
+    backgroundColor: '#130d2d',
   },
-  'canvas-metric': {
-    aspectRatio: 16 / 9,
-    style: {
-      shape: 'rounded' as const,
-      cornerRadius: 8,
-      borderWidth: 2,
-      borderColor: '#a78bfa',
-      backgroundColor: '#130d2d',
-    },
+  canvas: {
+    shape: 'rounded' as const,
+    cornerRadius: 8,
+    borderWidth: 2,
+    borderColor: '#fbbf24',
+    backgroundColor: '#130d2d',
   },
-}[cardMode]
+}
+const cardStyle = contentMode === 'default'
+  ? aspectAppearance.defaultStyle
+  : contentStyles[contentMode]
+recipeSource.textContent = recipeSources[contentMode]
+copyRecipe.addEventListener('click', async () => {
+  const label = copyRecipe.textContent
+  try {
+    await navigator.clipboard.writeText(recipeSources[contentMode])
+    copyRecipe.textContent = '已复制'
+  } catch {
+    copyRecipe.textContent = '复制失败'
+  }
+  window.setTimeout(() => {
+    copyRecipe.textContent = label
+  }, 1200)
+})
+
 const items = Array.from({ length: itemCount }, (_, index) => ({
   id: `guest-${index}`,
   title: `Guest ${index + 1}`,
@@ -119,9 +150,11 @@ const items = Array.from({ length: itemCount }, (_, index) => ({
 
 const productTemplate = defineCardTemplate<{
   price: number
-}>((item, { formatNumber }) => html`
+}>((item, { formatNumber, when }) => html`
   <div class="product">
-    <img src=${item.image} style="height:62%;object-fit:cover;object-position:50% 28%" />
+    ${when(item.image, () => html`
+      <img src=${item.image} style="height:62%;object-fit:cover;object-position:50% 28%" />
+    `)}
     <div class="copy">
       <span class="title">${item.title}</span>
       <span class="accent">¥${formatNumber(item.meta?.price ?? 0)}</span>
@@ -194,11 +227,11 @@ const metricTemplate = defineCardTemplate<{
   },
 })
 
-const cardContent = cardMode === 'template-product'
+const cardContent = contentMode === 'product'
   ? productTemplate
-  : cardMode === 'template-profile'
+  : contentMode === 'profile'
     ? profileTemplate
-    : cardMode === 'template-metric'
+    : contentMode === 'metric'
       ? metricTemplate
       : undefined
 
@@ -206,10 +239,10 @@ const stage = new MotionStage({
   container,
   quality: 'high',
   adaptivePerformance: false,
-  cardAspectRatio: cardAppearance.aspectRatio,
-  cardStyle: cardAppearance.style,
+  cardAspectRatio: aspectAppearance.ratio,
+  cardStyle,
   cardContent,
-  drawCard: cardMode === 'canvas-metric'
+  drawCard: contentMode === 'canvas'
     ? (context, item, bounds) => {
         const gradient = context.createLinearGradient(bounds.x, bounds.y, bounds.x + bounds.width, bounds.y)
         gradient.addColorStop(0, '#1e1b4b')
@@ -264,12 +297,25 @@ document.querySelector('[data-layout="cylinder"]')?.addEventListener('click', ()
 })
 document.querySelector('#pause')?.addEventListener('click', () => stage.pause())
 document.querySelector('#resume')?.addEventListener('click', () => stage.resume())
-document.querySelectorAll<HTMLButtonElement>('[data-card]').forEach((button) => {
+document.querySelectorAll<HTMLButtonElement>('[data-content]').forEach((button) => {
   button.addEventListener('click', () => {
     const next = new URLSearchParams(location.search)
-    next.set('card', button.dataset.card ?? 'avatar')
+    next.delete('card')
+    next.set('content', button.dataset.content ?? 'default')
+    if (!next.has('aspect')) next.set('aspect', aspectMode)
     location.search = next.toString()
   })
+  button.setAttribute('aria-pressed', String(button.dataset.content === contentMode))
+})
+document.querySelectorAll<HTMLButtonElement>('[data-aspect]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const next = new URLSearchParams(location.search)
+    next.delete('card')
+    if (!next.has('content')) next.set('content', contentMode)
+    next.set('aspect', button.dataset.aspect ?? 'square')
+    location.search = next.toString()
+  })
+  button.setAttribute('aria-pressed', String(button.dataset.aspect === aspectMode))
 })
 
 const statusTimer = window.setInterval(() => {

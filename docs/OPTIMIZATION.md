@@ -144,7 +144,7 @@ Sphere 的响应式半径、起始经度和轮廓淡出仍只在布局计算或�
 
 `card-template` 将稳定的 tagged template 字符串结构编译并缓存在 `WeakMap`，动态值只参与节点绑定和 Canvas 布局。模板不创建 DOM，不进入 Stage RAF；准备阶段声明的图片 URL 由 Atlas 统一去重、限流、缓存和取消，随后只绘制对应的初始或局部 patch 单元。
 
-主入口只新增擦除后的类型协议，不引用模板运行时代码。包门禁改为分别统计主库与按需模板：当前主库 37,537 bytes gzip、模板 5,820 bytes gzip、npm tarball 76,365 bytes、layout-only 4,012 bytes，分别低于 40,960 / 12,288 / 153,600 / 8,192 bytes 限制。
+主入口只新增擦除后的类型协议，不引用模板运行时代码。包门禁改为分别统计主库与按需模板：当前主库 37,537 bytes gzip、模板 5,820 bytes gzip、npm tarball 约 75 KB、layout-only 4,012 bytes，分别低于 40,960 / 12,288 / 153,600 / 8,192 bytes 限制。
 
 模板稳态仍复用一个 Atlas、一个实例 Mesh 和一个 Draw Call。性能验收重点放在 cold-start、atlas-update 和 transition-stress，避免仅凭稳态 FPS 掩盖模板布局或批量重绘成本。
 

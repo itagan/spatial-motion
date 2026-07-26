@@ -376,6 +376,8 @@ const stage = new MotionStage({ container, cardContent })
 
 模板支持 `div`、`span`、`img`、`br`、嵌套条件/数组、scoped class、inline style 与常用 flex/定位/图文样式。它不会创建 DOM、执行脚本或解析任意 HTML；未知标签或样式会回退内置卡片。模板图片继续使用 Stage 的去重、并发、超时、LRU 与取消机制。`cardContent` 和 `drawCard` 是互斥的静态 Stage 配置。
 
+卡片内容能力按使用成本分为四层：内置 `cardStyle` / `resolveCardStyle()` 负责常见图片与标题调整，`defineCardTemplate()` 是推荐的组合内容方式，`drawCard()` 保留完整 Canvas 逃生口，直接实现 `CardContentRenderer` 只面向需要自主管理准备数据和图片资源的高级场景。Vanilla 示例中的产品、人物和指标卡是可复制的源码配方，不是随包发布或承诺兼容的官方预设；卡片比例也与内容配方独立选择。示例页可展开并复制当前基础配置、ES6 模板或 Canvas 写法。
+
 拾取与聚焦：
 
 ```ts
@@ -470,7 +472,7 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 | --- | ---: | ---: |
 | 主库 JavaScript gzip | ≤ 40 KB | 36.7 KB（37,537 bytes） |
 | 按需 card-template gzip | ≤ 12 KB | 5.7 KB（5,820 bytes） |
-| npm tarball | ≤ 150 KB | 74.6 KB（76,365 bytes） |
+| npm tarball | ≤ 150 KB | 约 75.0 KB |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 3.9 KB（4,012 bytes） |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

@@ -17,6 +17,8 @@ Spatial Motion 从 v1.0.0 开始遵循 Semantic Versioning。本文件描述使�
 
 仓库中的 `demo/` 与 `examples/` 是使用说明和验证资产，不属于 npm 包入口或 v1.x API 承诺；复制示例不等同于增加稳定子路径。
 
+Vanilla 示例中的产品、人物和指标卡仅是源码配方，不是官方模板或公共预设。稳定能力边界是基础 `cardStyle`、ES6 模板适配器、底层 `drawCard()` 和高级 `CardContentRenderer` 协议；示例名称和视觉可以在 minor 版本中整理。
+
 ## v1.x 承诺
 
 - 已公开的函数、类方法、选项和联合类型不会在 minor/patch 版本中无迁移方案地移除或改成不兼容含义。
