@@ -93,6 +93,51 @@ describe('texture atlas card rendering', () => {
     atlas.texture.dispose()
   })
 
+  it('reuses the atlas canvas pixel buffer without a second full-size copy', async () => {
+    const originalCreateElement = document.createElement.bind(document)
+    const createElement = vi.spyOn(document, 'createElement').mockImplementation(
+      ((tagName: string, options?: ElementCreationOptions) => (
+        originalCreateElement(tagName, options)
+      )) as typeof document.createElement,
+    )
+    let atlasPixels: Uint8ClampedArray | undefined
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockImplementation(function (
+      this: HTMLCanvasElement,
+    ) {
+      let context = contexts.get(this)
+      if (!context) {
+        context = createContext()
+        context.getImageData.mockImplementation((_x, _y, width, height) => ({
+          data: (() => {
+            const pixels = new Uint8ClampedArray(width * height * 4).fill(7)
+            if (this.width > 64) atlasPixels = pixels
+            return pixels
+          })(),
+          width,
+          height,
+          colorSpace: 'srgb',
+        }))
+        contexts.set(this, context)
+      }
+      return context as unknown as CanvasRenderingContext2D
+    })
+
+    const atlas = await createTextureAtlas([{ id: 'a' }, { id: 'b' }], 64)
+    const canvasCreations = createElement.mock.calls.filter(([tagName]) => tagName === 'canvas')
+
+    expect(canvasCreations).toHaveLength(1)
+    expect(atlas.metrics.cells).toBe(2)
+    expect(atlas.data).toBe(atlasPixels)
+    expect(atlas.data).toBeInstanceOf(Uint8ClampedArray)
+    atlas.texture.dispose()
+
+    const drawCard = vi.fn()
+    const customAtlas = await createTextureAtlas([{ id: 'a' }, { id: 'b' }], 64, { drawCard })
+    expect(createElement.mock.calls.filter(([tagName]) => tagName === 'canvas')).toHaveLength(4)
+    expect(drawCard).toHaveBeenCalledTimes(2)
+    customAtlas.texture.dispose()
+  })
+
   it('falls back when an image does not settle before the configured timeout', async () => {
     vi.useFakeTimers()
     class NeverImage {

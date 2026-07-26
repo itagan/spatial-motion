@@ -526,7 +526,7 @@ npx spatial-motion-benchmark baseline.json current.json --preset transition-stre
 默认阈值覆盖 FPS、最大帧时间、P95/P99、33ms 长帧、Stage CPU、WebGL 提交、Atlas build/patch、纹理内存与估算上传量。配置不兼容或超过阈值时命令返回非零退出码；自定义阈值可对每个指标设置 `maxRegressionPercent`、`maxRegressionAbsolute` 或两者。随包提供的六个 `--preset` 覆盖 100/500/1000/2000 实例、low/medium/high/auto 质量和四类固定场景，CLI 会拒绝与预设不一致的结果。
 
 重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。同一 JavaScript turn 内的稳定 id 更新会合并；已初始化图集只上传变化单元对应的数据行，相邻单元会合并连续上传范围。Cards/Points 的 GPU Attribute 使用容量桶并原位写入，同一容量档内的布局切换不会替换 Geometry、Material 或过渡 Attribute。
-图集默认使用 4px 隔离、mipmap 和最高 4x 各向异性采样；Cards `resolution` 会被限制在 32–256px，并在实例规模超过设备 `MAX_TEXTURE_SIZE` 时自动降低实际单元分辨率，避免创建无效纹理。首次上传和 WebGL context 恢复仍使用完整图集上传。
+图集默认使用 4px 隔离、mipmap 和最高 4x 各向异性采样；Cards `resolution` 会被限制在 32–256px，并在实例规模超过设备 `MAX_TEXTURE_SIZE` 时自动降低实际单元分辨率，避免创建无效纹理。内置默认卡片首次构建会直接绘制到整图 Canvas，不为每项创建临时 Canvas；异步模板和自定义 `drawCard` 继续使用隔离单元 Canvas。首次上传和 WebGL context 恢复仍使用完整图集上传。
 
 ## 包构建与体积基准
 
@@ -534,14 +534,16 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| 主库 JavaScript gzip | ≤ 40 KB | 40.0 KB（40,953 bytes） |
+| 根入口真实消费者 gzip | ≤ 40 KB | 32.5 KB（33,231 bytes） |
+| Core-only 真实消费者 gzip | ≤ 16 KB | 11.6 KB（11,875 bytes） |
+| Cards-only 真实消费者 gzip | ≤ 12 KB | 9.6 KB（9,840 bytes） |
 | 按需 card-template gzip | ≤ 12 KB | 6.0 KB（6,194 bytes） |
 | 按需 Points Renderer gzip | ≤ 12 KB | 2.8 KB（2,918 bytes） |
 | 按需开发诊断 gzip | ≤ 12 KB | 3.8 KB（3,892 bytes） |
-| npm tarball | ≤ 150 KB | 83.2 KB（85,238 bytes） |
+| npm tarball | ≤ 150 KB | 约 84.1 KB |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 5.5 KB（5,598 bytes） |
 
-`npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。
+`npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。根入口、Core-only 与 Cards-only 的预算按真实 Vite/Terser 消费产物计算，并保持 Three.js external；各输出模块 gzip 相加只保留为诊断值，不作为用户下载体积门禁。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。
 
 约 2.5 秒采样窗口内，平均 FPS、P95 帧预算或 33ms 长帧比例任一持续恶化会下降一级；质量切换后有 5 秒冷却，FPS、P95 与长帧比例共同稳定约 8 秒后才允许恢复。页面切到后台、调试暂停及超过 100ms 的异常长帧不会参与判断。
 手动锁定 high、medium 或 low 时仍持续记录 FPS 和帧时间，但采样结果不会触发自动升降级。

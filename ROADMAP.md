@@ -98,6 +98,9 @@
 - [x] 增加按需 Dev 诊断、GPU 容量桶、Attribute 复用和模板/Atlas 热路径减负。
 - [x] 消除稳态交互读取的 Transform 深拷贝和 Stage wait 每帧临时数组。
 - [x] 高频 pointermove 合并到 Stage RAF，并增加 interaction-stress 浏览器基准。
+- [x] 包体积改用真实 root/Core/Cards 消费者门禁，保留分模块聚合诊断。
+- [x] Atlas 冷启动增加分阶段指标，默认绘制移除逐卡临时 Canvas，并移除整图像素缓冲二次复制。
+- [ ] 评估渐进式 Atlas GPU 首传，在不增加 Draw Call 或破坏局部 patch 的前提下消除大型图集首次上传峰值。
 - [ ] 收集自定义 Renderer/Layout 案例，完成发布候选 API freeze。
 
 ### CSS3D 可选渲染器

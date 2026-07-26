@@ -135,3 +135,5 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 2026-07-26 已完成运行时容量复用复验：Cards/Points 的 500/1000/2000 项均保持 60 FPS、主体 1 Draw Call，容量分别进入 512/1024/2048 桶；同容量档球体/圆柱切换的 `geometryBuilds` 保持 1，`attributeReuses` 增长且无资源累积。默认 Cards 2000/high 的 steady、transition-stress、连续 Atlas 更新 P95 分别为 17.60/17.46/17.50ms，均无 33ms 长帧；控制台无 error。
 
 2026-07-26 已完成高频交互合帧复验：Cards 2000/high 在约 240Hz 合成指针输入下，3 秒 707 次事件合并为 180 次拾取，减少 74.5%，保持 59.99 FPS、P95 17.70ms、0 个 33ms 长帧和 1 Draw Call。Points 2000 保持主体 1 Draw Call，控制台无 error。
+
+2026-07-26 已完成 Atlas 默认绘制冷启动复验：Cards 2000/high/cold-start 三轮 Atlas build 由 299.9ms 中位数降至 51.7ms，cell render/readback 中位数为 7.3/44.0ms；默认路径只创建 1 张整图 Canvas，产品模板隔离绘制路径保持正常。三轮均提交 2000 项、保持 1 Draw Call，P95 17.60–17.65ms；两轮存在一次 50ms 以上冷启动峰值，渐进式 GPU 首传仍作为后续优化项。默认与产品模板画面无异常，控制台无 warning/error。

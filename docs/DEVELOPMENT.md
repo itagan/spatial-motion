@@ -104,13 +104,13 @@ npm run pack:check
 5. 扩展 `scripts/verify-package.mjs` 的运行时和类型消费者检查。
 6. 运行 `npm run pack:check`，确认深层内部路径仍不可导入。
 
-当前自动化硬预算：主库 JavaScript gzip 不超过 40 KB，按需模板、Points Renderer 与 Dev 诊断入口各不超过 12 KB，npm tarball 不超过 150 KB，仅消费布局的 Tree Shaking 产物不超过 8 KB。预算变化属于需要明确讨论的工程决策。
+当前自动化硬预算按真实消费者产物执行：根入口 gzip 不超过 40 KB、Core-only 不超过 16 KB、Cards-only 不超过 12 KB；按需模板、Points Renderer 与 Dev 诊断入口各不超过 12 KB，npm tarball 不超过 150 KB，仅消费布局的 Tree Shaking 产物不超过 8 KB。Three.js 在这些消费者中保持 external。各 ESM 输出模块分别 gzip 后相加的数值只用于诊断模块增长，不代表网络下载量，也不单独阻断构建。预算变化属于需要明确讨论的工程决策。
 
 npm tarball 只携带运行时 `dist`、README、CHANGELOG、LICENSE、PUBLIC_API 和 COMPATIBILITY。ROADMAP、DEVELOPMENT、OPTIMIZATION、RELEASE、VISUAL_QA 与 examples 保留在源码仓库，不增加安装包体积。
 
 本地 `dist` 会生成声明映射便于源码跳转，但 npm tarball 排除 `.d.ts.map`；类型声明和 JavaScript source map 仍随包提供。该发布裁剪属于包体积控制，不应通过提高 150 KB 预算替代。
 
-准备冻结的首版入口记录在 `docs/PUBLIC_API.md`。`core`、逐布局、Cards、Points 与 `card-template` 都必须通过真实消费者验证；包检查执行 40 KB 主库、12 KB 模板和 12 KB Points gzip 门禁。正式发布严格按照 `docs/RELEASE.md` 执行；准备发布的代码变更不自动授权 npm publish、tag 或 GitHub Release。
+准备冻结的首版入口记录在 `docs/PUBLIC_API.md`。`core`、逐布局、Cards、Points 与 `card-template` 都必须通过真实消费者验证；包检查执行根入口/Core-only/Cards-only 以及各按需入口的独立 gzip 门禁。正式发布严格按照 `docs/RELEASE.md` 执行；准备发布的代码变更不自动授权 npm publish、tag 或 GitHub Release。
 
 ## 测试策略
 

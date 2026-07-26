@@ -54,6 +54,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private atlasBuildMs = 0
   private atlasPatchMs = 0
   private atlasDrawMs = 0
+  private atlasPrepareMs = 0
+  private atlasImageLoadWallMs = 0
+  private atlasCellRenderMs = 0
+  private atlasReadbackMs = 0
   private imageLoadMs = 0
   private imageRequests = 0
   private imageFailures = 0
@@ -396,6 +400,9 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.atlasCellsUpdated += patch.metrics.cells
     this.atlasPatchMs += patch.metrics.renderMs + applyMs
     this.atlasDrawMs += applyMs
+    this.atlasPrepareMs += patch.metrics.prepareMs
+    this.atlasImageLoadWallMs += patch.metrics.imageLoadWallMs
+    this.atlasCellRenderMs += patch.metrics.cellRenderMs
     this.imageLoadMs += patch.metrics.imageLoadMs
     this.imageRequests += patch.metrics.imageRequests
     this.imageFailures += patch.metrics.imageFailures
@@ -556,6 +563,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
         atlasBuildMs: this.atlasBuildMs,
         atlasPatchMs: this.atlasPatchMs,
         atlasDrawMs: this.atlasDrawMs,
+        atlasPrepareMs: this.atlasPrepareMs,
+        atlasImageLoadWallMs: this.atlasImageLoadWallMs,
+        atlasCellRenderMs: this.atlasCellRenderMs,
+        atlasReadbackMs: this.atlasReadbackMs,
         imageLoadMs: this.imageLoadMs,
         imageRequests: this.imageRequests,
         imageFailures: this.imageFailures,
@@ -596,6 +607,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.atlasCellsUpdated += atlas.metrics.cells
     this.atlasBuildMs += atlas.metrics.renderMs
     this.atlasDrawMs += atlas.metrics.applyMs
+    this.atlasPrepareMs += atlas.metrics.prepareMs
+    this.atlasImageLoadWallMs += atlas.metrics.imageLoadWallMs
+    this.atlasCellRenderMs += atlas.metrics.cellRenderMs
+    this.atlasReadbackMs += atlas.metrics.readbackMs
     this.imageLoadMs += atlas.metrics.imageLoadMs
     this.imageRequests += atlas.metrics.imageRequests
     this.imageFailures += atlas.metrics.imageFailures

@@ -183,3 +183,11 @@ Atlas patch 会按纹理行合并相邻卡片范围，模板实例保留最多 2
 自动化增加稳态快照引用回归，确保 2000 项 hover/pick 不会重新引入整组 Transform 克隆。该改动不增加 Renderer、Draw Call、纹理或公开 API，主库仍受原 40,960 bytes gzip 门禁约束。
 
 2026-07-26 Chromium 150 / Apple M4 / 1265×633 的 2000 Cards/high/interaction-stress 3 秒结果：合成输入触发 707 次 `pointermove`，Stage 实际执行 180 次拾取，合并 74.5%；平均 59.99 FPS、P95/P99 17.70/17.70ms、0 个 33ms 长帧、1 Draw Call。拾取累计 584.8ms，平均每次 3.249ms。Points 2000 浏览器复验继续保持 1 Draw Call，控制台无 error。
+
+## 真实消费者体积与 Atlas 冷启动
+
+包体积门禁不再把所有 ESM 输出文件分别 gzip 后相加当作用户下载量。`pack:check` 会从真实 `.tgz` 创建 root、Core-only 和 Cards-only Vite/Terser 消费者，并把 Three.js 保持为 external；分模块 gzip 聚合值仍输出，专门用于观察内部模块增长。当前 root/Core-only/Cards-only 分别为 33,231 / 11,875 / 9,840 bytes gzip，均低于 40,960 / 16,384 / 12,288 bytes 预算；分模块聚合诊断为 41,353 bytes，但不对应任何单个消费者产物。
+
+Atlas 指标拆分为 prepare、图片加载墙钟、单元绘制和整图像素 readback。内置默认卡片首次构建直接绘制到一个合成 Canvas，不再创建 2000 个临时单元 Canvas 或逐卡 `drawImage`；异步模板和自定义 `drawCard` 仍使用隔离单元 Canvas，局部 patch 路径不变。整图只执行一次 `getImageData()`，并直接把返回的 `Uint8ClampedArray` 交给 `DataTexture`，不再分配并复制第二份同尺寸 `Uint8Array`。
+
+2026-07-26 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2000 Cards/high/cold-start 三轮结果：优化前 Atlas build 中位数 299.9ms，默认直接绘制后为 56.9 / 51.7 / 51.0ms，中位数 51.7ms，减少约 82.8%；cell render 中位数由 39.5ms 降至 7.3ms，readback 由 243.2ms 降至 44.0ms。三轮均提交 2000 项、保持 1 Draw Call，P95 为 17.60–17.65ms；其中两轮记录到一次 50ms 以上冷启动峰值，说明后续若要彻底消除首传停顿，需要渐进式 GPU 初始化，而不是拆分 Canvas readback。默认与产品模板画面正常，控制台无 warning/error。

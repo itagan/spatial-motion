@@ -54,6 +54,10 @@ export interface BenchmarkResult {
   atlasBuildMs: number
   atlasPatchMs: number
   atlasDrawMs: number
+  atlasPrepareMs: number
+  atlasImageLoadWallMs: number
+  atlasCellRenderMs: number
+  atlasReadbackMs: number
   imageLoadMs: number
   imageRequests: number
   imageFailures: number
@@ -197,6 +201,10 @@ export class BenchmarkSession {
       atlasBuildMs: rendererCounterDelta(first, latest, 'atlasBuildMs'),
       atlasPatchMs: rendererCounterDelta(first, latest, 'atlasPatchMs'),
       atlasDrawMs: rendererCounterDelta(first, latest, 'atlasDrawMs'),
+      atlasPrepareMs: rendererCounterDelta(first, latest, 'atlasPrepareMs'),
+      atlasImageLoadWallMs: rendererCounterDelta(first, latest, 'atlasImageLoadWallMs'),
+      atlasCellRenderMs: rendererCounterDelta(first, latest, 'atlasCellRenderMs'),
+      atlasReadbackMs: rendererCounterDelta(first, latest, 'atlasReadbackMs'),
       imageLoadMs: rendererCounterDelta(first, latest, 'imageLoadMs'),
       imageRequests: rendererCounterDelta(first, latest, 'imageRequests'),
       imageFailures: rendererCounterDelta(first, latest, 'imageFailures'),
@@ -395,6 +403,10 @@ const benchmarkNumberFields = [
   'atlasBuildMs',
   'atlasPatchMs',
   'atlasDrawMs',
+  'atlasPrepareMs',
+  'atlasImageLoadWallMs',
+  'atlasCellRenderMs',
+  'atlasReadbackMs',
   'imageLoadMs',
   'imageRequests',
   'imageFailures',
