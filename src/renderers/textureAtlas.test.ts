@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { LinearFilter } from 'three'
 import type { TextureAtlasResult } from './textureAtlas'
 import {
   applyTextureAtlasPatch,
@@ -90,6 +91,15 @@ describe('texture atlas card rendering', () => {
     expect(atlas.texture.isDataTexture).toBe(true)
     expect(atlas.data).toHaveLength(64 * 64 * 4)
     expect(atlas.metrics.uploadBytes).toBe(64 * 64 * 4)
+    atlas.texture.dispose()
+  })
+
+  it('supports a non-mipmapped atlas for upload-sensitive consumers', async () => {
+    const atlas = await createTextureAtlas([{ id: 'one' }], 64, { mipmaps: false })
+
+    expect(atlas.mipmaps).toBe(false)
+    expect(atlas.texture.generateMipmaps).toBe(false)
+    expect(atlas.texture.minFilter).toBe(LinearFilter)
     atlas.texture.dispose()
   })
 

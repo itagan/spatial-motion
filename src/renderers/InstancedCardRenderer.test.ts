@@ -54,6 +54,7 @@ function atlas(count: number) {
       stride: 68,
       strideX: 68,
       strideY: 68,
+      mipmaps: true,
       initialized: true,
       metrics: {
         cells: count,
@@ -103,6 +104,43 @@ describe('InstancedCardRenderer item loading', () => {
     expect(scene.children).toHaveLength(1)
     renderer.dispose()
     expect(secondAtlas.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('uses automatic atlas resolution above 1024 items and preserves mipmap options', async () => {
+    const currentAtlas = atlas(1025)
+    currentAtlas.result.cellSize = 48
+    currentAtlas.result.mipmaps = false
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const renderer = new InstancedCardRenderer(new Scene(), {
+      cellSize: 'auto',
+      mipmaps: false,
+    })
+    const items = Array.from({ length: 1025 }, (_, index) => ({ id: String(index) }))
+
+    expect(await renderer.setItems(items)).toBe(true)
+    expect(atlasMock.create).toHaveBeenCalledWith(
+      items,
+      48,
+      expect.objectContaining({ mipmaps: false }),
+    )
+    expect(renderer.getStats().metrics).toMatchObject({
+      atlasResolution: 48,
+      atlasMipmaps: 0,
+    })
+    renderer.dispose()
+  })
+
+  it('keeps custom content at 64px unless automatic resolution is explicit', async () => {
+    const currentAtlas = atlas(1025)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const renderer = new InstancedCardRenderer(new Scene(), {
+      cardContent: { prepare: () => ({ draw: () => {} }) },
+    })
+    const items = Array.from({ length: 1025 }, (_, index) => ({ id: String(index) }))
+
+    expect(await renderer.setItems(items)).toBe(true)
+    expect(atlasMock.create).toHaveBeenCalledWith(items, 64, expect.any(Object))
+    renderer.dispose()
   })
 
   it('disposes an atlas that resolves after the renderer is destroyed', async () => {

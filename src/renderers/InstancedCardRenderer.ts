@@ -32,7 +32,7 @@ import type {
 } from './MotionRenderer.js'
 
 export interface CardRendererOptions<TMeta = unknown> extends TextureAtlasOptions<TMeta> {
-  cellSize?: number
+  cellSize?: number | 'auto'
 }
 
 export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
@@ -107,7 +107,15 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     const { controller, generation, options } = this.beginAtlasOperation()
     let atlas: TextureAtlasResult
     try {
-      atlas = await createTextureAtlas(items, this.atlasOptions.cellSize ?? 64, options)
+      atlas = await createTextureAtlas(
+        items,
+        resolveAtlasResolution(
+          this.atlasOptions.cellSize,
+          items.length,
+          Boolean(this.atlasOptions.cardContent || this.atlasOptions.drawCard),
+        ),
+        options,
+      )
     } catch (error) {
       if (generation !== this.generation || isAbortError(error)) return false
       throw error
@@ -575,6 +583,8 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
         geometryBuilds: this.geometryBuilds,
         attributeReuses: this.attributeReuses,
         atlasUploadRanges: this.atlasUploadRanges,
+        atlasResolution: this.atlas?.cellSize ?? 0,
+        atlasMipmaps: this.atlas?.mipmaps ? 1 : 0,
         ...this.atlasOptions.cardContent?.getMetrics?.(),
       },
     }
@@ -602,7 +612,9 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   }
 
   private recordAtlasBuild(atlas: TextureAtlasResult): void {
-    this.textureBytes = Math.ceil(atlas.width * atlas.height * 4 * 4 / 3)
+    this.textureBytes = Math.ceil(
+      atlas.width * atlas.height * 4 * (atlas.mipmaps ? 4 / 3 : 1),
+    )
     this.atlasBuilds += 1
     this.atlasCellsUpdated += atlas.metrics.cells
     this.atlasBuildMs += atlas.metrics.renderMs
@@ -675,6 +687,16 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
 
 function normalizeImageCacheSize(value: number | undefined): number {
   return Math.min(1024, Math.max(0, Math.floor(Number.isFinite(value) ? value as number : 128)))
+}
+
+function resolveAtlasResolution(
+  value: number | 'auto' | undefined,
+  itemCount: number,
+  customContent: boolean,
+): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 64
+  if (value === undefined && customContent) return 64
+  return itemCount > 1024 ? 48 : 64
 }
 
 function geometryByteLength(geometry: InstancedBufferGeometry | undefined): number {

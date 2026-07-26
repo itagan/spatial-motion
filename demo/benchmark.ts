@@ -55,9 +55,15 @@ const effects: Record<string, StreamingEffect> = {
 const container = document.querySelector<HTMLElement>('#benchmark-stage')
 if (!container) throw new Error('Benchmark stage container not found')
 
+const benchmarkParameters = new URLSearchParams(window.location.search)
+const requestedResolution = resolveBenchmarkResolution(benchmarkParameters.get('resolution'))
+const requestedMipmaps = benchmarkParameters.get('mipmaps') !== '0'
 const stage = new MotionStage({
   container,
-  renderer: cardsRenderer({ resolution: 64 }),
+  renderer: cardsRenderer({
+    resolution: requestedResolution,
+    mipmaps: requestedMipmaps,
+  }),
   quality: 'auto',
   adaptivePerformance: true,
   hoverEffect: 'highlight',
@@ -72,6 +78,7 @@ let sampleTimer = 0
 let stressTimer = 0
 let stressOperations = 0
 let runGeneration = 0
+let coldStartRenderSubmitMs = 0
 type ExtensionMode = 'none' | 'native' | 'gsap' | 'both'
 let extensionMode: ExtensionMode = 'none'
 let extensionHandles: StageExtensionHandle[] = []
@@ -202,6 +209,7 @@ async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
     environment: stage.getPerformanceEnvironment(),
   })
   stressOperations = 0
+  coldStartRenderSubmitMs = 0
   setRunButtonsDisabled(true)
   setStatus(`正在运行 ${durationSeconds} 秒${scenarioLabel(scenario)}…`)
   sampleTimer = window.setInterval(() => session.record(
@@ -246,8 +254,21 @@ async function runColdStart(generation: number): Promise<void> {
     layout: effect ? layouts.sphere : layouts[layoutName],
     duration: 0,
   })
+  if (generation !== runGeneration) return
+  await captureColdStartRenderSubmit(generation)
   if (generation !== runGeneration || !effect) return
   await stage.enterEffect(effect, { duration: 0 })
+}
+
+async function captureColdStartRenderSubmit(generation: number): Promise<void> {
+  for (let frame = 0; frame < 2; frame += 1) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    if (generation !== runGeneration) return
+    coldStartRenderSubmitMs = Math.max(
+      coldStartRenderSubmitMs,
+      stage.getPerformanceStats().renderSubmitMs,
+    )
+  }
 }
 
 async function runAtlasUpdateOperation(): Promise<void> {
@@ -342,7 +363,9 @@ function renderResult(result: BenchmarkResult): void {
       over50Ms: result.longFramesOver50Ms,
     },
     averageFrameCpuMs: Number(result.averageFrameCpuMs.toFixed(3)),
+    maximumFrameCpuMs: Number(result.maximumFrameCpuMs.toFixed(3)),
     averageRenderSubmitMs: Number(result.averageRenderSubmitMs.toFixed(3)),
+    maximumRenderSubmitMs: Number(result.maximumRenderSubmitMs.toFixed(3)),
     pickingMs: Number(result.pickingMs.toFixed(2)),
     pickOperations: result.pickOperations,
     averageExtensionUpdateMs: Number(result.averageExtensionUpdateMs.toFixed(3)),
@@ -376,11 +399,21 @@ function renderResult(result: BenchmarkResult): void {
       imageRequests: result.imageRequests,
       imageFailures: result.imageFailures,
       estimatedUploadBytes: result.estimatedTextureUploadBytes,
+      resolution: result.samples.at(-1)?.stats.renderer.metrics.atlasResolution ?? 0,
+      mipmaps: Boolean(result.samples.at(-1)?.stats.renderer.metrics.atlasMipmaps),
+      requestedResolution,
+      firstRenderSubmitMs: Number(coldStartRenderSubmitMs.toFixed(3)),
     },
     operations: stressOperations,
   }
   setText('#benchmark-result', JSON.stringify(summary, null, 2))
   renderComparison()
+}
+
+function resolveBenchmarkResolution(value: string | null): number | 'auto' {
+  if (!value || value === 'auto') return 'auto'
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : 'auto'
 }
 
 async function importBaseline(event: Event): Promise<void> {
