@@ -2,6 +2,7 @@ import type {
   TextureAtlasPatch,
   TextureAtlasResult,
 } from '../textureAtlas.js'
+import type { DataArrayTexture } from 'three'
 
 interface ArrayAtlasPlanOptions {
   sourceWidth: number
@@ -153,6 +154,7 @@ export function createArrayAtlasLayout(
 export function applyArrayAtlasPatch(
   atlas: TextureAtlasResult,
   patch: TextureAtlasPatch,
+  deferUpload = false,
 ): number {
   const startedAt = now()
   const texture = atlas.texture
@@ -182,11 +184,64 @@ export function applyArrayAtlasPatch(
     }
     updatedLayers.add(pageIndex)
   })
-  updatedLayers.forEach((layer) => texture.addLayerUpdate(layer))
-  texture.needsUpdate = updatedLayers.size > 0
+  if (!deferUpload) {
+    updatedLayers.forEach((layer) => texture.addLayerUpdate(layer))
+    texture.needsUpdate = updatedLayers.size > 0
+  }
   patch.metrics.uploadRanges = updatedLayers.size
   patch.metrics.uploadBytes = updatedLayers.size * layerByteLength
   return now() - startedAt
+}
+
+export function createArrayAtlasPatcher() {
+  const queue: number[] = []
+  return {
+    apply(
+      atlas: TextureAtlasResult,
+      patch: TextureAtlasPatch,
+      visibleLayers?: number,
+    ): number {
+      const applyMs = applyArrayAtlasPatch(atlas, patch, visibleLayers !== undefined)
+      if (visibleLayers === undefined) return applyMs
+      const texture = atlas.texture as DataArrayTexture
+      const queuedBefore = queue.length
+      const pageCapacity = atlas.columns * atlas.rows
+      patch.cells.forEach(({ index }) => {
+        const layer = Math.floor(index / pageCapacity)
+        if (
+          layer < visibleLayers
+          && !texture.layerUpdates.has(layer)
+          && !queue.includes(layer)
+        ) queue.push(layer)
+      })
+      const queuedLayers = queue.length - queuedBefore
+      patch.metrics.uploadRanges = queuedLayers
+      patch.metrics.uploadBytes = queuedLayers * atlas.width * atlas.height * 4
+      return applyMs
+    },
+    advance(
+      atlas: TextureAtlasResult,
+      nextLayer: number,
+      layerBudget: number,
+    ): readonly [number, boolean] {
+      const texture = atlas.texture as DataArrayTexture
+      let selectedLayers = 0
+      while (selectedLayers < layerBudget && queue.length > 0) {
+        texture.addLayerUpdate(queue.shift()!)
+        selectedLayers += 1
+      }
+      const end = Math.min(atlas.depth, nextLayer + layerBudget - selectedLayers)
+      for (let layer = nextLayer; layer < end; layer += 1) {
+        texture.addLayerUpdate(layer)
+      }
+      selectedLayers += end - nextLayer
+      if (selectedLayers > 0) texture.needsUpdate = true
+      return [end, selectedLayers > 0]
+    },
+    clear(): void {
+      queue.length = 0
+    },
+  }
 }
 
 interface PageCandidate {

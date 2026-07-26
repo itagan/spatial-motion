@@ -15,7 +15,9 @@ import type { Texture } from 'three'
 import type { MotionItem, Transform } from '../core/types.js'
 import type { StreamingEffectGpuData, StreamingEffectKind } from '../effects/types.js'
 import {
+  advanceTextureAtlasUploads,
   applyTextureAtlasPatch,
+  clearTextureAtlasPatchQueue,
   createTextureAtlas,
   createTextureAtlasPatch,
   TextureAtlasImageCache,
@@ -464,19 +466,26 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       this.atlasDiscardedPatches += 1
       return false
     }
-    const applyMs = applyTextureAtlasPatch(this.atlas, patch)
+    const atlas = this.atlas
+    const metrics = patch.metrics
+    const arrayAtlas = atlas.mode === 'array'
+    const applyMs = applyTextureAtlasPatch(
+      atlas,
+      patch,
+      arrayAtlas ? this.nextLayer : undefined,
+    )
     this.atlasPatches += 1
-    this.atlasCellsUpdated += patch.metrics.cells
-    this.atlasPatchMs += patch.metrics.renderMs + applyMs
+    this.atlasCellsUpdated += metrics.cells
+    this.atlasPatchMs += metrics.renderMs + applyMs
     this.atlasDrawMs += applyMs
-    this.atlasPrepareMs += patch.metrics.prepareMs
-    this.atlasImageLoadWallMs += patch.metrics.imageLoadWallMs
-    this.atlasCellRenderMs += patch.metrics.cellRenderMs
-    this.imageLoadMs += patch.metrics.imageLoadMs
-    this.imageRequests += patch.metrics.imageRequests
-    this.imageFailures += patch.metrics.imageFailures
-    this.estimatedTextureUploadBytes += patch.metrics.uploadBytes
-    this.atlasUploadRanges += patch.metrics.uploadRanges ?? 0
+    this.atlasPrepareMs += metrics.prepareMs
+    this.atlasImageLoadWallMs += metrics.imageLoadWallMs
+    this.atlasCellRenderMs += metrics.cellRenderMs
+    this.imageLoadMs += metrics.imageLoadMs
+    this.imageRequests += metrics.imageRequests
+    this.imageFailures += metrics.imageFailures
+    this.estimatedTextureUploadBytes += metrics.uploadBytes
+    this.atlasUploadRanges += metrics.uploadRanges ?? 0
     fingerprints.forEach(({ index, value }) => {
       this.itemFingerprints[index] = value
     })
@@ -742,6 +751,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private prepareAtlasUploads(atlas: TextureAtlasResult): void {
     this.nextLayer = 0
     this.skipUploadFrames = 0
+    clearTextureAtlasPatchQueue(atlas)
     if (atlas.mode !== 'array' || !('layerUpdates' in atlas.texture)) return
     atlas.texture.layerUpdates.clear()
     const initialLayers = Math.min(
@@ -762,23 +772,19 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       || atlas.mode !== 'array'
       || !this.material
       || !('layerUpdates' in atlas.texture)
-      || this.nextLayer >= atlas.depth
     ) return
     if (this.skipUploadFrames > 0) {
       this.skipUploadFrames -= 1
       return
     }
-    const end = Math.min(
-      atlas.depth,
-      this.nextLayer + this.layersPerUpload(atlas, FRAME_ARRAY_UPLOAD_BYTES),
+    const [end, uploaded] = advanceTextureAtlasUploads(
+      atlas,
+      this.nextLayer,
+      this.layersPerUpload(atlas, FRAME_ARRAY_UPLOAD_BYTES),
     )
-    for (let layer = this.nextLayer; layer < end; layer += 1) {
-      atlas.texture.addLayerUpdate(layer)
-    }
     this.nextLayer = end
     this.material.uniforms.uLayers.value = end
-    atlas.texture.needsUpdate = true
-    this.layerUploadFrames += 1
+    if (uploaded) this.layerUploadFrames += 1
   }
 
   private layersPerUpload(atlas: TextureAtlasResult, byteBudget: number): number {

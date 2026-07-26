@@ -92,10 +92,21 @@ export interface TextureAtlasMetrics {
   arrayPackMs?: number
 }
 
-const arrayAtlasPatchers = new WeakMap<
-  TextureAtlasResult,
-  (atlas: TextureAtlasResult, patch: TextureAtlasPatch) => number
->()
+interface ArrayAtlasPatcher {
+  apply: (
+    atlas: TextureAtlasResult,
+    patch: TextureAtlasPatch,
+    visibleLayers?: number,
+  ) => number
+  advance: (
+    atlas: TextureAtlasResult,
+    nextLayer: number,
+    layerBudget: number,
+  ) => readonly [nextLayer: number, uploaded: boolean]
+  clear: () => void
+}
+
+const arrayAtlasPatchers = new WeakMap<TextureAtlasResult, ArrayAtlasPatcher>()
 
 export async function createTextureAtlas<TMeta = unknown>(
   items: readonly MotionItem<TMeta>[],
@@ -238,7 +249,8 @@ async function createAtlasResult<TMeta>(
   const width = columns * strideX
   const height = rows * strideY
   if (useArrayAtlas) {
-    const { applyArrayAtlasPatch, createArrayAtlasData } = await import('./atlas/ArrayAtlasStore.js')
+    const { createArrayAtlasData, createArrayAtlasPatcher } =
+      await import('./atlas/ArrayAtlasStore.js')
     const arrayStartedAt = now()
     const array = prepackedArray
       ? {
@@ -297,7 +309,7 @@ async function createAtlasResult<TMeta>(
       texture.onUpdate = () => {
         atlas.initialized = true
       }
-      arrayAtlasPatchers.set(atlas, applyArrayAtlasPatch)
+      arrayAtlasPatchers.set(atlas, createArrayAtlasPatcher())
       return atlas
     }
   }
@@ -346,11 +358,28 @@ export async function createTextureAtlasPatch<TMeta = unknown>(
   return rasterizeCards(items, indices, cellSize, options)
 }
 
-export function applyTextureAtlasPatch(atlas: TextureAtlasResult, patch: TextureAtlasPatch): number {
+export function applyTextureAtlasPatch(
+  atlas: TextureAtlasResult,
+  patch: TextureAtlasPatch,
+  visibleLayers?: number,
+): number {
   if (atlas.mode !== 'array') return applyAtlasPatch(atlas, patch)
   const patchArrayAtlas = arrayAtlasPatchers.get(atlas)
   if (!patchArrayAtlas) throw new Error()
-  return patchArrayAtlas(atlas, patch)
+  return patchArrayAtlas.apply(atlas, patch, visibleLayers)
+}
+
+export function advanceTextureAtlasUploads(
+  atlas: TextureAtlasResult,
+  nextLayer: number,
+  layerBudget: number,
+): readonly [nextLayer: number, uploaded: boolean] {
+  return arrayAtlasPatchers.get(atlas)?.advance(atlas, nextLayer, layerBudget)
+    ?? [nextLayer, false]
+}
+
+export function clearTextureAtlasPatchQueue(atlas: TextureAtlasResult): void {
+  arrayAtlasPatchers.get(atlas)?.clear()
 }
 
 

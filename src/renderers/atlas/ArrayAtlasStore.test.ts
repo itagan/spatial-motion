@@ -1,10 +1,11 @@
 import { DataArrayTexture } from 'three'
 import { describe, expect, it, vi } from 'vitest'
-import type { TextureAtlasResult } from '../textureAtlas'
+import type { TextureAtlasPatch, TextureAtlasResult } from '../textureAtlas'
 import {
   applyArrayAtlasPatch,
   createArrayAtlasData,
   createArrayAtlasLayout,
+  createArrayAtlasPatcher,
   resolveArrayAtlasPageSize,
 } from './ArrayAtlasStore'
 
@@ -151,7 +152,7 @@ describe('ArrayAtlasStore', () => {
         getImageData: vi.fn(() => ({ data: pixels })),
       })),
     } as unknown as HTMLCanvasElement
-    const patch = {
+    const patch: TextureAtlasPatch = {
       cells: [{ index: 0, canvas }, { index: 4, canvas }],
       metrics: { uploadBytes: 0 } as TextureAtlasResult['metrics'],
     }
@@ -162,5 +163,97 @@ describe('ArrayAtlasStore', () => {
     expect(patch.metrics.uploadRanges).toBe(2)
     expect(patch.metrics.uploadBytes).toBe(8 * 8 * 2 * 4)
     expect(atlas.data[((8 - 1 - 1) * 8 + 1) * 4]).toBe(7)
+  })
+
+  it('can defer GPU layer updates while retaining patched CPU data', () => {
+    const texture = new DataArrayTexture(new Uint8Array(8 * 8 * 2 * 4), 8, 8, 2)
+    const atlas = {
+      texture,
+      mode: 'array',
+      rects: new Float32Array(8),
+      width: 8,
+      height: 8,
+      depth: 2,
+      data: texture.image.data as Uint8Array,
+      columns: 2,
+      rows: 2,
+      cellSize: 2,
+      cellWidth: 2,
+      cellHeight: 2,
+      padding: 1,
+      stride: 4,
+      strideX: 4,
+      strideY: 4,
+      mipmaps: false,
+      initialized: true,
+      metrics: {} as TextureAtlasResult['metrics'],
+    } satisfies TextureAtlasResult
+    const pixels = new Uint8ClampedArray(2 * 2 * 4)
+    pixels.fill(9)
+    const canvas = {
+      getContext: vi.fn(() => ({
+        getImageData: vi.fn(() => ({ data: pixels })),
+      })),
+    } as unknown as HTMLCanvasElement
+    const patch: TextureAtlasPatch = {
+      cells: [{ index: 4, canvas }],
+      metrics: { uploadBytes: 0 } as TextureAtlasResult['metrics'],
+    }
+
+    applyArrayAtlasPatch(atlas, patch, true)
+
+    expect(texture.layerUpdates).toEqual(new Set())
+    expect(texture.version).toBe(0)
+    expect(atlas.data[(8 * 8 * 4) + ((8 - 1 - 1) * 8 + 1) * 4]).toBe(9)
+  })
+
+  it('deduplicates visible patches and leaves hidden layers for sequential upload', () => {
+    const texture = new DataArrayTexture(new Uint8Array(8 * 8 * 2 * 4), 8, 8, 2)
+    const atlas = {
+      texture,
+      mode: 'array',
+      rects: new Float32Array(8),
+      width: 8,
+      height: 8,
+      depth: 2,
+      data: texture.image.data as Uint8Array,
+      columns: 2,
+      rows: 2,
+      cellSize: 2,
+      cellWidth: 2,
+      cellHeight: 2,
+      padding: 1,
+      stride: 4,
+      strideX: 4,
+      strideY: 4,
+      mipmaps: false,
+      initialized: true,
+      metrics: {} as TextureAtlasResult['metrics'],
+    } satisfies TextureAtlasResult
+    const pixels = new Uint8ClampedArray(2 * 2 * 4)
+    const canvas = {
+      getContext: vi.fn(() => ({
+        getImageData: vi.fn(() => ({ data: pixels })),
+      })),
+    } as unknown as HTMLCanvasElement
+    const patch = (): TextureAtlasPatch => ({
+      cells: [{ index: 0, canvas }, { index: 0, canvas }, { index: 4, canvas }],
+      metrics: { uploadBytes: 0 } as TextureAtlasResult['metrics'],
+    })
+    const patcher = createArrayAtlasPatcher()
+    const first = patch()
+    const repeated = patch()
+
+    patcher.apply(atlas, first, 1)
+    patcher.apply(atlas, repeated, 1)
+
+    expect(first.metrics).toMatchObject({ uploadRanges: 1, uploadBytes: 8 * 8 * 4 })
+    expect(repeated.metrics).toMatchObject({ uploadRanges: 0, uploadBytes: 0 })
+    expect(texture.layerUpdates).toEqual(new Set())
+    expect(patcher.advance(atlas, 1, 1)).toEqual([1, true])
+    expect(texture.layerUpdates).toEqual(new Set([0]))
+    texture.layerUpdates.clear()
+    expect(patcher.advance(atlas, 1, 1)).toEqual([2, true])
+    expect(texture.layerUpdates).toEqual(new Set([1]))
   })
 })
