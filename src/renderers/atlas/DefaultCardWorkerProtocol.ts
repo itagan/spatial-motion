@@ -4,6 +4,7 @@ export interface DefaultCardWorkerItem {
   id: string
   title?: string
   style: CardStyle
+  imageIndex?: number
 }
 
 export interface DefaultCardWorkerRequest {
@@ -16,6 +17,7 @@ export interface DefaultCardWorkerRequest {
   strideX: number
   strideY: number
   items: DefaultCardWorkerItem[]
+  images: ImageBitmap[]
 }
 
 export interface DefaultCardWorkerResponse {

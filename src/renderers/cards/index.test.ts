@@ -17,6 +17,7 @@ describe('cardsRenderer', () => {
       maxTextureSize: 4096,
       maxAnisotropy: 8,
       signal: controller.signal,
+      prepareTexture: () => 0,
     })
     expect(renderer.descriptor.itemBounds).toMatchObject({
       kind: 'quad',

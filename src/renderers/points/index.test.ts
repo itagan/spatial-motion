@@ -32,6 +32,7 @@ function createRenderer(options = {}) {
     maxTextureSize: 4096,
     maxAnisotropy: 4,
     signal: controller.signal,
+    prepareTexture: () => 0,
   })
   const points = root.children[0] as Points<BufferGeometry, ShaderMaterial>
   return { controller, points, renderer, root }

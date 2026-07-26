@@ -58,11 +58,13 @@ if (!container) throw new Error('Benchmark stage container not found')
 const benchmarkParameters = new URLSearchParams(window.location.search)
 const requestedResolution = resolveBenchmarkResolution(benchmarkParameters.get('resolution'))
 const requestedMipmaps = benchmarkParameters.get('mipmaps') !== '0'
+const requestedTexturePrewarm = resolveTexturePrewarm(benchmarkParameters.get('prewarm'))
 const stage = new MotionStage({
   container,
   renderer: cardsRenderer({
     resolution: requestedResolution,
     mipmaps: requestedMipmaps,
+    texturePrewarm: requestedTexturePrewarm,
   }),
   quality: 'auto',
   adaptivePerformance: true,
@@ -395,6 +397,12 @@ function renderResult(result: BenchmarkResult): void {
       imageLoadWallMs: Number(result.atlasImageLoadWallMs.toFixed(2)),
       cellRenderMs: Number(result.atlasCellRenderMs.toFixed(2)),
       readbackMs: Number(result.atlasReadbackMs.toFixed(2)),
+      workerRenders: result.atlasWorkerRenders,
+      imageBitmapDecodeMs: Number(result.atlasImageBitmapDecodeMs.toFixed(2)),
+      texturePrewarms: result.atlasTexturePrewarms,
+      texturePrewarmMs: Number(result.atlasTexturePrewarmMs.toFixed(2)),
+      texturePrewarmFailures: result.atlasTexturePrewarmFailures,
+      texturePrewarmSkips: result.atlasTexturePrewarmSkips,
       imageLoadMs: Number(result.imageLoadMs.toFixed(2)),
       imageRequests: result.imageRequests,
       imageFailures: result.imageFailures,
@@ -402,6 +410,7 @@ function renderResult(result: BenchmarkResult): void {
       resolution: result.samples.at(-1)?.stats.renderer.metrics.atlasResolution ?? 0,
       mipmaps: Boolean(result.samples.at(-1)?.stats.renderer.metrics.atlasMipmaps),
       requestedResolution,
+      requestedTexturePrewarm: requestedTexturePrewarm ?? 'auto',
       firstRenderSubmitMs: Number(coldStartRenderSubmitMs.toFixed(3)),
     },
     operations: stressOperations,
@@ -414,6 +423,12 @@ function resolveBenchmarkResolution(value: string | null): number | 'auto' {
   if (!value || value === 'auto') return 'auto'
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : 'auto'
+}
+
+function resolveTexturePrewarm(value: string | null): boolean | undefined {
+  if (value === '1') return true
+  if (value === '0') return false
+  return undefined
 }
 
 async function importBaseline(event: Event): Promise<void> {

@@ -18,6 +18,7 @@ import {
 } from './DefaultCardPainter.js'
 import {
   ImageResourcePool,
+  type ImageResourceBatch,
   type ImageLoadResult,
   throwIfAtlasAborted,
 } from './ImageResourcePool.js'
@@ -40,6 +41,7 @@ export async function rasterizeCards<TMeta = unknown>(
   cellSize: number,
   options: TextureAtlasOptions<TMeta>,
   renderTarget?: AtlasRenderTarget,
+  resourceBatch?: ImageResourceBatch,
 ): Promise<TextureAtlasPatch> {
   const startedAt = now()
   const uniqueIndices = [...new Set(indices)].filter((index) => index >= 0 && index < items.length)
@@ -73,12 +75,12 @@ export async function rasterizeCards<TMeta = unknown>(
     })
     .filter((url): url is string => Boolean(url)))]
   const prepareMs = now() - prepareStartedAt
-  const resources = await new ImageResourcePool({
-    timeout: options.imageTimeout,
-    concurrency: options.imageConcurrency,
-    cache: options.imageCache,
-    signal: options.signal,
-  }).load(imageUrls)
+  const resources = resourceBatch ?? await new ImageResourcePool({
+      timeout: options.imageTimeout,
+      concurrency: options.imageConcurrency,
+      cache: options.imageCache,
+      signal: options.signal,
+    }).load(imageUrls)
   const { width: cellWidth, height: cellHeight } = resolveCellDimensions(
     cellSize,
     options.aspectRatio,
@@ -122,6 +124,7 @@ export async function rasterizeCards<TMeta = unknown>(
     uploadBytes: 0,
     uploadRanges: 0,
     workerRenders: 0,
+    imageBitmapDecodeMs: 0,
   }
   return {
     cells: renderedCells.map(({ index, rendered }) => ({ index, canvas: rendered.canvas })),

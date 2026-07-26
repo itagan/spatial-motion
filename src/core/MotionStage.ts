@@ -257,6 +257,11 @@ export class MotionStage<TMeta = unknown> {
         maxTextureSize: this.renderer.capabilities.maxTextureSize,
         maxAnisotropy: this.renderer.capabilities.getMaxAnisotropy(),
         signal: this.contentAbortController.signal,
+        prepareTexture: (texture) => {
+          const startedAt = performance.now()
+          this.renderer.initTexture(texture)
+          return performance.now() - startedAt
+        },
       })
       assertMotionRenderer(contentRenderer)
     } catch (error) {

@@ -12,6 +12,7 @@ interface DefaultCardWorkerScope {
 const scope = globalThis as unknown as DefaultCardWorkerScope
 
 scope.onmessage = (event) => {
+  const images = event.data.images
   try {
     const request = event.data
     const canvas = new OffscreenCanvas(request.width, request.height)
@@ -22,7 +23,7 @@ scope.onmessage = (event) => {
       drawDefaultCell(
         context,
         item,
-        null,
+        item.imageIndex === undefined ? null : request.images[item.imageIndex] ?? null,
         {
           x: (index % request.columns) * request.strideX + request.padding,
           y: Math.floor(index / request.columns) * request.strideY + request.padding,
@@ -44,6 +45,8 @@ scope.onmessage = (event) => {
       readbackMs: 0,
       error: error instanceof Error ? error.message : String(error),
     }, [])
+  } finally {
+    images.forEach((image) => image.close())
   }
 }
 

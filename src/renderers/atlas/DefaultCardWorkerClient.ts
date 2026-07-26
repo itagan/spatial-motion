@@ -1,5 +1,6 @@
 import type { MotionItem } from '../../core/types.js'
 import type { TextureAtlasOptions } from '../textureAtlas.js'
+import type { ImageResourceBatch } from './ImageResourcePool.js'
 import type {
   DefaultCardWorkerRequest,
 } from './DefaultCardWorkerProtocol.js'
@@ -8,22 +9,33 @@ export interface DefaultCardWorkerResult {
   data: Uint8ClampedArray
   cellRenderMs: number
   readbackMs: number
+  imageBitmapDecodeMs: number
+  imageLoadWallMs: number
+  imageLoadMs: number
+  imageRequests: number
+  imageFailures: number
+}
+
+export interface DefaultCardWorkerAttempt {
+  result: DefaultCardWorkerResult | null
+  resources?: ImageResourceBatch
 }
 
 export async function renderDefaultAtlasInWorker<TMeta>(
   items: readonly MotionItem<TMeta>[],
-  dimensions: Omit<DefaultCardWorkerRequest, 'items'>,
+  dimensions: Omit<DefaultCardWorkerRequest, 'items' | 'images'>,
   options: TextureAtlasOptions<TMeta>,
-): Promise<DefaultCardWorkerResult | null> {
+): Promise<DefaultCardWorkerAttempt> {
+  const hasImages = items.some((item) => Boolean(item.image))
   if (
     options.drawCard
     || options.cardContent
     || items.length < 256
-    || items.some((item) => Boolean(item.image))
     || typeof Worker === 'undefined'
     || typeof OffscreenCanvas === 'undefined'
+    || (hasImages && typeof createImageBitmap === 'undefined')
   ) {
-    return null
+    return { result: null }
   }
   if (options.signal?.aborted) throw options.signal.reason
 
@@ -33,6 +45,6 @@ export async function renderDefaultAtlasInWorker<TMeta>(
     return renderDefaultAtlasInWorkerRuntime(items, dimensions, options)
   } catch {
     if (options.signal?.aborted) throw options.signal.reason
-    return null
+    return { result: null }
   }
 }

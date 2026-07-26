@@ -139,3 +139,7 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 2026-07-26 已完成 Atlas 默认绘制冷启动复验：Cards 2000/high/cold-start 三轮 Atlas build 由 299.9ms 中位数降至 51.7ms，cell render/readback 中位数为 7.3/44.0ms；默认路径只创建 1 张整图 Canvas，产品模板隔离绘制路径保持正常。三轮均提交 2000 项、保持 1 Draw Call，P95 17.60–17.65ms；两轮存在一次 50ms 以上冷启动峰值，后续对照继续区分 CPU readback 与纹理首传。默认与产品模板画面无异常，控制台无 warning/error。
 
 2026-07-26 已完成 Atlas 自动分辨率对照：2000/high 的自动 48px 三轮 build 中位数 40.1ms、readback 中位数 33.1ms、纹理约 33.9MB，相比固定 64px 的 51.7/44.0ms 和约 53.4MB 明显下降；保持 2000 submitted、1 Draw Call，球面头像清晰度可接受且控制台无 warning/error。40px 与 64px/无 mipmap 对照证明继续降清晰度或默认关闭 mipmap都不能消除冷启动长帧，因此保留 48px+mipmap，并把离主线程绘制/readback列为后续独立课题。
+
+2026-07-26 已完成图片 Atlas Worker 与纹理首传对照：默认头像 Cards 的 500/1000/2000 项均把去重图片转换为 `ImageBitmap` 并在 Worker 完成整图绘制/readback，主体保持 1 Draw Call。2000/high/cold-start 使用自适应预热时为 60.01 FPS、P95 17.45ms、P99 17.60ms、0 个 33ms 长帧；位图解码 2.6ms、Worker 绘制/readback 3.9/27.4ms，控制台无 warning/error。强制预热大图集的对照出现一次 33ms 长帧，默认策略因此跳过超过 16 MiB 的像素缓冲。
+
+2026-07-26 已完成 mipmap 与局部指纹对照：2000/high/cold-start 关闭 mipmap 后纹理内存降至 24.2MB，但首次提交仍为 30.9ms，未改变首传瓶颈，因此默认继续开启。逐项内容指纹下，2000 项单卡 patch 只解析一个变化索引；3 秒连续更新完成 17 次 patch，保持 60 FPS、P95 17.50ms、P99 17.65ms、0 个 33ms 长帧和 1 Draw Call，控制台无 error。

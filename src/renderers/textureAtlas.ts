@@ -77,6 +77,7 @@ export interface TextureAtlasMetrics {
   uploadBytes: number
   uploadRanges?: number
   workerRenders?: number
+  imageBitmapDecodeMs?: number
 }
 
 export async function createTextureAtlas<TMeta = unknown>(
@@ -119,7 +120,7 @@ export async function createTextureAtlas<TMeta = unknown>(
     )
   })
 
-  const workerResult = await renderDefaultAtlasInWorker(items, {
+  const workerAttempt = await renderDefaultAtlasInWorker(items, {
     width,
     height,
     columns,
@@ -129,6 +130,7 @@ export async function createTextureAtlas<TMeta = unknown>(
     strideX,
     strideY,
   }, options)
+  const workerResult = workerAttempt.result
   if (workerResult) {
     return createAtlasResult(
       workerResult.data,
@@ -138,17 +140,18 @@ export async function createTextureAtlas<TMeta = unknown>(
       {
         cells: items.length,
         renderMs: now() - startedAt,
-        prepareMs: 0,
-        imageLoadWallMs: 0,
+        prepareMs: workerResult.imageBitmapDecodeMs,
+        imageLoadWallMs: workerResult.imageLoadWallMs,
         cellRenderMs: workerResult.cellRenderMs,
         applyMs: 0,
         readbackMs: workerResult.readbackMs,
-        imageLoadMs: 0,
-        imageRequests: 0,
-        imageFailures: 0,
+        imageLoadMs: workerResult.imageLoadMs,
+        imageRequests: workerResult.imageRequests,
+        imageFailures: workerResult.imageFailures,
         uploadBytes: workerResult.data.byteLength,
         uploadRanges: 1,
         workerRenders: 1,
+        imageBitmapDecodeMs: workerResult.imageBitmapDecodeMs,
       },
     )
   }
@@ -164,6 +167,7 @@ export async function createTextureAtlas<TMeta = unknown>(
     resolvedCellSize,
     options,
     { context, columns, padding, strideX, strideY },
+    workerAttempt.resources,
   )
   const applyStartedAt = now()
   drawPatchToCanvas(context, columns, cellWidth, cellHeight, padding, strideX, strideY, patch)
@@ -177,6 +181,7 @@ export async function createTextureAtlas<TMeta = unknown>(
     uploadBytes: data.byteLength,
     uploadRanges: 1,
     workerRenders: 0,
+    imageBitmapDecodeMs: 0,
   }
   return createAtlasResult(data, rects, metrics, options, patch.metrics)
 }

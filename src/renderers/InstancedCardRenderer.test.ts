@@ -191,6 +191,77 @@ describe('InstancedCardRenderer item loading', () => {
     renderer.dispose()
   })
 
+  it('prewarms each accepted atlas texture and repeats preparation after context recovery', async () => {
+    const currentAtlas = atlas(1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const prepareTexture = vi.fn(() => 3)
+    const renderer = new InstancedCardRenderer(new Scene(), { prepareTexture })
+
+    expect(await renderer.setItems([{ id: 'prewarm' }])).toBe(true)
+    renderer.capabilities.resourceRecovery?.refreshResources()
+
+    expect(prepareTexture).toHaveBeenCalledTimes(2)
+    expect(prepareTexture).toHaveBeenCalledWith(currentAtlas.result.texture)
+    expect(renderer.getStats().metrics).toMatchObject({
+      atlasTexturePrewarms: 2,
+      atlasTexturePrewarmMs: 6,
+      atlasTexturePrewarmFailures: 0,
+    })
+    renderer.dispose()
+  })
+
+  it('falls back to visible-frame upload when texture prewarming fails', async () => {
+    const currentAtlas = atlas(1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const renderer = new InstancedCardRenderer(new Scene(), {
+      prepareTexture: () => { throw new Error('upload failed') },
+    })
+
+    expect(await renderer.setItems([{ id: 'fallback-upload' }])).toBe(true)
+    expect(renderer.getStats().metrics).toMatchObject({
+      atlasTexturePrewarms: 0,
+      atlasTexturePrewarmFailures: 1,
+    })
+    renderer.dispose()
+  })
+
+  it('skips automatic texture prewarming for atlases above the long-frame threshold', async () => {
+    const currentAtlas = atlas(2000)
+    currentAtlas.result.data = new Uint8Array(16 * 1024 * 1024 + 1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const prepareTexture = vi.fn(() => 3)
+    const renderer = new InstancedCardRenderer(new Scene(), { prepareTexture })
+
+    expect(await renderer.setItems([{ id: 'large-atlas' }])).toBe(true)
+
+    expect(prepareTexture).not.toHaveBeenCalled()
+    expect(renderer.getStats().metrics).toMatchObject({
+      atlasTexturePrewarms: 0,
+      atlasTexturePrewarmSkips: 1,
+    })
+    renderer.dispose()
+  })
+
+  it('allows explicit texture prewarming above the automatic threshold', async () => {
+    const currentAtlas = atlas(2000)
+    currentAtlas.result.data = new Uint8Array(16 * 1024 * 1024 + 1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const prepareTexture = vi.fn(() => 3)
+    const renderer = new InstancedCardRenderer(new Scene(), {
+      prepareTexture,
+      texturePrewarm: true,
+    })
+
+    expect(await renderer.setItems([{ id: 'forced-prewarm' }])).toBe(true)
+
+    expect(prepareTexture).toHaveBeenCalledOnce()
+    expect(renderer.getStats().metrics).toMatchObject({
+      atlasTexturePrewarms: 1,
+      atlasTexturePrewarmSkips: 0,
+    })
+    renderer.dispose()
+  })
+
   it('reuses mesh, material, geometry, and transition attributes within a capacity bucket', async () => {
     const firstAtlas = atlas(3)
     const secondAtlas = atlas(4)
@@ -441,6 +512,51 @@ describe('InstancedCardRenderer item loading', () => {
 
     expect(atlasMock.createPatch).toHaveBeenCalledOnce()
     expect(atlasMock.createPatch.mock.calls[0][3]).toMatchObject({ resolveCardStyle })
+    renderer.dispose()
+  })
+
+  it('fingerprints only changed items during a large partial update', async () => {
+    const itemCount = 2000
+    const currentAtlas = atlas(itemCount)
+    const patch = {
+      cells: [],
+      metrics: {
+        cells: 1,
+        renderMs: 1,
+        prepareMs: 0,
+        imageLoadWallMs: 0,
+        cellRenderMs: 1,
+        applyMs: 0,
+        readbackMs: 0,
+        imageLoadMs: 0,
+        imageRequests: 0,
+        imageFailures: 0,
+        uploadBytes: 0,
+      },
+    }
+    const resolveCardStyle = vi.fn((item: { meta?: { winner?: boolean } }) =>
+      item.meta?.winner ? { borderColor: '#ffd700' } : undefined)
+    const items = Array.from({ length: itemCount }, (_value, index) => ({
+      id: `item-${index}`,
+      meta: { winner: false },
+    }))
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    atlasMock.createPatch.mockResolvedValueOnce(patch)
+    const renderer = new InstancedCardRenderer(new Scene(), { resolveCardStyle })
+    await renderer.setItems(items)
+    resolveCardStyle.mockClear()
+    const updated = items.slice()
+    updated[123] = { ...updated[123], meta: { winner: true } }
+
+    expect(await renderer.updateItems(updated, [123, 123, -1, itemCount])).toBe(true)
+
+    expect(resolveCardStyle).toHaveBeenCalledOnce()
+    expect(atlasMock.createPatch.mock.calls[0][1]).toEqual([123])
+    expect(renderer.getStats().metrics).toMatchObject({
+      fingerprintFullScans: 1,
+      fingerprintPatchScans: 1,
+      fingerprintItemsScanned: 2001,
+    })
     renderer.dispose()
   })
 })
