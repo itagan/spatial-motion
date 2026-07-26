@@ -22,6 +22,7 @@ export interface TextureAtlasOptions<TMeta = unknown> {
   imageConcurrency?: number
   imageCacheSize?: number
   imageCache?: TextureAtlasImageCache
+  mipmaps?: boolean
   signal?: AbortSignal
 }
 
@@ -40,6 +41,7 @@ export interface TextureAtlasResult {
   stride: number
   strideX: number
   strideY: number
+  mipmaps: boolean
   initialized: boolean
   metrics: TextureAtlasMetrics
 }
@@ -208,10 +210,11 @@ export async function createTextureAtlas<TMeta = unknown>(
   const data = context.getImageData(0, 0, canvas.width, canvas.height).data
   patch.metrics.readbackMs = now() - readbackStartedAt
   const texture = new DataTexture(data, canvas.width, canvas.height)
+  const mipmaps = options.mipmaps !== false
   texture.colorSpace = SRGBColorSpace
-  texture.minFilter = LinearMipmapLinearFilter
+  texture.minFilter = mipmaps ? LinearMipmapLinearFilter : LinearFilter
   texture.magFilter = LinearFilter
-  texture.generateMipmaps = true
+  texture.generateMipmaps = mipmaps
   texture.flipY = true
   texture.anisotropy = Math.max(1, Math.floor(options.anisotropy ?? 1))
   texture.needsUpdate = true
@@ -230,6 +233,7 @@ export async function createTextureAtlas<TMeta = unknown>(
     stride,
     strideX,
     strideY,
+    mipmaps,
     initialized: false,
     metrics: patch.metrics,
   }

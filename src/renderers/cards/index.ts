@@ -16,7 +16,8 @@ export interface CardsRendererOptions<TMeta = unknown> {
   draw?: DrawCard<TMeta>
   content?: CardContentRenderer<TMeta>
   aspectRatio?: number
-  resolution?: number
+  resolution?: number | 'auto'
+  mipmaps?: boolean
   imageTimeout?: number
   imageConcurrency?: number
   imageCacheSize?: number
@@ -35,6 +36,7 @@ export function cardsRenderer<TMeta = unknown>(
     cardContent: options.content,
     aspectRatio: resolveAspectRatio(options.aspectRatio),
     cellSize: options.resolution,
+    mipmaps: options.mipmaps,
     imageTimeout: options.imageTimeout,
     imageConcurrency: options.imageConcurrency,
     imageCacheSize: options.imageCacheSize,

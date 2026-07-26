@@ -13,6 +13,7 @@
 - 新增 `defineLayout()`，为自定义布局提供冻结对象与 Transform 输出验证。
 - 新增按需 `dev` 入口，可验证自定义 Renderer/Layout 并生成批量边界、法线和顶部方向调试对象。
 - Benchmark Atlas 指标新增 prepare、图片墙钟、单元绘制和像素 readback 分段耗时，便于定位冷启动瓶颈。
+- Cards `resolution` 新增 `'auto'`，内置默认卡片超过 1024 项时使用 48px；新增 `mipmaps` 开关及实际分辨率/mipmap Renderer 指标。
 
 ### Fixed
 

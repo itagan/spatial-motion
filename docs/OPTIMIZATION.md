@@ -186,8 +186,12 @@ Atlas patch 会按纹理行合并相邻卡片范围，模板实例保留最多 2
 
 ## 真实消费者体积与 Atlas 冷启动
 
-包体积门禁不再把所有 ESM 输出文件分别 gzip 后相加当作用户下载量。`pack:check` 会从真实 `.tgz` 创建 root、Core-only 和 Cards-only Vite/Terser 消费者，并把 Three.js 保持为 external；分模块 gzip 聚合值仍输出，专门用于观察内部模块增长。当前 root/Core-only/Cards-only 分别为 33,231 / 11,875 / 9,840 bytes gzip，均低于 40,960 / 16,384 / 12,288 bytes 预算；分模块聚合诊断为 41,353 bytes，但不对应任何单个消费者产物。
+包体积门禁不再把所有 ESM 输出文件分别 gzip 后相加当作用户下载量。`pack:check` 会从真实 `.tgz` 创建 root、Core-only 和 Cards-only Vite/Terser 消费者，并把 Three.js 保持为 external；分模块 gzip 聚合值仍输出，专门用于观察内部模块增长。当前 root/Core-only/Cards-only 分别为 33,362 / 11,875 / 9,972 bytes gzip，均低于 40,960 / 16,384 / 12,288 bytes 预算；分模块聚合诊断为 41,500 bytes，但不对应任何单个消费者产物。
 
 Atlas 指标拆分为 prepare、图片加载墙钟、单元绘制和整图像素 readback。内置默认卡片首次构建直接绘制到一个合成 Canvas，不再创建 2000 个临时单元 Canvas 或逐卡 `drawImage`；异步模板和自定义 `drawCard` 仍使用隔离单元 Canvas，局部 patch 路径不变。整图只执行一次 `getImageData()`，并直接把返回的 `Uint8ClampedArray` 交给 `DataTexture`，不再分配并复制第二份同尺寸 `Uint8Array`。
 
-2026-07-26 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2000 Cards/high/cold-start 三轮结果：优化前 Atlas build 中位数 299.9ms，默认直接绘制后为 56.9 / 51.7 / 51.0ms，中位数 51.7ms，减少约 82.8%；cell render 中位数由 39.5ms 降至 7.3ms，readback 由 243.2ms 降至 44.0ms。三轮均提交 2000 项、保持 1 Draw Call，P95 为 17.60–17.65ms；其中两轮记录到一次 50ms 以上冷启动峰值，说明后续若要彻底消除首传停顿，需要渐进式 GPU 初始化，而不是拆分 Canvas readback。默认与产品模板画面正常，控制台无 warning/error。
+2026-07-26 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2000 Cards/high/cold-start 三轮结果：优化前 Atlas build 中位数 299.9ms，默认直接绘制后为 56.9 / 51.7 / 51.0ms，中位数 51.7ms，减少约 82.8%；cell render 中位数由 39.5ms 降至 7.3ms，readback 由 243.2ms 降至 44.0ms。三轮均提交 2000 项、保持 1 Draw Call，P95 为 17.60–17.65ms；其中两轮记录到一次 50ms 以上冷启动峰值，后续分辨率与提交对照继续区分 CPU readback 和纹理首传。默认与产品模板画面正常，控制台无 warning/error。
+
+随后增加基础级 Atlas 策略：内置默认卡片的 `resolution` 未配置或为 `'auto'` 时，超过 1024 项使用 48px，否则使用 64px；显式数值始终优先。模板与自定义 `drawCard` 的未配置行为保持 64px，避免基于像素的内容布局被隐式缩放。`mipmaps` 默认开启但允许显式关闭，实际 resolution/mipmap 状态进入 Renderer metrics；Benchmark 摘要同时报告最大 CPU/submit、紧邻冷启动的首次 render submit 和 Atlas 设置。
+
+同环境 2000/high/cold-start 的自动 48px 三轮 Atlas build 为 40.1/44.2/39.1ms，中位数 40.1ms，readback 中位数 33.1ms，纹理内存由固定 64px 的约 53.4MB 降至 33.9MB；主体保持 1 Draw Call，P95 为 17.50–18.25ms。40px 单轮为 build/readback 32.2/24.7ms、约 24.9MB，但仍记录一次 33ms 长帧，因此不继续牺牲清晰度。64px 关闭 mipmap 后纹理约 42.0MB，但 build/readback 仍为 56.4/46.5ms，说明 mipmap 不是 CPU 冷启动主瓶颈，默认继续开启。后续方向修正为离主线程默认绘制/readback，并单独评估纹理首传；不直接引入分页 Atlas。完整验证为 20 个测试文件、269 项测试，Library/Demo/Examples 与 tgz 消费检查全部通过。
