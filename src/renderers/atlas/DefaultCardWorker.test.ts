@@ -74,14 +74,25 @@ describe('default card atlas worker', () => {
     expect(transfer).toEqual([response.data])
   })
 
-  it('repacks array pages before transferring pixels to the main thread', async () => {
+  it('draws array pages directly into the final layer buffer', async () => {
     const context = createContext()
+    context.getImageData.mockImplementation(
+      (_x: number, _y: number, width: number, height: number) => {
+        const data = new Uint8ClampedArray(width * height * 4)
+        data[(width + 1) * 4] = 11
+        data[(width + 13) * 4] = 22
+        return { data, width, height, colorSpace: 'srgb' }
+      },
+    )
     const postMessage = vi.fn()
+    const canvases: TestOffscreenCanvas[] = []
     class TestOffscreenCanvas {
       constructor(
         readonly width: number,
         readonly height: number,
-      ) {}
+      ) {
+        canvases.push(this)
+      }
       getContext() { return context }
     }
     vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas)
@@ -124,6 +135,15 @@ describe('default card atlas worker', () => {
       arrayPageColumns: 3,
       arrayPageRows: 3,
     })
+    expect(canvases).toHaveLength(1)
+    expect(canvases[0]).toMatchObject({ width: 24, height: 12 })
+    expect(context.clearRect).toHaveBeenCalledOnce()
+    expect(context.getImageData).toHaveBeenCalledOnce()
+    expect(context.getImageData).toHaveBeenCalledWith(0, 0, 24, 12)
+    const pixels = new Uint8Array(response.data!)
+    const firstLayerOffset = ((12 - 1 - 1) * 12 + 1) * 4
+    expect(pixels[firstLayerOffset]).toBe(11)
+    expect(pixels[12 * 12 * 4 + firstLayerOffset]).toBe(22)
     expect(transfer).toEqual([response.data, response.rects])
   })
 })
@@ -143,6 +163,7 @@ function createContext() {
     clip: vi.fn(),
     stroke: vi.fn(),
     drawImage: vi.fn(),
+    clearRect: vi.fn(),
     getImageData: vi.fn((_x: number, _y: number, width: number, height: number) => ({
       data: new Uint8ClampedArray(width * height * 4),
       width,
