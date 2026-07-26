@@ -70,6 +70,14 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 - [ ] 产品、人物和指标 ES6 模板在 1:1、3:4、16:9 下布局正确，flex、绝对定位、渐变、裁剪和文字省略无越界。
 - [ ] 模板的嵌套条件/数组、scoped class、动态 style 和多图片加载正确；非法标签/样式回退内置占位且不创建 DOM 卡片。
 - [ ] 模板模式 500/1000/2000 输入保持主体 1 Draw Call，局部数据更新只增加对应 Atlas patch，模板资源不会随更新持续增长。
+- [ ] 同容量档快速布局切换时 `geometryBuilds` 不增长，`attributeReuses` 持续增加；跨容量档只保留一个活动 Geometry/Material。
+- [ ] 相邻卡片 patch 的 `atlasUploadRanges` 少于逐卡逐行范围，离散 patch 不上传无关大块。
+
+## 开发诊断
+
+- [ ] `validateLayout()` 在横竖屏 Context 和 0/1/100/500/2000 数量下无 error，warning 与实际重叠/密度问题一致。
+- [ ] `validateMotionRenderer()` 对 Cards、Points 和自定义最小 Renderer 返回有限统计，重复更新后对象数不持续增长。
+- [ ] 布局调试 Group 的边界、蓝色法线和绿色顶部方向与卡片画面一致，`dispose()` 后无 Geometry/Material 残留。
 
 ## 生命周期和压力测试
 
@@ -123,3 +131,5 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 2026-07-26 已完成协议加固复验：Points 的 500/1000/2000 项、球体/圆柱快速中断、圆形拾取和暂停恢复继续保持单 Canvas、1 Draw Call；Cards 500/2000 项与产品横卡回归正常。默认 Cards 2000/high 的 steady / transition-stress P95 分别为 17.34/17.50ms，均为 60 FPS、0 个 33ms 长帧、1 Draw Call，压力场景完成 4 次中断/patch，控制台无 error。
 
 2026-07-26 已完成未发布 API 收敛复验：显式 Cards/Points Renderer 下，Points 1000/2000 与 Cards 500/2000 均保持单 Canvas、60 FPS、主体 1 Draw Call；Points 2000 的球体/圆柱连续快速中断稳定，Cards 2000 产品横卡 Atlas build 完成后恢复 60 FPS，控制台无 error。
+
+2026-07-26 已完成运行时容量复用复验：Cards/Points 的 500/1000/2000 项均保持 60 FPS、主体 1 Draw Call，容量分别进入 512/1024/2048 桶；同容量档球体/圆柱切换的 `geometryBuilds` 保持 1，`attributeReuses` 增长且无资源累积。默认 Cards 2000/high 的 steady、transition-stress、连续 Atlas 更新 P95 分别为 17.60/17.46/17.50ms，均无 33ms 长帧；控制台无 error。

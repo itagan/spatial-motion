@@ -1,4 +1,5 @@
 import {
+  DynamicDrawUsage,
   Euler,
   FrontSide,
   InstancedBufferAttribute,
@@ -39,6 +40,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   readonly descriptor: MotionRendererDescriptor
   private mesh: Mesh<InstancedBufferGeometry, ShaderMaterial> | null = null
   private instanceCapacity = 0
+  private itemCount = 0
   private material: ShaderMaterial | null = null
   private generation = 0
   private itemsFingerprint = ''
@@ -56,6 +58,9 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private imageRequests = 0
   private imageFailures = 0
   private estimatedTextureUploadBytes = 0
+  private geometryBuilds = 0
+  private attributeReuses = 0
+  private atlasUploadRanges = 0
   private readonly euler = new Euler()
   private readonly quaternion = new Quaternion()
   private readonly imageCache: TextureAtlasImageCache
@@ -92,7 +97,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     }
   }
 
-  async setItems(items: MotionItem<TMeta>[]): Promise<boolean> {
+  async setItems(items: readonly MotionItem<TMeta>[]): Promise<boolean> {
     const fingerprint = createItemsFingerprint(items, this.atlasOptions)
     if (this.mesh && fingerprint === this.itemsFingerprint && !this.atlasAbortController) return true
     const { controller, generation, options } = this.beginAtlasOperation()
@@ -110,6 +115,14 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       atlas.texture.dispose()
       return false
     }
+    const nextCapacity = resolveBufferCapacity(this.instanceCapacity, items.length)
+    if (this.mesh && this.material && nextCapacity === this.instanceCapacity) {
+      this.replaceAtlas(atlas, items.length)
+      this.itemsFingerprint = fingerprint
+      this.recordAtlasBuild(atlas)
+      this.attributeReuses += 1
+      return true
+    }
     this.disposeCurrent()
     const aspectRatio = resolveAspectRatio(this.atlasOptions.aspectRatio)
     const plane = new PlaneGeometry(
@@ -121,11 +134,20 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     geometry.setAttribute('position', plane.getAttribute('position'))
     geometry.setAttribute('uv', plane.getAttribute('uv'))
     geometry.instanceCount = items.length
-    geometry.setAttribute('atlasRect', new InstancedBufferAttribute(atlas.rects, 4))
-    geometry.setAttribute('effectPath', new InstancedBufferAttribute(new Float32Array(items.length * 4), 4))
-    geometry.setAttribute('effectSpeedFactor', new InstancedBufferAttribute(new Float32Array(items.length), 1))
-    geometry.setAttribute('visibilityRank', new InstancedBufferAttribute(createVisibilityRanks(items.length), 1))
-    geometry.setAttribute('itemIndex', new InstancedBufferAttribute(createItemIndices(items.length), 1))
+    geometry.setAttribute('atlasRect', dynamicAttribute(new Float32Array(nextCapacity * 4), 4))
+    geometry.setAttribute('effectPath', dynamicAttribute(new Float32Array(nextCapacity * 4), 4))
+    geometry.setAttribute('effectSpeedFactor', dynamicAttribute(new Float32Array(nextCapacity), 1))
+    geometry.setAttribute('visibilityRank', new InstancedBufferAttribute(createVisibilityRanks(nextCapacity), 1))
+    geometry.setAttribute('itemIndex', new InstancedBufferAttribute(createItemIndices(nextCapacity), 1))
+    geometry.setAttribute('fromPosition', dynamicAttribute(new Float32Array(nextCapacity * 3), 3))
+    geometry.setAttribute('toPosition', dynamicAttribute(new Float32Array(nextCapacity * 3), 3))
+    geometry.setAttribute('fromQuaternion', dynamicAttribute(new Float32Array(nextCapacity * 4), 4))
+    geometry.setAttribute('toQuaternion', dynamicAttribute(new Float32Array(nextCapacity * 4), 4))
+    geometry.setAttribute('fromScale', dynamicAttribute(new Float32Array(nextCapacity), 1))
+    geometry.setAttribute('toScale', dynamicAttribute(new Float32Array(nextCapacity), 1))
+    geometry.setAttribute('fromOpacity', dynamicAttribute(new Float32Array(nextCapacity), 1))
+    geometry.setAttribute('toOpacity', dynamicAttribute(new Float32Array(nextCapacity), 1))
+    copyAttribute(geometry.getAttribute('atlasRect') as InstancedBufferAttribute, atlas.rects)
     this.material = new ShaderMaterial({
       uniforms: {
         atlas: { value: atlas.texture },
@@ -335,25 +357,22 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       side: FrontSide,
     })
     this.mesh = new Mesh(geometry, this.material)
-    this.instanceCapacity = items.length
+    this.instanceCapacity = nextCapacity
+    this.itemCount = items.length
+    this.geometryBuilds += 1
     this.mesh.frustumCulled = false
     this.root.add(this.mesh)
     this.itemsFingerprint = fingerprint
-    this.textureBytes = Math.ceil(atlas.width * atlas.height * 4 * 4 / 3)
-    this.atlasBuilds += 1
-    this.atlasCellsUpdated += atlas.metrics.cells
-    this.atlasBuildMs += atlas.metrics.renderMs
-    this.atlasDrawMs += atlas.metrics.applyMs
-    this.imageLoadMs += atlas.metrics.imageLoadMs
-    this.imageRequests += atlas.metrics.imageRequests
-    this.imageFailures += atlas.metrics.imageFailures
-    this.estimatedTextureUploadBytes += atlas.metrics.uploadBytes
     this.atlas = atlas
+    this.recordAtlasBuild(atlas)
     return true
   }
 
-  async updateItems(items: MotionItem<TMeta>[], changedIndices: number[]): Promise<boolean> {
-    if (!this.mesh || !this.atlas || items.length !== this.instanceCapacity) {
+  async updateItems(
+    items: readonly MotionItem<TMeta>[],
+    changedIndices: readonly number[],
+  ): Promise<boolean> {
+    if (!this.mesh || !this.atlas || items.length !== this.itemCount) {
       return this.setItems(items)
     }
     const fingerprint = createItemsFingerprint(items, this.atlasOptions)
@@ -381,45 +400,57 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.imageRequests += patch.metrics.imageRequests
     this.imageFailures += patch.metrics.imageFailures
     this.estimatedTextureUploadBytes += patch.metrics.uploadBytes
+    this.atlasUploadRanges += patch.metrics.uploadRanges ?? 0
     this.itemsFingerprint = fingerprint
     return true
   }
 
-  setTransforms(transforms: Transform[]): void {
+  setTransforms(transforms: readonly Transform[]): void {
     this.prepareTransition(transforms, transforms)
     this.setProgress(1)
   }
 
   prepareTransition(
-    from: Transform[],
-    to: Transform[],
+    from: readonly Transform[],
+    to: readonly Transform[],
   ): void {
     if (!this.mesh) return
-    const count = Math.min(from.length, to.length, this.instanceCapacity)
-    const fromPosition = new Float32Array(count * 3)
-    const toPosition = new Float32Array(count * 3)
-    const fromQuaternion = new Float32Array(count * 4)
-    const toQuaternion = new Float32Array(count * 4)
-    const fromScale = new Float32Array(count)
-    const toScale = new Float32Array(count)
-    const fromOpacity = new Float32Array(count)
-    const toOpacity = new Float32Array(count)
+    const count = Math.min(from.length, to.length, this.itemCount)
+    const geometry = this.mesh.geometry
+    const fromPosition = geometry.getAttribute('fromPosition') as InstancedBufferAttribute
+    const toPosition = geometry.getAttribute('toPosition') as InstancedBufferAttribute
+    const fromQuaternion = geometry.getAttribute('fromQuaternion') as InstancedBufferAttribute
+    const toQuaternion = geometry.getAttribute('toQuaternion') as InstancedBufferAttribute
+    const fromScale = geometry.getAttribute('fromScale') as InstancedBufferAttribute
+    const toScale = geometry.getAttribute('toScale') as InstancedBufferAttribute
+    const fromOpacity = geometry.getAttribute('fromOpacity') as InstancedBufferAttribute
+    const toOpacity = geometry.getAttribute('toOpacity') as InstancedBufferAttribute
 
     for (let index = 0; index < count; index += 1) {
-      this.writeTransform(from[index], index, fromPosition, fromQuaternion, fromScale, fromOpacity)
-      this.writeTransform(to[index], index, toPosition, toQuaternion, toScale, toOpacity)
+      this.writeTransform(
+        from[index],
+        index,
+        fromPosition.array as Float32Array,
+        fromQuaternion.array as Float32Array,
+        fromScale.array as Float32Array,
+        fromOpacity.array as Float32Array,
+      )
+      this.writeTransform(
+        to[index],
+        index,
+        toPosition.array as Float32Array,
+        toQuaternion.array as Float32Array,
+        toScale.array as Float32Array,
+        toOpacity.array as Float32Array,
+      )
     }
 
-    const geometry = this.mesh.geometry
-    geometry.setAttribute('fromPosition', new InstancedBufferAttribute(fromPosition, 3))
-    geometry.setAttribute('toPosition', new InstancedBufferAttribute(toPosition, 3))
-    geometry.setAttribute('fromQuaternion', new InstancedBufferAttribute(fromQuaternion, 4))
-    geometry.setAttribute('toQuaternion', new InstancedBufferAttribute(toQuaternion, 4))
-    geometry.setAttribute('fromScale', new InstancedBufferAttribute(fromScale, 1))
-    geometry.setAttribute('toScale', new InstancedBufferAttribute(toScale, 1))
-    geometry.setAttribute('fromOpacity', new InstancedBufferAttribute(fromOpacity, 1))
-    geometry.setAttribute('toOpacity', new InstancedBufferAttribute(toOpacity, 1))
-    this.mesh.geometry.instanceCount = count
+    ;[fromPosition, toPosition].forEach((attribute) => markAttribute(attribute, count * 3))
+    ;[fromQuaternion, toQuaternion].forEach((attribute) => markAttribute(attribute, count * 4))
+    ;[fromScale, toScale, fromOpacity, toOpacity]
+      .forEach((attribute) => markAttribute(attribute, count))
+    this.attributeReuses += 8
+    geometry.instanceCount = count
     this.setProgress(0)
   }
 
@@ -441,26 +472,6 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     if (this.material) this.material.uniforms.progress.value = progress
   }
 
-  setOrientation(orientation: 'surface' | 'camera'): void {
-    if (!this.material) return
-    const value = orientation === 'camera' ? 1 : 0
-    this.material.uniforms.fromBillboard.value = value
-    this.material.uniforms.toBillboard.value = value
-  }
-
-  setHideBackHemisphere(hidden: boolean): void {
-    if (!this.material) return
-    const value = hidden ? 1 : 0
-    this.material.uniforms.fromHideBackHemisphere.value = value
-    this.material.uniforms.toHideBackHemisphere.value = value
-  }
-
-  setHemisphereEdgeFade(amount: number): void {
-    if (!this.material) return
-    this.material.uniforms.fromHemisphereEdgeFade.value = amount
-    this.material.uniforms.toHemisphereEdgeFade.value = amount
-  }
-
   setVisualState(state: MotionRendererVisualState): void {
     if (!this.material) return
     const uniforms = this.material.uniforms
@@ -474,8 +485,17 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
 
   enableEffect(data: StreamingEffectGpuData): void {
     if (!this.mesh || !this.material) return
-    this.mesh.geometry.setAttribute('effectPath', new InstancedBufferAttribute(data.paths, 4))
-    this.mesh.geometry.setAttribute('effectSpeedFactor', new InstancedBufferAttribute(data.speedFactors, 1))
+    const effectPath = this.mesh.geometry.getAttribute('effectPath') as InstancedBufferAttribute
+    const effectSpeed = this.mesh.geometry.getAttribute('effectSpeedFactor') as InstancedBufferAttribute
+    ;(effectPath.array as Float32Array).fill(0)
+    ;(effectSpeed.array as Float32Array).fill(-1)
+    ;(effectPath.array as Float32Array).set(data.paths.subarray(0, effectPath.array.length))
+    ;(effectSpeed.array as Float32Array).set(
+      data.speedFactors.subarray(0, effectSpeed.array.length),
+    )
+    markAttribute(effectPath, Math.min(effectPath.array.length, data.paths.length))
+    markAttribute(effectSpeed, Math.min(effectSpeed.array.length, data.speedFactors.length))
+    this.attributeReuses += 2
     const uniforms = this.material.uniforms
     setVector4(uniforms.effectParamsA.value as Vector4, data.parameters, 0)
     setVector4(uniforms.effectParamsB.value as Vector4, data.parameters, 4)
@@ -490,12 +510,12 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     while (activeCount < data.speedFactors.length && data.speedFactors[activeCount] >= 0) {
       activeCount += 1
     }
-    this.mesh.geometry.instanceCount = Math.min(this.instanceCapacity, activeCount)
+    this.mesh.geometry.instanceCount = Math.min(this.itemCount, activeCount)
   }
 
   disableEffect(): void {
     if (this.material) this.material.uniforms.effectMode.value = 0
-    if (this.mesh) this.mesh.geometry.instanceCount = this.instanceCapacity
+    if (this.mesh) this.mesh.geometry.instanceCount = this.itemCount
   }
 
   setEffectTime(elapsedSeconds: number): void {
@@ -512,7 +532,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
 
   resize(_viewport: MotionRendererViewport): void {}
 
-  refreshTexture(): void {
+  refreshResources(): void {
     if (this.atlas) {
       this.atlas.initialized = false
       this.atlas.texture.clearUpdateRanges()
@@ -521,13 +541,9 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     }
   }
 
-  refreshResources(): void {
-    this.refreshTexture()
-  }
-
   getStats(): MotionRendererStats {
     return {
-      instanceCount: this.mesh ? this.instanceCapacity : 0,
+      instanceCount: this.mesh ? this.itemCount : 0,
       submittedInstanceCount: this.mesh?.geometry.instanceCount ?? 0,
       gpuBytes: this.textureBytes + geometryByteLength(this.mesh?.geometry),
       metrics: {
@@ -544,6 +560,11 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
         imageRequests: this.imageRequests,
         imageFailures: this.imageFailures,
         estimatedTextureUploadBytes: this.estimatedTextureUploadBytes,
+        capacity: this.mesh ? this.instanceCapacity : 0,
+        geometryBuilds: this.geometryBuilds,
+        attributeReuses: this.attributeReuses,
+        atlasUploadRanges: this.atlasUploadRanges,
+        ...this.atlasOptions.cardContent?.getMetrics?.(),
       },
     }
   }
@@ -554,6 +575,32 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.atlasAbortController = null
     this.imageCache.clear()
     this.disposeCurrent()
+  }
+
+  private replaceAtlas(atlas: TextureAtlasResult, itemCount: number): void {
+    if (!this.mesh || !this.material) return
+    this.atlas?.texture.dispose()
+    this.atlas = atlas
+    this.material.uniforms.atlas.value = atlas.texture
+    copyAttribute(
+      this.mesh.geometry.getAttribute('atlasRect') as InstancedBufferAttribute,
+      atlas.rects,
+    )
+    this.itemCount = itemCount
+    this.mesh.geometry.instanceCount = itemCount
+  }
+
+  private recordAtlasBuild(atlas: TextureAtlasResult): void {
+    this.textureBytes = Math.ceil(atlas.width * atlas.height * 4 * 4 / 3)
+    this.atlasBuilds += 1
+    this.atlasCellsUpdated += atlas.metrics.cells
+    this.atlasBuildMs += atlas.metrics.renderMs
+    this.atlasDrawMs += atlas.metrics.applyMs
+    this.imageLoadMs += atlas.metrics.imageLoadMs
+    this.imageRequests += atlas.metrics.imageRequests
+    this.imageFailures += atlas.metrics.imageFailures
+    this.estimatedTextureUploadBytes += atlas.metrics.uploadBytes
+    this.atlasUploadRanges += atlas.metrics.uploadRanges ?? 0
   }
 
   private beginAtlasOperation(): {
@@ -584,6 +631,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.material?.dispose()
     this.mesh = null
     this.instanceCapacity = 0
+    this.itemCount = 0
     this.material = null
     this.itemsFingerprint = ''
     this.textureBytes = 0
@@ -639,7 +687,7 @@ function setVector4(target: Vector4, values: Float32Array, offset: number): void
 }
 
 function createItemsFingerprint<TMeta>(
-  items: MotionItem<TMeta>[],
+  items: readonly MotionItem<TMeta>[],
   options: TextureAtlasOptions<TMeta>,
 ): string {
   return items
@@ -677,4 +725,27 @@ function createVisibilityRanks(count: number): Float32Array {
 
 function createItemIndices(count: number): Float32Array {
   return Float32Array.from({ length: count }, (_, index) => index)
+}
+
+function resolveBufferCapacity(current: number, required: number): number {
+  if (required <= 0) return 0
+  if (required <= current && required >= current / 2) return current
+  return 2 ** Math.ceil(Math.log2(required))
+}
+
+function dynamicAttribute(array: Float32Array, itemSize: number): InstancedBufferAttribute {
+  return new InstancedBufferAttribute(array, itemSize).setUsage(DynamicDrawUsage)
+}
+
+function copyAttribute(attribute: InstancedBufferAttribute, values: Float32Array): void {
+  const target = attribute.array as Float32Array
+  target.fill(0)
+  target.set(values.subarray(0, target.length))
+  markAttribute(attribute, Math.min(target.length, values.length))
+}
+
+function markAttribute(attribute: InstancedBufferAttribute, count: number): void {
+  attribute.clearUpdateRanges()
+  if (count > 0) attribute.addUpdateRange(0, count)
+  attribute.needsUpdate = true
 }

@@ -11,6 +11,7 @@
 - 新增按需 `card-template` 入口、`html` tagged template、`defineCardTemplate()` 和受控 HTML/CSS 子集；模板图片复用 Atlas 资源管线。
 - `MotionRenderer` 成为稳定 Core 契约，新增 `core`、Cards、Points 和逐布局按需入口。
 - 新增 `defineLayout()`，为自定义布局提供冻结对象与 Transform 输出验证。
+- 新增按需 `dev` 入口，可验证自定义 Renderer/Layout 并生成批量边界、法线和顶部方向调试对象。
 
 ### Fixed
 
@@ -18,6 +19,7 @@
 - Sphere `surface` 朝向现在让每张卡片的法线精确对齐球面外法线；默认球体与经典 Demo 预设也改用完整球面贴合朝向，`upright-surface` 仍可显式选用。
 - Sphere `surface` 卡片的顶部统一朝向球面北极，避免头像随经纬度发生无规则滚转或倒置。
 - 质量切换现在异步协调 2000/1000/500 实例容量并从完整输入恢复升级数据，不再把实例上限与固定可见比例重复削减；等待缩容的实例会在顶点着色阶段提前裁剪。
+- Cards/Points 现在按容量桶复用 Geometry、Material、过渡 Attribute 和 TypedArray；Atlas 相邻单元合并上传范围，模板复用有界文字测量结果。
 
 ### Compatibility
 
@@ -28,6 +30,7 @@
 - `MotionItem<TMeta>`、`MotionStage<TMeta>`、Renderer 与回调统一泛型 meta；性能统计拆分为通用 `render` 与 `renderer`。
 - 构造期 `items` 现在实际进入 Renderer，并通过 `stage.ready` 暴露初始化完成状态。
 - `LayoutContext` 统一为 `itemWidth/itemHeight`，不保留 `cardWidth/cardHeight`。
+- 未发布数据契约收紧为只读 `MotionItem`、`Transform` 与 Renderer/Layout 输入数组，不保留可变签名。
 
 ## 1.15.0 - 2026-07-19
 

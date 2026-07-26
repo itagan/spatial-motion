@@ -32,7 +32,10 @@ export interface MotionRendererViewport {
 }
 
 export interface MotionRendererPatchCapability<TMeta = unknown> {
-  updateItems(items: MotionItem<TMeta>[], changedIndices: number[]): Promise<boolean>
+  updateItems(
+    items: readonly MotionItem<TMeta>[],
+    changedIndices: readonly number[],
+  ): Promise<boolean>
 }
 
 export interface MotionRendererVisualCapability {
@@ -80,9 +83,9 @@ export interface MotionRendererStats {
 export interface MotionRenderer<TMeta = unknown> {
   readonly descriptor: MotionRendererDescriptor
   readonly capabilities: MotionRendererCapabilities<TMeta>
-  setItems(items: MotionItem<TMeta>[]): Promise<boolean>
-  setTransforms(transforms: Transform[]): void
-  prepareTransition(from: Transform[], to: Transform[]): void
+  setItems(items: readonly MotionItem<TMeta>[]): Promise<boolean>
+  setTransforms(transforms: readonly Transform[]): void
+  prepareTransition(from: readonly Transform[], to: readonly Transform[]): void
   setProgress(progress: number): void
   setVisibleRatio(ratio: number): void
   getStats(): MotionRendererStats

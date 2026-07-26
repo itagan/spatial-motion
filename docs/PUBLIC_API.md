@@ -10,6 +10,7 @@ Spatial Motion 尚未发布。本文件记录准备冻结的首版边界；发�
 - `@itagan/spatial-motion/renderers/points`：`pointsRenderer()`。
 - `@itagan/spatial-motion/layouts` 与 `layouts/{sphere,cylinder,grid,ring,helix,cone,box,scatter}`。
 - `@itagan/spatial-motion/effects`、`performance`、`card-template` 和 `package.json`。
+- `@itagan/spatial-motion/dev`：按需开发诊断，不从根入口重导出。
 
 未在 `package.json#exports` 中声明的 `src`、`dist` 和内部模块不可导入。旧 `experimental-renderer` 入口不存在。
 
@@ -17,7 +18,7 @@ Spatial Motion 尚未发布。本文件记录准备冻结的首版边界；发�
 
 - `MotionStage<TMeta>` 强制接收 `renderer: MotionRendererFactory<TMeta>`，Core 不隐式创建 Cards。
 - 构造参数提供 `items` 时通过 `stage.ready` 等待初始 Renderer 数据准备；后续数据使用 `setItems()` / `updateItem(s)`。
-- `MotionItem<TMeta>`、更新参数、Cards/Points Resolver 和 Stage item 回调共享同一泛型 meta。
+- `MotionItem<TMeta>`、`Transform`、Renderer/Layout 输入及更新索引使用只读契约；Stage、Cards/Points Resolver 和 item 回调共享同一泛型 meta。
 - Factory 只获得隔离内容 `Group`、GPU 限制和 destroy `AbortSignal`，不能接管 Scene、Camera、WebGLRenderer 或 RAF。
 - 核心协议负责数据、Transform、GPU 过渡进度、质量可见比例、统计和销毁；patch、visual、highlight、viewport、resource recovery 与 streaming effects 是可选能力。
 - `descriptor.itemBounds` 支持 layout/camera quad、camera disc 或 `null`；`null` 关闭指针拾取但不影响布局与程序化 focus。
@@ -39,5 +40,6 @@ Spatial Motion 尚未发布。本文件记录准备冻结的首版边界；发�
 ## 性能与扩展
 
 - Cards 与 Points 主体各保持单一批量对象；默认布局、过渡和质量裁剪不为每项增加 Draw Call。
-- 主库 40 KB gzip、模板 12 KB、Points 12 KB、150 KB tarball 和 8 KB layout-only 是自动化硬预算。
+- `dev` 导出 Renderer/Layout 验证报告和可挂载到 StageExtension 的布局方向可视化；error 不自动修正，重叠等启发式结果为 warning。
+- 主库 40 KB gzip、模板/Points/Dev 各 12 KB、150 KB tarball 和 8 KB layout-only 是自动化硬预算。
 - Stage extension 只能挂载隔离 Group，并负责释放自身 Geometry、Material、Texture 和动画资源。

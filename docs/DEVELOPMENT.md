@@ -104,7 +104,7 @@ npm run pack:check
 5. 扩展 `scripts/verify-package.mjs` 的运行时和类型消费者检查。
 6. 运行 `npm run pack:check`，确认深层内部路径仍不可导入。
 
-当前自动化硬预算：主库 JavaScript gzip 不超过 40 KB，按需模板与 Points Renderer 各不超过 12 KB，npm tarball 不超过 150 KB，仅消费布局的 Tree Shaking 产物不超过 8 KB。预算变化属于需要明确讨论的工程决策。
+当前自动化硬预算：主库 JavaScript gzip 不超过 40 KB，按需模板、Points Renderer 与 Dev 诊断入口各不超过 12 KB，npm tarball 不超过 150 KB，仅消费布局的 Tree Shaking 产物不超过 8 KB。预算变化属于需要明确讨论的工程决策。
 
 npm tarball 只携带运行时 `dist`、README、CHANGELOG、LICENSE、PUBLIC_API 和 COMPATIBILITY。ROADMAP、DEVELOPMENT、OPTIMIZATION、RELEASE、VISUAL_QA 与 examples 保留在源码仓库，不增加安装包体积。
 

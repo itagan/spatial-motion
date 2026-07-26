@@ -57,6 +57,7 @@ export interface TextureAtlasMetrics {
   imageRequests: number
   imageFailures: number
   uploadBytes: number
+  uploadRanges?: number
 }
 
 interface ImageLoadResult {
@@ -138,7 +139,7 @@ const loadImage = (
 }
 
 export async function createTextureAtlas<TMeta = unknown>(
-  items: MotionItem<TMeta>[],
+  items: readonly MotionItem<TMeta>[],
   cellSize = 64,
   options: TextureAtlasOptions<TMeta> = {},
 ): Promise<TextureAtlasResult> {
@@ -225,13 +226,14 @@ export async function createTextureAtlas<TMeta = unknown>(
     ...patch.metrics,
     renderMs: now() - startedAt,
     uploadBytes: data.byteLength,
+    uploadRanges: 1,
   }
   return atlas
 }
 
 export async function createTextureAtlasPatch<TMeta = unknown>(
-  items: MotionItem<TMeta>[],
-  indices: number[],
+  items: readonly MotionItem<TMeta>[],
+  indices: readonly number[],
   cellSize: number,
   options: TextureAtlasOptions<TMeta> = {},
 ): Promise<TextureAtlasPatch> {
@@ -301,6 +303,7 @@ export async function createTextureAtlasPatch<TMeta = unknown>(
       imageRequests: imageResults.filter((result) => result.requested).length,
       imageFailures: imageResults.filter((result) => result.failed).length,
       uploadBytes: 0,
+      uploadRanges: 0,
     },
   }
 }
@@ -308,7 +311,11 @@ export async function createTextureAtlasPatch<TMeta = unknown>(
 export function applyTextureAtlasPatch(atlas: TextureAtlasResult, patch: TextureAtlasPatch): number {
   const startedAt = now()
   let uploadBytes = 0
-  patch.cells.forEach(({ index, canvas }) => {
+  const rangesByRow = new Map<number, Array<{ start: number; end: number }>>()
+  patch.cells
+    .slice()
+    .sort((left, right) => left.index - right.index)
+    .forEach(({ index, canvas }) => {
     const x = (index % atlas.columns) * atlas.strideX + atlas.padding
     const y = Math.floor(index / atlas.columns) * atlas.strideY + atlas.padding
     const context = canvas.getContext('2d')
@@ -319,13 +326,38 @@ export function applyTextureAtlasPatch(atlas: TextureAtlasResult, patch: Texture
       const targetOffset = ((y + row) * atlas.width + x) * 4
       const rowLength = atlas.cellWidth * 4
       atlas.data.set(imageData.data.subarray(sourceOffset, sourceOffset + rowLength), targetOffset)
-      if (atlas.initialized) atlas.texture.addUpdateRange(targetOffset, rowLength)
-      uploadBytes += rowLength
+      if (atlas.initialized) {
+        const atlasRow = y + row
+        const ranges = rangesByRow.get(atlasRow) ?? []
+        ranges.push({ start: targetOffset, end: targetOffset + rowLength })
+        rangesByRow.set(atlasRow, ranges)
+      }
     }
   })
   if (!atlas.initialized) {
     atlas.texture.clearUpdateRanges()
     uploadBytes = atlas.data.byteLength
+    patch.metrics.uploadRanges = 1
+  } else {
+    atlas.texture.clearUpdateRanges()
+    let uploadRanges = 0
+    rangesByRow.forEach((ranges) => {
+      let current = ranges[0]
+      ranges.slice(1).forEach((range) => {
+        if (range.start <= current.end + atlas.padding * 8) {
+          current.end = Math.max(current.end, range.end)
+          return
+        }
+        atlas.texture.addUpdateRange(current.start, current.end - current.start)
+        uploadBytes += current.end - current.start
+        uploadRanges += 1
+        current = range
+      })
+      atlas.texture.addUpdateRange(current.start, current.end - current.start)
+      uploadBytes += current.end - current.start
+      uploadRanges += 1
+    })
+    patch.metrics.uploadRanges = uploadRanges
   }
   patch.metrics.uploadBytes = uploadBytes
   atlas.texture.needsUpdate = true

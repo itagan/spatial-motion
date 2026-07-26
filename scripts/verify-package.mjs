@@ -11,6 +11,7 @@ const packageName = packageJson.name
 const jsGzipBudget = 40 * 1024
 const cardTemplateGzipBudget = 12 * 1024
 const pointsRendererGzipBudget = 12 * 1024
+const devGzipBudget = 12 * 1024
 const tarballBudget = 150 * 1024
 const treeShakenBudget = 8 * 1024
 const keepConsumer = process.env.KEEP_PACKAGE_CONSUMER === '1'
@@ -40,6 +41,7 @@ const requiredExports = [
   './card-template',
   './renderers/cards',
   './renderers/points',
+  './dev',
 ]
 for (const exportPath of requiredExports) {
   const declaration = packageJson.exports?.[exportPath]
@@ -54,20 +56,27 @@ const jsContents = await Promise.all(jsFiles.map((path) => readFile(path)))
 const cardTemplateJsFiles = jsFiles.filter((path) => path.includes(`${join('dist', 'card-template')}/`))
 const pointsRendererJsFiles = jsFiles
   .filter((path) => path.includes(`${join('dist', 'renderers', 'points')}/`))
+const devJsFiles = jsFiles.filter((path) => path.includes(`${join('dist', 'dev')}/`))
 const coreJsFiles = jsFiles.filter((path) =>
-  !cardTemplateJsFiles.includes(path) && !pointsRendererJsFiles.includes(path))
+  !cardTemplateJsFiles.includes(path)
+  && !pointsRendererJsFiles.includes(path)
+  && !devJsFiles.includes(path))
 const coreJsContents = await Promise.all(coreJsFiles.map((path) => readFile(path)))
 const cardTemplateJsContents = await Promise.all(cardTemplateJsFiles.map((path) => readFile(path)))
 const pointsRendererJsContents = await Promise.all(
   pointsRendererJsFiles.map((path) => readFile(path)),
 )
-const jsBytes = jsContents.reduce((total, contents) => total + contents.byteLength, 0)
+const devJsContents = await Promise.all(devJsFiles.map((path) => readFile(path)))
+const totalJsBytes = jsContents.reduce((total, contents) => total + contents.byteLength, 0)
+const jsBytes = coreJsContents.reduce((total, contents) => total + contents.byteLength, 0)
 const jsGzipBytes = coreJsContents.reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
 const cardTemplateJsGzipBytes = cardTemplateJsContents
   .reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
 const pointsRendererJsGzipBytes = pointsRendererJsContents
   .reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
-assert(jsBytes < 150 * 1024, `Library JS suggests Three.js was bundled: ${jsBytes} bytes`)
+const devJsGzipBytes = devJsContents
+  .reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
+assert(jsBytes < 150 * 1024, `Core library JS suggests Three.js was bundled: ${jsBytes} bytes`)
 assert(jsGzipBytes <= jsGzipBudget, `Library JS gzip budget exceeded: ${jsGzipBytes} > ${jsGzipBudget}`)
 assert(
   cardTemplateJsGzipBytes <= cardTemplateGzipBudget,
@@ -77,6 +86,7 @@ assert(
   pointsRendererJsGzipBytes <= pointsRendererGzipBudget,
   `Points renderer JS gzip budget exceeded: ${pointsRendererJsGzipBytes} > ${pointsRendererGzipBudget}`,
 )
+assert(devJsGzipBytes <= devGzipBudget, `Dev JS gzip budget exceeded: ${devJsGzipBytes} > ${devGzipBudget}`)
 assert(jsContents.some((contents) => /from\s*["']three["']/.test(contents.toString('utf8'))), 'Library should retain an external Three.js import')
 
 const dryRun = parsePackResult(run('npm', ['pack', '--dry-run', '--json', '--ignore-scripts']))
@@ -131,11 +141,16 @@ try {
     const cardTemplate = await import('${packageName}/card-template')
     const cards = await import('${packageName}/renderers/cards')
     const points = await import('${packageName}/renderers/points')
+    const dev = await import('${packageName}/dev')
     assert.equal(typeof main.MotionStage, 'function')
     assert.equal(typeof core.MotionStage, 'function')
     assert.equal(typeof core.defineMotionRenderer, 'function')
     assert.equal(typeof cards.cardsRenderer, 'function')
     assert.equal(typeof points.pointsRenderer, 'function')
+    assert.equal(typeof dev.validateLayout, 'function')
+    assert.equal(typeof dev.validateMotionRenderer, 'function')
+    assert.equal(typeof dev.createLayoutDebugVisualization, 'function')
+    assert.equal(typeof main.validateLayout, 'undefined')
     assert.equal(typeof sphereLayout.sphere, 'function')
     assert.equal(typeof layouts.sphere, 'function')
     assert.equal(typeof layouts.box, 'function')
@@ -266,6 +281,7 @@ try {
     import {
       pointsRenderer,
     } from '${packageName}/renderers/points'
+    import { createLayoutDebugVisualization, validateLayout, validateMotionRenderer, type DevelopmentValidationReport, type LayoutValidationSamples, type MotionRendererValidationSamples } from '${packageName}/dev'
     type Meta = { color?: string; winner?: boolean }
     const items: MotionItem<Meta>[] = [{ id: 'one', meta: { winner: true } }]
     declare const stage: MotionStage<Meta> | undefined
@@ -357,6 +373,15 @@ try {
       void [context, rendererContext]
       return renderer
     })
+    const layoutReport: DevelopmentValidationReport<LayoutValidationSamples> =
+      validateLayout(sphere())
+    const rendererReport: Promise<DevelopmentValidationReport<MotionRendererValidationSamples>> =
+      validateMotionRenderer(rendererFactory)
+    const debugVisualization = createLayoutDebugVisualization(sphere(), {
+      count: 10,
+      context: { width: 100, height: 100 },
+    })
+    debugVisualization.dispose()
     declare const container: HTMLElement
     const pointStageOptions: MotionStageOptions<Meta> = {
       container,
@@ -403,7 +428,7 @@ try {
     const configuredLayouts = [createLayout(layoutConfig), createLayoutFromSubpath(subpathConfig)]
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
-    void [items, stage, cardsRenderer, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, rendererGpuBytes, rendererMetrics, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions, rendererCapabilities, rendererVisualState, rendererPickShape, rendererDescriptor, rendererViewport, rendererStats, rendererFactory, pointStageOptions]
+    void [items, stage, cardsRenderer, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, rendererGpuBytes, rendererMetrics, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions, rendererCapabilities, rendererVisualState, rendererPickShape, rendererDescriptor, rendererViewport, rendererStats, rendererFactory, pointStageOptions, layoutReport, rendererReport, debugVisualization]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
@@ -524,9 +549,11 @@ try {
     publishedFiles: dryRun.files.length,
     tarballBytes: dryRun.size,
     libraryJsBytes: jsBytes,
+    totalJsBytes,
     libraryJsGzipBytes: jsGzipBytes,
     cardTemplateJsGzipBytes,
     pointsRendererJsGzipBytes,
+    devJsGzipBytes,
     layoutConsumerBytes: Buffer.byteLength(consumerJs),
     coreConsumerBytes: Buffer.byteLength(coreConsumerJs),
     consumerRuntime: 'passed',

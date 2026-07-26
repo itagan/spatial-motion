@@ -31,6 +31,7 @@
 - 圆角、圆形、边框与背景卡片样式，以及安全的 Canvas 自定义绘制
 - 按需 ES6 tagged template 卡片内容，使用受控 HTML/CSS 子集并继续写入同一纹理图集
 - 稳定按需批量渲染器协议及单 Draw Call `pointsRenderer()`
+- 按需 Renderer/Layout 开发诊断与批量布局方向可视化
 - 按稳定 `id` 局部重绘单张或多张图集卡片
 - 统一的平滑特效运动曲线、mipmap 图集采样和 GPU 纹理尺寸保护
 - WebGL context loss 暂停/恢复、图片超时回退和长时间压力基准
@@ -158,9 +159,10 @@ import { MotionStage } from '@itagan/spatial-motion/core'
 import { cardsRenderer } from '@itagan/spatial-motion/renderers/cards'
 import { tunnel, vortex } from '@itagan/spatial-motion/effects'
 import { BenchmarkSession, compareBenchmarkResults } from '@itagan/spatial-motion/performance'
+import { validateLayout, validateMotionRenderer } from '@itagan/spatial-motion/dev'
 ```
 
-`core`、Cards/Points Renderer、布局集合与逐布局、`effects`、`performance`、`card-template` 和 `package.json` 都是稳定导出路径。根入口是便利聚合入口；需要严格控制产物时使用子路径。
+`core`、Cards/Points Renderer、布局集合与逐布局、`effects`、`performance`、`card-template`、`dev` 和 `package.json` 都是稳定导出路径。根入口是便利聚合入口；需要严格控制产物时使用子路径。`dev` 仅供开发期主动导入，不被根入口或生产模块引用。
 
 可序列化布局配置：
 
@@ -414,6 +416,31 @@ await stage.setItems(items)
 
 自定义 `MotionRenderer` 只需实现数据、Transform、过渡进度、质量可见比例、统计与销毁；局部 patch、视觉状态、高亮、viewport、资源恢复和流式特效通过 `capabilities` 按需声明。`descriptor.itemBounds` 可使用 quad、disc 或 `null`。`getPerformanceStats()` 将场景提交数据放在 `render`，将实例、GPU 字节与 Renderer 专属指标放在 `renderer`。
 
+开发自定义 Renderer 或 Layout 时可使用独立诊断入口：
+
+```ts
+import {
+  createLayoutDebugVisualization,
+  validateLayout,
+  validateMotionRenderer,
+} from '@itagan/spatial-motion/dev'
+
+const rendererReport = await validateMotionRenderer(pointsRenderer(), {
+  items,
+  cycles: 3,
+})
+const layoutReport = validateLayout(sphere())
+const debug = createLayoutDebugVisualization(sphere(), {
+  count: 500,
+  context: { width: 1280, height: 720, itemWidth: 1, itemHeight: 1 },
+})
+
+// 通过 StageExtension 挂载 debug.group；结束时释放：
+debug.dispose()
+```
+
+协议、非有限值和释放残留属于 error；重复位置、可能重叠和无拾取边界属于 warning。诊断不会自动修正输出。Cards/Points 的 `renderer.metrics` 同时报告 GPU 容量、Geometry 构建、Attribute 复用和 Atlas 上传范围。
+
 拾取与聚焦：
 
 ```ts
@@ -498,7 +525,7 @@ npx spatial-motion-benchmark baseline.json current.json --preset transition-stre
 
 默认阈值覆盖 FPS、最大帧时间、P95/P99、33ms 长帧、Stage CPU、WebGL 提交、Atlas build/patch、纹理内存与估算上传量。配置不兼容或超过阈值时命令返回非零退出码；自定义阈值可对每个指标设置 `maxRegressionPercent`、`maxRegressionAbsolute` 或两者。随包提供的六个 `--preset` 覆盖 100/500/1000/2000 实例、low/medium/high/auto 质量和四类固定场景，CLI 会拒绝与预设不一致的结果。
 
-重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。同一 JavaScript turn 内的稳定 id 更新会合并；已初始化图集只上传变化单元对应的数据行。
+重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。同一 JavaScript turn 内的稳定 id 更新会合并；已初始化图集只上传变化单元对应的数据行，相邻单元会合并连续上传范围。Cards/Points 的 GPU Attribute 使用容量桶并原位写入，同一容量档内的布局切换不会替换 Geometry、Material 或过渡 Attribute。
 图集默认使用 4px 隔离、mipmap 和最高 4x 各向异性采样；Cards `resolution` 会被限制在 32–256px，并在实例规模超过设备 `MAX_TEXTURE_SIZE` 时自动降低实际单元分辨率，避免创建无效纹理。首次上传和 WebGL context 恢复仍使用完整图集上传。
 
 ## 包构建与体积基准
@@ -507,10 +534,11 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| 主库 JavaScript gzip | ≤ 40 KB | 39.4 KB（40,379 bytes） |
-| 按需 card-template gzip | ≤ 12 KB | 5.7 KB（5,820 bytes） |
-| 按需 Points Renderer gzip | ≤ 12 KB | 2.5 KB（2,556 bytes） |
-| npm tarball | ≤ 150 KB | 78.1 KB（79,972 bytes） |
+| 主库 JavaScript gzip | ≤ 40 KB | 40.0 KB（40,922 bytes） |
+| 按需 card-template gzip | ≤ 12 KB | 6.0 KB（6,194 bytes） |
+| 按需 Points Renderer gzip | ≤ 12 KB | 2.8 KB（2,918 bytes） |
+| 按需开发诊断 gzip | ≤ 12 KB | 3.8 KB（3,892 bytes） |
+| npm tarball | ≤ 150 KB | 83.1 KB（85,087 bytes） |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 5.5 KB（5,598 bytes） |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

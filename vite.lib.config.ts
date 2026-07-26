@@ -21,6 +21,7 @@ export default defineConfig({
         'card-template/index': new URL('./src/card-template/index.ts', import.meta.url).pathname,
         'renderers/cards/index': new URL('./src/renderers/cards/index.ts', import.meta.url).pathname,
         'renderers/points/index': new URL('./src/renderers/points/index.ts', import.meta.url).pathname,
+        'dev/index': new URL('./src/dev/index.ts', import.meta.url).pathname,
       },
       formats: ['es'],
     },

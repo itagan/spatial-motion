@@ -63,6 +63,30 @@ describe('pointsRenderer', () => {
     expect(root.children).toHaveLength(1)
   })
 
+  it('reuses geometry and transition attributes inside the same capacity bucket', async () => {
+    const { points, renderer } = createRenderer()
+    await renderer.setItems(items(3))
+    const geometry = points.geometry
+    const material = points.material
+    const fromPosition = geometry.getAttribute('fromPosition')
+    renderer.prepareTransition(
+      Array.from({ length: 3 }, () => transform()),
+      Array.from({ length: 3 }, () => transform({ x: 1 })),
+    )
+    await renderer.setItems(items(4))
+    renderer.prepareTransition(
+      Array.from({ length: 4 }, () => transform()),
+      Array.from({ length: 4 }, () => transform({ y: 1 })),
+    )
+    expect(points.geometry).toBe(geometry)
+    expect(points.material).toBe(material)
+    expect(geometry.getAttribute('fromPosition')).toBe(fromPosition)
+    expect(renderer.getStats().metrics).toMatchObject({
+      capacity: 4,
+      geometryBuilds: 1,
+    })
+  })
+
   it('patches only colors without replacing geometry', async () => {
     const { points, renderer } = createRenderer({
       resolveColor: (item: MotionItem) => (item.meta as { color: string }).color,
@@ -128,7 +152,7 @@ describe('pointsRenderer', () => {
     expect(disposeGeometry).toHaveBeenCalledOnce()
     expect(disposeMaterial).toHaveBeenCalledOnce()
     await expect(renderer.setItems(items(4))).resolves.toBe(false)
-    expect(renderer.getStats()).toEqual({
+    expect(renderer.getStats()).toMatchObject({
       instanceCount: 0,
       submittedInstanceCount: 0,
       gpuBytes: 0,

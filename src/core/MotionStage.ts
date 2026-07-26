@@ -41,7 +41,7 @@ import type { StreamingEffect, StreamingEffectGpuData } from '../effects/types.j
 
 export interface MotionStageOptions<TMeta = unknown> {
   container: HTMLElement
-  items?: MotionItem<TMeta>[]
+  items?: readonly MotionItem<TMeta>[]
   renderer: MotionRendererFactory<TMeta>
   quality?: QualityLevel | 'auto'
   cameraZ?: number
@@ -364,18 +364,18 @@ export class MotionStage<TMeta = unknown> {
     this.ready = options.items ? this.setItemsInternal(options.items) : Promise.resolve()
   }
 
-  setItems(items: MotionItem<TMeta>[]): Promise<void> {
+  setItems(items: readonly MotionItem<TMeta>[]): Promise<void> {
     this.assertActive()
     validateItems(items)
     return this.setItemsAfterPendingUpdates(items)
   }
 
-  private async setItemsAfterPendingUpdates(items: MotionItem<TMeta>[]): Promise<void> {
+  private async setItemsAfterPendingUpdates(items: readonly MotionItem<TMeta>[]): Promise<void> {
     await this.flushPendingItemUpdates()
     return this.setItemsInternal(items)
   }
 
-  private async setItemsInternal(items: MotionItem<TMeta>[]): Promise<void> {
+  private async setItemsInternal(items: readonly MotionItem<TMeta>[]): Promise<void> {
     const token = ++this.itemsToken
     this.cancelActiveTransition('interrupted')
     this.activeEffect = null
@@ -469,7 +469,7 @@ export class MotionStage<TMeta = unknown> {
     this.cancelActiveTransition('interrupted')
     const from = this.transforms
     const calculationStartedAt = performance.now()
-    const target = layout.calculate(this.items.length, this.context())
+    const target = [...layout.calculate(this.items.length, this.context())]
     this.transformCalculationMs += performance.now() - calculationStartedAt
     this.transformCalculations += 1
     const targetOrientation = layout.orientation ?? 'surface'
@@ -570,14 +570,17 @@ export class MotionStage<TMeta = unknown> {
     return true
   }
 
-  updateItems(items: MotionItem<TMeta>[], options: UpdateItemsOptions = {}): Promise<boolean> {
+  updateItems(
+    items: readonly MotionItem<TMeta>[],
+    options: UpdateItemsOptions = {},
+  ): Promise<boolean> {
     this.assertActive()
     validateItems(items)
     return this.updateItemsAfterPendingUpdates(items, options)
   }
 
   private async updateItemsAfterPendingUpdates(
-    items: MotionItem<TMeta>[],
+    items: readonly MotionItem<TMeta>[],
     options: UpdateItemsOptions,
   ): Promise<boolean> {
     await this.flushPendingItemUpdates()
@@ -691,7 +694,7 @@ export class MotionStage<TMeta = unknown> {
   }
 
   private async updateItemsInternal(
-    items: MotionItem<TMeta>[],
+    items: readonly MotionItem<TMeta>[],
     options: UpdateItemsOptions,
     preserveEffect = false,
   ): Promise<boolean> {
@@ -729,7 +732,7 @@ export class MotionStage<TMeta = unknown> {
     const targetLayout = options.layout ?? this.lastLayout
     if (currentEffect && this.activeEffect === currentEffect) {
       if (targetLayout) {
-        this.transforms = targetLayout.calculate(this.items.length, this.context())
+        this.transforms = [...targetLayout.calculate(this.items.length, this.context())]
         this.contentRenderer.setTransforms(this.transforms)
         if (options.layout) this.lastLayout = options.layout
       }
@@ -1044,7 +1047,7 @@ export class MotionStage<TMeta = unknown> {
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(width, height, false)
     if (this.lastLayout && this.items.length && !this.activeTransition && !this.activeEffect) {
-      this.transforms = this.lastLayout.calculate(this.items.length, this.context())
+      this.transforms = [...this.lastLayout.calculate(this.items.length, this.context())]
       this.contentRenderer.setTransforms(this.transforms)
     }
     const viewport = this.extensionViewport()
@@ -1753,13 +1756,8 @@ function assertMotionRenderer(value: unknown): asserts value is MotionRenderer {
   }
   const renderer = value as Partial<MotionRenderer>
   const methods: Array<keyof MotionRenderer> = [
-    'setItems',
-    'setTransforms',
-    'prepareTransition',
-    'setProgress',
-    'setVisibleRatio',
-    'getStats',
-    'dispose',
+    'setItems', 'setTransforms', 'prepareTransition', 'setProgress',
+    'setVisibleRatio', 'getStats', 'dispose',
   ]
   const missing = methods.find((method) => typeof renderer[method] !== 'function')
   if (missing) throw new TypeError(`Motion renderer is missing required method: ${missing}`)
@@ -1771,16 +1769,13 @@ function assertMotionRenderer(value: unknown): asserts value is MotionRenderer {
   }
   validateCapability(renderer.capabilities.patch, 'patch', ['updateItems'])
   validateCapability(renderer.capabilities.visual, 'visual', [
-    'setVisualState',
-    'prepareVisualTransition',
+    'setVisualState', 'prepareVisualTransition',
   ])
   validateCapability(renderer.capabilities.highlight, 'highlight', ['setHighlightIndex'])
   validateCapability(renderer.capabilities.viewport, 'viewport', ['resize'])
   validateCapability(renderer.capabilities.resourceRecovery, 'resourceRecovery', ['refreshResources'])
   validateCapability(renderer.capabilities.streamingEffects, 'streamingEffects', [
-    'enable',
-    'disable',
-    'setTime',
+    'enable', 'disable', 'setTime',
   ])
   const shape = renderer.descriptor.itemBounds
   if (shape === null) return
@@ -1807,7 +1802,7 @@ function assertMotionRenderer(value: unknown): asserts value is MotionRenderer {
 function validateCapability(
   capability: unknown,
   name: string,
-  methods: string[],
+  methods: readonly string[],
 ): void {
   if (capability === undefined) return
   if (!capability || typeof capability !== 'object') {
@@ -1970,7 +1965,7 @@ function countVisibleEffectItems(speedFactors: Float32Array, ratio: number): num
   return visible
 }
 
-function validateItems<TMeta>(items: MotionItem<TMeta>[]): void {
+function validateItems<TMeta>(items: readonly MotionItem<TMeta>[]): void {
   const ids = new Set<string>()
   items.forEach((item, index) => {
     if (!item.id.trim()) throw new Error(`MotionItem at index ${index} must have a non-empty id`)

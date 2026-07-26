@@ -140,8 +140,47 @@ describe('InstancedCardRenderer item loading', () => {
       },
     })
     expect(renderer.getStats().gpuBytes).toBeGreaterThan(87_382)
-    renderer.refreshTexture()
+    renderer.capabilities.resourceRecovery?.refreshResources()
     expect(currentAtlas.texture.needsUpdate).toBe(true)
+    renderer.dispose()
+  })
+
+  it('reuses mesh, material, geometry, and transition attributes within a capacity bucket', async () => {
+    const firstAtlas = atlas(3)
+    const secondAtlas = atlas(4)
+    atlasMock.create.mockResolvedValueOnce(firstAtlas.result).mockResolvedValueOnce(secondAtlas.result)
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene)
+    await renderer.setItems([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+    const geometry = mesh.geometry
+    const material = mesh.material
+    const fromPosition = geometry.getAttribute('fromPosition')
+
+    await renderer.setItems([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }])
+    renderer.prepareTransition(
+      Array.from({ length: 4 }, () => ({
+        x: 0, y: 0, z: 0, scale: 1,
+        rotationX: 0, rotationY: 0, rotationZ: 0, opacity: 1,
+      })),
+      Array.from({ length: 4 }, () => ({
+        x: 1, y: 0, z: 0, scale: 1,
+        rotationX: 0, rotationY: 0, rotationZ: 0, opacity: 1,
+      })),
+    )
+
+    expect(scene.children[0]).toBe(mesh)
+    expect(mesh.geometry).toBe(geometry)
+    expect(mesh.material).toBe(material)
+    expect(geometry.getAttribute('fromPosition')).toBe(fromPosition)
+    expect(firstAtlas.dispose).toHaveBeenCalledOnce()
+    expect(renderer.getStats()).toMatchObject({
+      instanceCount: 4,
+      metrics: {
+        capacity: 4,
+        geometryBuilds: 1,
+      },
+    })
     renderer.dispose()
   })
 
