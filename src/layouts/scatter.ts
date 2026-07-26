@@ -1,4 +1,5 @@
 import type { Layout, Transform } from '../core/types.js'
+import { defineLayout } from './defineLayout.js'
 
 export interface ScatterOptions {
   direction?: 'random' | 'radial' | 'left' | 'right'
@@ -23,7 +24,7 @@ export function scatter(options: ScatterOptions = {}): Layout {
   const opacity = Math.min(1, Math.max(0, options.opacity ?? 0))
   const seed = Number.isFinite(options.seed) ? options.seed as number : 2030
 
-  return {
+  return defineLayout({
     name: `scatter-${direction}`,
     // Surface orientation lets the transition interpolate the configured spin.
     // The cards are normally transparent at rest, so random final tilt is not exposed.
@@ -40,7 +41,7 @@ export function scatter(options: ScatterOptions = {}): Layout {
         }
       })
     },
-  }
+  })
 }
 
 function scatterPosition(

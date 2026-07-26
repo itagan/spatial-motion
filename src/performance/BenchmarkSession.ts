@@ -189,23 +189,29 @@ export class BenchmarkSession {
       transformCalculations: counterDelta(first, latest, 'transformCalculations'),
       pickingMs: counterDelta(first, latest, 'pickingMs'),
       pickOperations: counterDelta(first, latest, 'pickOperations'),
-      atlasBuilds: counterDelta(first, latest, 'atlasBuilds'),
-      atlasPatches: counterDelta(first, latest, 'atlasPatches'),
-      atlasDiscardedBuilds: counterDelta(first, latest, 'atlasDiscardedBuilds'),
-      atlasDiscardedPatches: counterDelta(first, latest, 'atlasDiscardedPatches'),
-      atlasCellsUpdated: counterDelta(first, latest, 'atlasCellsUpdated'),
-      atlasBuildMs: counterDelta(first, latest, 'atlasBuildMs'),
-      atlasPatchMs: counterDelta(first, latest, 'atlasPatchMs'),
-      atlasDrawMs: counterDelta(first, latest, 'atlasDrawMs'),
-      imageLoadMs: counterDelta(first, latest, 'imageLoadMs'),
-      imageRequests: counterDelta(first, latest, 'imageRequests'),
-      imageFailures: counterDelta(first, latest, 'imageFailures'),
-      estimatedTextureUploadBytes: counterDelta(first, latest, 'estimatedTextureUploadBytes'),
-      maximumDrawCalls: maximum(this.samples.map(({ stats }) => stats.drawCalls)),
-      maximumTriangles: maximum(this.samples.map(({ stats }) => stats.triangles)),
-      maximumTextureBytes: maximum(this.samples.map(({ stats }) => stats.textureBytes)),
-      renderedItems: latest?.renderedItems ?? 0,
-      submittedItems: latest?.submittedItems ?? 0,
+      atlasBuilds: rendererCounterDelta(first, latest, 'atlasBuilds'),
+      atlasPatches: rendererCounterDelta(first, latest, 'atlasPatches'),
+      atlasDiscardedBuilds: rendererCounterDelta(first, latest, 'atlasDiscardedBuilds'),
+      atlasDiscardedPatches: rendererCounterDelta(first, latest, 'atlasDiscardedPatches'),
+      atlasCellsUpdated: rendererCounterDelta(first, latest, 'atlasCellsUpdated'),
+      atlasBuildMs: rendererCounterDelta(first, latest, 'atlasBuildMs'),
+      atlasPatchMs: rendererCounterDelta(first, latest, 'atlasPatchMs'),
+      atlasDrawMs: rendererCounterDelta(first, latest, 'atlasDrawMs'),
+      imageLoadMs: rendererCounterDelta(first, latest, 'imageLoadMs'),
+      imageRequests: rendererCounterDelta(first, latest, 'imageRequests'),
+      imageFailures: rendererCounterDelta(first, latest, 'imageFailures'),
+      estimatedTextureUploadBytes: rendererCounterDelta(
+        first,
+        latest,
+        'estimatedTextureUploadBytes',
+      ),
+      maximumDrawCalls: maximum(this.samples.map(({ stats }) => stats.render.drawCalls)),
+      maximumTriangles: maximum(this.samples.map(({ stats }) => stats.render.triangles)),
+      maximumTextureBytes: maximum(
+        this.samples.map(({ stats }) => stats.renderer.metrics.textureBytes ?? 0),
+      ),
+      renderedItems: latest?.renderer.instanceCount ?? 0,
+      submittedItems: latest?.renderer.submittedInstanceCount ?? 0,
       visibleItems: latest?.visibleItems ?? 0,
       extensionStats: this.samples.at(-1)?.extensionStats.map((entry) => ({ ...entry })) ?? [],
       samples: this.samples.map((sample) => ({
@@ -329,6 +335,16 @@ function counterDelta(
 ): number {
   const start = typeof first?.[key] === 'number' ? first[key] as number : 0
   const end = typeof latest?.[key] === 'number' ? latest[key] as number : 0
+  return Math.max(0, end - start)
+}
+
+function rendererCounterDelta(
+  first: StagePerformanceStats | undefined,
+  latest: StagePerformanceStats | undefined,
+  key: string,
+): number {
+  const start = first?.renderer.metrics[key] ?? 0
+  const end = latest?.renderer.metrics[key] ?? 0
   return Math.max(0, end - start)
 }
 

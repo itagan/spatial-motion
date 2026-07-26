@@ -3,6 +3,7 @@ import {
   compareBenchmarkResults,
   parseBenchmarkResult,
   MotionStage,
+  cardsRenderer,
   box,
   cone,
   cylinder,
@@ -56,9 +57,9 @@ if (!container) throw new Error('Benchmark stage container not found')
 
 const stage = new MotionStage({
   container,
+  renderer: cardsRenderer({ resolution: 64 }),
   quality: 'auto',
   adaptivePerformance: true,
-  cardResolution: 64,
 })
 let itemCount = 500
 let qualityMode: QualityMode = 'auto'
@@ -284,14 +285,17 @@ function updateMetrics(): void {
     ? extensionStats.map(({ name, enabled, updateTimeP95 }) =>
       `${name}:${enabled ? 'ON' : 'OFF'} ${updateTimeP95.toFixed(2)}`).join(' · ')
     : '--')
-  setText('#metric-items', `${stats.renderedItems} / ${stats.inputItems}`)
-  setText('#metric-submitted', String(stats.submittedItems))
+  setText('#metric-items', `${stats.renderer.instanceCount} / ${stats.inputItems}`)
+  setText('#metric-submitted', String(stats.renderer.submittedInstanceCount))
   setText('#metric-visible', String(stats.visibleItems))
   setText('#metric-effect', stats.effect ? `${stats.effect} / ${stats.activeEffectItems}` : 'layout / 0')
-  setText('#metric-calls', String(stats.drawCalls))
-  setText('#metric-triangles', stats.triangles.toLocaleString())
-  setText('#metric-texture', formatBytes(stats.textureBytes))
-  setText('#metric-atlas-updates', `${stats.atlasBuilds} / ${stats.atlasPatches}`)
+  setText('#metric-calls', String(stats.render.drawCalls))
+  setText('#metric-triangles', stats.render.triangles.toLocaleString())
+  setText('#metric-texture', formatBytes(stats.renderer.metrics.textureBytes ?? 0))
+  setText(
+    '#metric-atlas-updates',
+    `${stats.renderer.metrics.atlasBuilds ?? 0} / ${stats.renderer.metrics.atlasPatches ?? 0}`,
+  )
   setText('#metric-quality', `${stats.quality.toUpperCase()} / ${stats.qualityMode.toUpperCase()}`)
   setText('#metric-context', stats.contextLost ? 'LOST' : 'READY')
 }

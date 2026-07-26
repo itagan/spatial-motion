@@ -10,6 +10,7 @@ const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'
 const packageName = packageJson.name
 const jsGzipBudget = 40 * 1024
 const cardTemplateGzipBudget = 12 * 1024
+const pointsRendererGzipBudget = 12 * 1024
 const tarballBudget = 150 * 1024
 const treeShakenBudget = 8 * 1024
 const keepConsumer = process.env.KEEP_PACKAGE_CONSUMER === '1'
@@ -19,7 +20,27 @@ assert(packageJson.sideEffects === false, 'Package must declare sideEffects: fal
 assert(packageJson.peerDependencies?.three, 'Three.js must be a peer dependency')
 assert(!packageJson.dependencies?.three, 'Three.js must not be a runtime dependency')
 
-const requiredExports = ['.', './layouts', './effects', './performance', './card-template']
+const layoutExports = [
+  './layouts/sphere',
+  './layouts/cylinder',
+  './layouts/grid',
+  './layouts/ring',
+  './layouts/helix',
+  './layouts/cone',
+  './layouts/box',
+  './layouts/scatter',
+]
+const requiredExports = [
+  '.',
+  './core',
+  './layouts',
+  ...layoutExports,
+  './effects',
+  './performance',
+  './card-template',
+  './renderers/cards',
+  './renderers/points',
+]
 for (const exportPath of requiredExports) {
   const declaration = packageJson.exports?.[exportPath]
   assert(declaration?.types && declaration?.import, `Missing typed ESM export: ${exportPath}`)
@@ -31,18 +52,30 @@ const distFiles = await listFiles(join(root, 'dist'))
 const jsFiles = distFiles.filter((path) => path.endsWith('.js'))
 const jsContents = await Promise.all(jsFiles.map((path) => readFile(path)))
 const cardTemplateJsFiles = jsFiles.filter((path) => path.includes(`${join('dist', 'card-template')}/`))
-const coreJsFiles = jsFiles.filter((path) => !cardTemplateJsFiles.includes(path))
+const pointsRendererJsFiles = jsFiles
+  .filter((path) => path.includes(`${join('dist', 'renderers', 'points')}/`))
+const coreJsFiles = jsFiles.filter((path) =>
+  !cardTemplateJsFiles.includes(path) && !pointsRendererJsFiles.includes(path))
 const coreJsContents = await Promise.all(coreJsFiles.map((path) => readFile(path)))
 const cardTemplateJsContents = await Promise.all(cardTemplateJsFiles.map((path) => readFile(path)))
+const pointsRendererJsContents = await Promise.all(
+  pointsRendererJsFiles.map((path) => readFile(path)),
+)
 const jsBytes = jsContents.reduce((total, contents) => total + contents.byteLength, 0)
 const jsGzipBytes = coreJsContents.reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
 const cardTemplateJsGzipBytes = cardTemplateJsContents
+  .reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
+const pointsRendererJsGzipBytes = pointsRendererJsContents
   .reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
 assert(jsBytes < 150 * 1024, `Library JS suggests Three.js was bundled: ${jsBytes} bytes`)
 assert(jsGzipBytes <= jsGzipBudget, `Library JS gzip budget exceeded: ${jsGzipBytes} > ${jsGzipBudget}`)
 assert(
   cardTemplateJsGzipBytes <= cardTemplateGzipBudget,
   `Card template JS gzip budget exceeded: ${cardTemplateJsGzipBytes} > ${cardTemplateGzipBudget}`,
+)
+assert(
+  pointsRendererJsGzipBytes <= pointsRendererGzipBudget,
+  `Points renderer JS gzip budget exceeded: ${pointsRendererJsGzipBytes} > ${pointsRendererGzipBudget}`,
 )
 assert(jsContents.some((contents) => /from\s*["']three["']/.test(contents.toString('utf8'))), 'Library should retain an external Three.js import')
 
@@ -90,11 +123,20 @@ try {
   await writeFile(join(consumer, 'runtime-check.mjs'), `
     import assert from 'node:assert/strict'
     const main = await import('${packageName}')
+    const core = await import('${packageName}/core')
     const layouts = await import('${packageName}/layouts')
+    const sphereLayout = await import('${packageName}/layouts/sphere')
     const effects = await import('${packageName}/effects')
     const performance = await import('${packageName}/performance')
     const cardTemplate = await import('${packageName}/card-template')
+    const cards = await import('${packageName}/renderers/cards')
+    const points = await import('${packageName}/renderers/points')
     assert.equal(typeof main.MotionStage, 'function')
+    assert.equal(typeof core.MotionStage, 'function')
+    assert.equal(typeof core.defineMotionRenderer, 'function')
+    assert.equal(typeof cards.cardsRenderer, 'function')
+    assert.equal(typeof points.pointsRenderer, 'function')
+    assert.equal(typeof sphereLayout.sphere, 'function')
     assert.equal(typeof layouts.sphere, 'function')
     assert.equal(typeof layouts.box, 'function')
     assert.equal(typeof layouts.scatter, 'function')
@@ -110,6 +152,7 @@ try {
     assert.equal(typeof cardTemplate.html, 'function')
     assert.equal(typeof cardTemplate.defineCardTemplate, 'function')
     assert.equal(typeof main.html, 'undefined')
+    assert.equal(typeof main.withMotionRenderer, 'undefined')
     assert.equal(typeof main.MotionStage.prototype.updateItem, 'function')
     assert.equal(typeof main.MotionStage.prototype.updateItemsById, 'function')
     assert.equal(typeof main.MotionStage.prototype.addExtension, 'function')
@@ -119,6 +162,14 @@ try {
     assert.equal(typeof main.easing.sineInOut, 'function')
     await assert.rejects(
       import('${packageName}/renderers/InstancedCardRenderer'),
+      (error) => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+    )
+    await assert.rejects(
+      import('${packageName}/renderers/MotionRenderer'),
+      (error) => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+    )
+    await assert.rejects(
+      import('${packageName}/experimental-renderer'),
       (error) => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED',
     )
   `)
@@ -186,6 +237,7 @@ try {
       type CardStyle,
       type CardTitleStyle,
       type CardContentRenderer,
+      cardsRenderer,
       type MotionItem,
       type MotionItemUpdate,
       type MotionPreference,
@@ -209,8 +261,14 @@ try {
     import { vortex, type EmissionOptions } from '${packageName}/effects'
     import { BenchmarkSession, compareBenchmarkResults, evaluateBenchmarkRegression, parseBenchmarkResult, type BenchmarkRegressionThresholds, type BenchmarkResult } from '${packageName}/performance'
     import { defineCardTemplate, html, type CardTemplateStyle } from '${packageName}/card-template'
-    const items: MotionItem[] = [{ id: 'one' }]
-    declare const stage: MotionStage | undefined
+    import { defineMotionRenderer, type MotionRenderer, type MotionRendererCapabilities, type MotionRendererDescriptor, type MotionRendererFactory, type MotionRendererFactoryContext, type MotionRendererHighlightCapability, type MotionRendererPatchCapability, type MotionRendererPickShape, type MotionRendererResourceRecoveryCapability, type MotionRendererStats, type MotionRendererStreamingEffectsCapability, type MotionRendererViewport, type MotionRendererViewportCapability, type MotionRendererVisualCapability, type MotionRendererVisualState } from '${packageName}/core'
+    import { cardsRenderer as cardsRendererFromSubpath } from '${packageName}/renderers/cards'
+    import {
+      pointsRenderer,
+    } from '${packageName}/renderers/points'
+    type Meta = { color?: string; winner?: boolean }
+    const items: MotionItem<Meta>[] = [{ id: 'one', meta: { winner: true } }]
+    declare const stage: MotionStage<Meta> | undefined
     const emission: EmissionOptions = { mode: 'wave' }
     const motion: MotionPreference = 'auto'
     const titleStyle: CardTitleStyle = { position: 'bottom', fontSizeRatio: 0.12, maxLines: 2 }
@@ -221,30 +279,95 @@ try {
       imagePosition: { x: 0.5, y: 0.25 },
       titleStyle,
     }
-    const resolveCardStyle: ResolveCardStyle = (item) =>
+    const resolveCardStyle: ResolveCardStyle<Meta> = (item) =>
       item.meta ? { borderColor: '#ffd700' } : undefined
     const templateStyle: CardTemplateStyle = { display: 'flex', flexDirection: 'column', gap: 4 }
-    const cardContent: CardContentRenderer = defineCardTemplate((item) => html\`
+    const cardContent: CardContentRenderer<Meta> = defineCardTemplate<Meta>((item) => html\`
       <div style=\${templateStyle}>
         <img src=\${item.image} style="height:70%;object-fit:cover" />
         <span style="font-size:12px;line-clamp:1">\${item.title}</span>
       </div>
     \`)
-    const stageOptions: Omit<MotionStageOptions, 'container'> = {
-      cardAspectRatio: 0.75,
-      cardStyle,
-      resolveCardStyle,
-      cardContent,
-      cardResolution: 96,
-      imageTimeout: 5000,
-      imageConcurrency: 4,
-      imageCacheSize: 64,
+    const stageOptions: Omit<MotionStageOptions<Meta>, 'container'> = {
+      renderer: cardsRendererFromSubpath<Meta>({
+        aspectRatio: 0.75,
+        style: cardStyle,
+        resolveStyle: resolveCardStyle,
+        content: cardContent,
+        resolution: 96,
+        imageTimeout: 5000,
+        imageConcurrency: 4,
+        imageCacheSize: 64,
+      }),
       transition: { duration: 900 },
       onContextChange: (state) => void state,
       keyboardNavigation: true,
       ariaLabel: 'Participants',
     }
-    const updates: MotionItemUpdate[] = [{ id: 'one', patch: { title: 'updated' } }]
+    const rendererVisualState: MotionRendererVisualState = {
+      billboard: 1,
+      hideBackHemisphere: 0,
+      hemisphereEdgeFade: 0,
+    }
+    const rendererPickShape: MotionRendererPickShape = {
+      kind: 'disc',
+      diameter: 0.8,
+      facing: 'camera',
+    }
+    const rendererDescriptor: MotionRendererDescriptor = { itemBounds: rendererPickShape }
+    const rendererViewport: MotionRendererViewport = { width: 100, height: 100, pixelRatio: 1 }
+    const patchCapability: MotionRendererPatchCapability = {
+      async updateItems(nextItems, changedIndices) { void [nextItems, changedIndices]; return true },
+    }
+    const visualCapability: MotionRendererVisualCapability = {
+      setVisualState(state) { void state },
+      prepareVisualTransition(from, to) { void [from, to] },
+    }
+    const highlightCapability: MotionRendererHighlightCapability = {
+      setHighlightIndex(index) { void index },
+    }
+    const viewportCapability: MotionRendererViewportCapability = {
+      resize(viewport) { void viewport },
+    }
+    const recoveryCapability: MotionRendererResourceRecoveryCapability = {
+      refreshResources() {},
+    }
+    const streamingCapability: MotionRendererStreamingEffectsCapability = {
+      enable(data) { void data },
+      disable() {},
+      setTime(elapsedSeconds) { void elapsedSeconds },
+    }
+    const rendererCapabilities: MotionRendererCapabilities = {
+      patch: patchCapability,
+      visual: visualCapability,
+      highlight: highlightCapability,
+      viewport: viewportCapability,
+      resourceRecovery: recoveryCapability,
+      streamingEffects: streamingCapability,
+    }
+    const rendererStats: MotionRendererStats = {
+      instanceCount: 10,
+      submittedInstanceCount: 10,
+      gpuBytes: 1024,
+      metrics: { customUpdates: 2 },
+    }
+    declare const renderer: MotionRenderer
+    declare const rendererContext: MotionRendererFactoryContext
+    const rendererFactory: MotionRendererFactory = defineMotionRenderer((context) => {
+      void [context, rendererContext]
+      return renderer
+    })
+    declare const container: HTMLElement
+    const pointStageOptions: MotionStageOptions<Meta> = {
+      container,
+      quality: 'medium',
+      renderer: pointsRenderer<Meta>({
+        size: 0.8,
+        resolveColor: (item) =>
+          item.meta?.color ?? '#67e8f9',
+      }),
+    }
+    const updates: MotionItemUpdate<Meta>[] = [{ id: 'one', patch: { title: 'updated' } }]
     declare const benchmark: BenchmarkResult
     const environment: StagePerformanceEnvironment | undefined = stage?.getPerformanceEnvironment()
     const comparison = compareBenchmarkResults(benchmark, benchmark)
@@ -273,11 +396,14 @@ try {
     const transitionHandle: StageTransitionHandle | undefined = stage?.startTransition(sphere(), { duration: 100, signal: new AbortController().signal })
     const transitionResult: Promise<StageTransitionResult> | undefined = transitionHandle?.finished
     const extensionStats: StageExtensionStats[] | undefined = stage?.getExtensionStats()
+    const rendererGpuBytes: number | undefined = stage?.getPerformanceStats().renderer.gpuBytes
+    const rendererMetrics: Readonly<Record<string, number>> | undefined =
+      stage?.getPerformanceStats().renderer.metrics
     const subpathConfig = parseLayoutConfigFromSubpath(JSON.stringify(layoutConfig)) satisfies SubpathLayoutConfig
     const configuredLayouts = [createLayout(layoutConfig), createLayoutFromSubpath(subpathConfig)]
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
-    void [items, stage, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions]
+    void [items, stage, cardsRenderer, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, rendererGpuBytes, rendererMetrics, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions, rendererCapabilities, rendererVisualState, rendererPickShape, rendererDescriptor, rendererViewport, rendererStats, rendererFactory, pointStageOptions]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
@@ -295,7 +421,7 @@ try {
 
   await writeFile(join(consumer, 'index.html'), '<div id="result"></div><script type="module" src="/tree.ts"></script>')
   await writeFile(join(consumer, 'tree.ts'), `
-    import { sphere } from '${packageName}'
+    import { sphere } from '${packageName}/layouts/sphere'
     document.querySelector('#result').textContent = String(sphere().calculate(3, { width: 1, height: 1 }).length)
   `)
   run(process.execPath, [join(root, 'node_modules/vite/bin/vite.js'), 'build'], consumer)
@@ -309,12 +435,37 @@ try {
   assert(!consumerJs.includes('WebGLRenderer'), 'Layout-only bundle contains the WebGL renderer')
   assert(!consumerJs.includes('effectMode'), 'Layout-only bundle contains streaming effect shaders')
 
+  await writeFile(join(consumer, 'core.html'), '<div id="result"></div><script type="module" src="/core.ts"></script>')
+  await writeFile(join(consumer, 'core.ts'), `
+    import { MotionStage, defineMotionRenderer } from '${packageName}/core'
+    document.querySelector('#result').textContent =
+      String(typeof MotionStage === 'function' && typeof defineMotionRenderer === 'function')
+  `)
+  await writeFile(join(consumer, 'vite.core.config.mjs'), `
+    export default { build: { outDir: 'dist-core', emptyOutDir: true, rollupOptions: { input: 'core.html' } } }
+  `)
+  run(process.execPath, [
+    join(root, 'node_modules/vite/bin/vite.js'),
+    'build',
+    '--config',
+    'vite.core.config.mjs',
+  ], consumer)
+  const coreConsumerJs = (await Promise.all(
+    (await listFiles(join(consumer, 'dist-core')))
+      .filter((path) => path.endsWith('.js'))
+      .map((path) => readFile(path, 'utf8')),
+  )).join('\n')
+  assert(!coreConsumerJs.includes('SpatialMotionCards'), 'Core bundle contains the Cards renderer')
+  assert(!coreConsumerJs.includes('SpatialMotionPoints'), 'Core bundle contains the Points renderer')
+  assert(!coreConsumerJs.includes('atlasBuilds'), 'Core bundle contains Atlas implementation metrics')
+  assert(!coreConsumerJs.includes('fibonacci'), 'Core bundle contains the Sphere layout')
+
   await writeFile(join(consumer, 'stage.html'), `
     <style>html,body,#stage{width:100%;height:100%;margin:0;background:#05070d}#result{position:fixed;z-index:2;color:white}</style>
     <pre id="result">starting</pre><div id="stage"></div><script type="module" src="/stage.ts"></script>
   `)
   await writeFile(join(consumer, 'stage.ts'), `
-    import { MotionStage, sphere, type MotionItem, type StageExtension } from '${packageName}'
+    import { MotionStage, cardsRenderer, sphere, type MotionItem, type StageExtension } from '${packageName}'
     import { defineCardTemplate, html } from '${packageName}/card-template'
     import { Object3D } from 'three'
     const container = document.querySelector<HTMLElement>('#stage')!
@@ -322,16 +473,18 @@ try {
     const items: MotionItem[] = Array.from({ length: 12 }, (_, index) => ({ id: String(index), title: String(index) }))
     const stage = new MotionStage({
       container,
+      renderer: cardsRenderer({
+        style: { shape: 'rounded', cornerRadius: 8 },
+        content: defineCardTemplate((item) => html\`
+          <div style="display:flex;flex-direction:column">
+            <span>\${item.title}</span>
+          </div>
+        \`),
+        resolution: 64,
+        imageTimeout: 1000,
+      }),
       quality: 'low',
       adaptivePerformance: false,
-      cardStyle: { shape: 'rounded', cornerRadius: 8 },
-      cardContent: defineCardTemplate((item) => html\`
-        <div style="display:flex;flex-direction:column">
-          <span>\${item.title}</span>
-        </div>
-      \`),
-      cardResolution: 64,
-      imageTimeout: 1000,
       transition: { duration: 0 },
     })
     await stage.setItems(items)
@@ -351,7 +504,7 @@ try {
     const environment = stage.getPerformanceEnvironment()
     const extensionStats = stage.getExtensionStats()
     stage.destroy()
-    const smoke = { ready: true, renderedItems: stats.renderedItems, submittedItems: stats.submittedItems, extensions: stats.extensions, extensionStats: extensionStats.length, drawCalls: stats.drawCalls, contextLost: stats.contextLost, p95: stats.frameTimeP95, maxTextureSize: environment.maxTextureSize, destroyed: !container.querySelector('canvas') }
+    const smoke = { ready: true, renderedItems: stats.renderer.instanceCount, submittedItems: stats.renderer.submittedInstanceCount, extensions: stats.extensions, extensionStats: extensionStats.length, drawCalls: stats.render.drawCalls, contextLost: stats.contextLost, p95: stats.frameTimeP95, maxTextureSize: environment.maxTextureSize, destroyed: !container.querySelector('canvas') }
     document.documentElement.dataset.packageSmoke = smoke.destroyed ? 'passed' : 'failed'
     result.textContent = JSON.stringify(smoke)
   `)
@@ -373,7 +526,9 @@ try {
     libraryJsBytes: jsBytes,
     libraryJsGzipBytes: jsGzipBytes,
     cardTemplateJsGzipBytes,
+    pointsRendererJsGzipBytes,
     layoutConsumerBytes: Buffer.byteLength(consumerJs),
+    coreConsumerBytes: Buffer.byteLength(coreConsumerJs),
     consumerRuntime: 'passed',
     consumerTypes: 'passed',
     internalExportBoundary: 'passed',

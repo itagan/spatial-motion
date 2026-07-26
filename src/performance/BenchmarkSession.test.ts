@@ -9,7 +9,7 @@ import {
 } from './BenchmarkSession'
 
 function stats(overrides: Partial<StagePerformanceStats> = {}): StagePerformanceStats {
-  return {
+  const base: StagePerformanceStats = {
     fps: 60,
     averageFrameMs: 16.67,
     frameTimeP50: 16.5,
@@ -23,12 +23,28 @@ function stats(overrides: Partial<StagePerformanceStats> = {}): StagePerformance
     sampleCount: 120,
     qualityMode: 'high',
     inputItems: 600,
-    renderedItems: 600,
-    submittedItems: 600,
     visibleItems: 600,
-    drawCalls: 1,
-    triangles: 1200,
-    textureBytes: 2_000_000,
+    render: { drawCalls: 1, triangles: 1200 },
+    renderer: {
+      instanceCount: 600,
+      submittedInstanceCount: 600,
+      gpuBytes: 2_000_000,
+      metrics: {
+        textureBytes: 2_000_000,
+        atlasBuilds: 1,
+        atlasPatches: 0,
+        atlasDiscardedBuilds: 0,
+        atlasDiscardedPatches: 0,
+        atlasCellsUpdated: 600,
+        atlasBuildMs: 10,
+        atlasPatchMs: 0,
+        atlasDrawMs: 2,
+        imageLoadMs: 0,
+        imageRequests: 0,
+        imageFailures: 0,
+        estimatedTextureUploadBytes: 2_000_000,
+      },
+    },
     pixelRatio: 1.5,
     paused: false,
     effect: null,
@@ -40,21 +56,18 @@ function stats(overrides: Partial<StagePerformanceStats> = {}): StagePerformance
     transformCalculations: 0,
     pickingMs: 0,
     pickOperations: 0,
-    atlasBuilds: 1,
-    atlasPatches: 0,
-    atlasDiscardedBuilds: 0,
-    atlasDiscardedPatches: 0,
-    atlasCellsUpdated: 600,
-    atlasBuildMs: 10,
-    atlasPatchMs: 0,
-    atlasDrawMs: 2,
-    imageLoadMs: 0,
-    imageRequests: 0,
-    imageFailures: 0,
-    estimatedTextureUploadBytes: 2_000_000,
     extensions: 0,
     extensionUpdateMs: 0,
+  }
+  return {
+    ...base,
     ...overrides,
+    render: { ...base.render, ...overrides.render },
+    renderer: {
+      ...base.renderer,
+      ...overrides.renderer,
+      metrics: { ...base.renderer.metrics, ...overrides.renderer?.metrics },
+    },
   }
 }
 
@@ -91,12 +104,18 @@ describe('BenchmarkSession', () => {
       extensionUpdateMs: 0.3,
       transformCalculationMs: 4,
       transformCalculations: 2,
-      atlasPatches: 1,
-      atlasCellsUpdated: 601,
-      atlasPatchMs: 3,
-      estimatedTextureUploadBytes: 4_000_000,
-      drawCalls: 2,
-      triangles: 1400,
+      renderer: {
+        instanceCount: 600,
+        submittedInstanceCount: 600,
+        gpuBytes: 2_000_000,
+        metrics: {
+          atlasPatches: 1,
+          atlasCellsUpdated: 601,
+          atlasPatchMs: 3,
+          estimatedTextureUploadBytes: 4_000_000,
+        },
+      },
+      render: { drawCalls: 2, triangles: 1400 },
     }), 1100, extensionStats)
 
     const result = session.finish(1600)

@@ -1,4 +1,5 @@
 import type { Layout, Transform } from '../core/types.js'
+import { defineLayout } from './defineLayout.js'
 
 export interface HelixOptions {
   radius?: number
@@ -18,7 +19,7 @@ export function helix(options: HelixOptions = {}): Layout {
   const direction = options.clockwise ? -1 : 1
   const orientation = options.orientation ?? 'surface'
 
-  return {
+  return defineLayout({
     name: 'helix',
     orientation,
     calculate(count): Transform[] {
@@ -44,5 +45,5 @@ export function helix(options: HelixOptions = {}): Layout {
         }
       })
     },
-  }
+  })
 }

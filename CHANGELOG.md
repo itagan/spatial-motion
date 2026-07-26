@@ -7,8 +7,10 @@
 ### Added
 
 - Sphere 新增 `fit: 'contain'`、`viewportPadding`、`startAngle` 和 `edgeFade`，参数实验室的经典头像球体默认完整适配视口、避开精确极点并启用轻量轮廓淡出。
-- 卡片增加 `imageFit`、焦点定位、内容留白、覆盖层、多行标题、逐卡 `resolveCardStyle()` 和 Stage 级 `cardAspectRatio`；矩形卡片继续使用同一图集、实例 Mesh 和 Draw Call。
-- 新增按需 `card-template` 入口、`html` tagged template、`defineCardTemplate()`、受控 HTML/CSS 子集和 `cardContent` 协议；模板图片复用现有 Atlas 资源管线。
+- 卡片增加图片定位、多行标题、逐卡样式和统一宽高比，并收口为稳定 `cardsRenderer()` 配置。
+- 新增按需 `card-template` 入口、`html` tagged template、`defineCardTemplate()` 和受控 HTML/CSS 子集；模板图片复用 Atlas 资源管线。
+- `MotionRenderer` 成为稳定 Core 契约，新增 `core`、Cards、Points 和逐布局按需入口。
+- 新增 `defineLayout()`，为自定义布局提供冻结对象与 Transform 输出验证。
 
 ### Fixed
 
@@ -20,8 +22,12 @@
 ### Compatibility
 
 - 发布构建改用 Terser 保持既有 40 KB gzip 预算；本地继续生成隐藏 JavaScript source map，但 npm tarball 不再携带 `.js.map`，类型声明和运行时导出不变。
-- 主库继续受 40 KB gzip 门禁约束，按需模板入口单独限制为 12 KB；`cardContent` 与 `drawCard` 互斥，旧配置和默认视觉不变。
+- 主库继续受 40 KB gzip 门禁约束，模板与 Points 入口分别限制为 12 KB；Cards `content` 与 `draw` 互斥。
 - Vanilla 卡片示例将内容配方与 `1:1`、`3:4`、`16:9` 比例拆分，产品、人物和指标展示明确为可复制源码而非公共预设，并可展开复制当前 ES6 或 Canvas 写法；旧 `card=` 演示链接继续映射到新参数。
+- 未发布 API 直接收敛：`MotionStage` 强制显式传入 Renderer，删除 Symbol 注入、实验入口、Cards Stage 字段及旧特效/布局别名。
+- `MotionItem<TMeta>`、`MotionStage<TMeta>`、Renderer 与回调统一泛型 meta；性能统计拆分为通用 `render` 与 `renderer`。
+- 构造期 `items` 现在实际进入 Renderer，并通过 `stage.ready` 暴露初始化完成状态。
+- `LayoutContext` 统一为 `itemWidth/itemHeight`，不保留 `cardWidth/cardHeight`。
 
 ## 1.15.0 - 2026-07-19
 

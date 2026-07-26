@@ -130,7 +130,7 @@ Sphere 的响应式半径、起始经度和轮廓淡出仍只在布局计算或�
 
 ## 卡片内容与统一宽高比
 
-卡片宽高比在 Stage 初始化时归一化到最长边为 1；矩形 PlaneGeometry、Atlas 单元、UV、局部行上传和拾取四边形共享同一宽高，不增加实例属性、Mesh 或 Draw Call。`cardResolution` 继续代表最长像素边，图集按单元比例选择行列并同时遵守最大纹理宽高。
+卡片宽高比在 Cards Renderer 初始化时归一化到最长边为 1；矩形 PlaneGeometry、Atlas 单元、UV、局部行上传和拾取四边形共享同一宽高，不增加实例属性、Mesh 或 Draw Call。`resolution` 代表最长像素边，图集按单元比例选择行列并同时遵守最大纹理宽高。
 
 内置 Canvas 绘制增加图片 fit/焦点、相对留白、覆盖层和多行标题；逐卡样式只在图集生成或 patch 阶段解析，不进入 Stage RAF。最终浏览器性能和包体积数值以本次完整验收结果为准。
 
@@ -151,3 +151,15 @@ Sphere 的响应式半径、起始经度和轮廓淡出仍只在布局计算或�
 2026-07-26 Chromium 150 / Apple M4 实测：等价 2000 项指标卡的三次 Atlas build 中位数，模板为 410.9ms、手写 Canvas 为 380.2ms，模板层增加约 8.1%，低于 15% 门槛。模板单卡更新产生 1 个 patch、约 7.5ms patch 累计耗时，Stage 内只有一个 Canvas 子节点。
 
 默认 Cards 的 2000/high/3 秒 steady 为 60.0 FPS、P95 18.50ms；transition-stress 为 60.0 FPS、P95 18.60ms、4 次 patch、0 个 24/33/50ms 长帧和 1 Draw Call。相对卡片宽高比阶段的 17.80/18.20ms 基线分别回退约 3.9%/2.2%，均低于 10% 门槛。
+
+## 稳定批量渲染器协议
+
+Stage 持有专属内容 `Group` 并通过稳定 `MotionRenderer` 协议编排显式 Renderer；整体旋转、稳定 id、布局/过渡、质量、遮挡拾取和 RAF 仍由 Stage 管理。Cards 配置集中在 `cardsRenderer()`，Core 只读取通用 descriptor、核心生命周期与可选能力。
+
+核心协议不再要求空实现：patch、visual、highlight、viewport、resource recovery 和 streaming effects 使用独立能力对象。缺少 patch 时完整重设数据并按 token 恢复当前过渡、视觉、质量和特效状态；无边界描述时退出指针拾取。测试夹具使用真实单 `LineSegments` 最小实现与单 `InstancedMesh` 部分能力实现，证明第三、第四种批量对象无需修改 Stage。
+
+按需 `pointsRenderer()` 使用单个 `THREE.Points`、`BufferGeometry` 和 `ShaderMaterial`，位置、缩放与透明度在 GPU 插值，质量隐藏在顶点阶段完成。容量变化替换并立即释放旧 Geometry，局部数据 patch 只更新颜色范围；通用统计报告实际 Buffer 字节，Atlas、纹理和图片指标归零。不支持 streaming effects 时只计算时间 0 的静态首帧，避免建立无效逐帧状态。
+
+API 收敛后的真实包检查结果为主库 40,379 bytes gzip、Points 2,556 bytes gzip、模板 5,820 bytes gzip、tarball 79,972 bytes、layout-only 5,598 bytes，全部保持在独立预算内。严格 TypeScript 与 Node ESM 消费验证 Core、Cards、Points 和逐布局入口可用，内部深层路径继续被拦截。
+
+2026-07-26 Chromium 150 / Apple M4 / 1265×633 协议加固回归：默认 Cards 的 2000/high/3 秒 steady 为 60.0 FPS、P95 17.34ms；transition-stress 为 60.0 FPS、P95 17.50ms、4 次中断/patch。两者均为 0 个 33ms 长帧、1 Draw Call，相对协议前 18.50/18.60ms 基线没有回退。Points 的 500/1000/2000 项球体与圆柱、快速中断、拾取和暂停恢复均保持单 Canvas、主体 1 Draw Call，控制台无 error。

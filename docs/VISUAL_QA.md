@@ -117,3 +117,9 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 2026-07-26 已完成 ES6 模板桌面浏览器验收：500 个 1:1 产品模板、1000 个 3:4 人物模板和 2000 个 16:9 指标模板均正确绘制，保持 60 FPS、1 Draw Call；球体/圆柱快速中断与整卡拾取通过。2000 项模板单卡数据更新只产生 1 个 Atlas patch，舞台内只有 1 个 Canvas 子节点，没有逐卡 DOM。
 
 2026-07-26 已完成 Vanilla 卡片入口收敛验收：内容配方与 `1:1`、`3:4`、`16:9` 比例独立选择，选中状态和新 `content` / `aspect` URL 可恢复；旧 `card=template-product` 首次操作会原子迁移并保留当前内容与比例。基础、产品和 Canvas 路径在 1000 项下均保持单 Canvas、1 Draw Call，控制台无 error；产品、人物和指标在界面与文档中明确为源码配方而非公共预设。源码面板会随五种内容模式切换，分别展示基础配置、三种 ES6 tagged template 和底层 `drawCard()` 写法。
+
+2026-07-26 已完成批量渲染器桌面验收：Points 的 500/1000/2000 项均保持单 Canvas、1 Draw Call，球体/圆柱快速中断、圆形拾取、暂停恢复和源码面板通过，Cards 专属内容/比例控件在 Points 模式正确禁用。默认 Cards 2000/high 的 steady 与 transition-stress P95 均为 18.25ms、0 个 33ms 长帧、1 Draw Call，压力场景完成 4 次中断/patch；浏览器控制台无 error。
+
+2026-07-26 已完成协议加固复验：Points 的 500/1000/2000 项、球体/圆柱快速中断、圆形拾取和暂停恢复继续保持单 Canvas、1 Draw Call；Cards 500/2000 项与产品横卡回归正常。默认 Cards 2000/high 的 steady / transition-stress P95 分别为 17.34/17.50ms，均为 60 FPS、0 个 33ms 长帧、1 Draw Call，压力场景完成 4 次中断/patch，控制台无 error。
+
+2026-07-26 已完成未发布 API 收敛复验：显式 Cards/Points Renderer 下，Points 1000/2000 与 Cards 500/2000 均保持单 Canvas、60 FPS、主体 1 Draw Call；Points 2000 的球体/圆柱连续快速中断稳定，Cards 2000 产品横卡 Atlas build 完成后恢复 60 FPS，控制台无 error。

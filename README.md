@@ -30,6 +30,7 @@
 - ResizeObserver 响应式画布及完整资源释放
 - 圆角、圆形、边框与背景卡片样式，以及安全的 Canvas 自定义绘制
 - 按需 ES6 tagged template 卡片内容，使用受控 HTML/CSS 子集并继续写入同一纹理图集
+- 稳定按需批量渲染器协议及单 Draw Call `pointsRenderer()`
 - 按稳定 `id` 局部重绘单张或多张图集卡片
 - 统一的平滑特效运动曲线、mipmap 图集采样和 GPU 纹理尺寸保护
 - WebGL context loss 暂停/恢复、图片超时回退和长时间压力基准
@@ -108,17 +109,19 @@ npm run dev:examples
 ## 基础使用
 
 ```ts
-import { MotionStage, cylinder, easing, sphere } from '@itagan/spatial-motion'
+import { MotionStage, cardsRenderer, cylinder, easing, sphere } from '@itagan/spatial-motion'
 
 const stage = new MotionStage({
   container: document.querySelector('#stage')!,
+  renderer: cardsRenderer({
+    resolution: 64,
+    imageTimeout: 10_000,
+    imageConcurrency: 6,
+    imageCacheSize: 128,
+  }),
   quality: 'auto',
   adaptivePerformance: true,
   transition: { duration: 1200, easing: easing.sineInOut },
-  cardResolution: 64,
-  imageTimeout: 10_000,
-  imageConcurrency: 6,
-  imageCacheSize: 128,
   onContextChange(state) {
     console.log('WebGL context:', state)
   },
@@ -126,6 +129,7 @@ const stage = new MotionStage({
     console.log(quality, stats.fps)
   },
 })
+await stage.ready // 仅在构造参数提供 items 时需要等待初始 Renderer 数据准备
 
 await stage.setItems(participants)
 stage.autoRotate({ y: 0.25 })
@@ -149,11 +153,14 @@ await stage.to(grid(), { signal: controller.signal })
 
 ```ts
 import { sphere, cylinder } from '@itagan/spatial-motion/layouts'
+import { sphere as sphereOnly } from '@itagan/spatial-motion/layouts/sphere'
+import { MotionStage } from '@itagan/spatial-motion/core'
+import { cardsRenderer } from '@itagan/spatial-motion/renderers/cards'
 import { tunnel, vortex } from '@itagan/spatial-motion/effects'
 import { BenchmarkSession, compareBenchmarkResults } from '@itagan/spatial-motion/performance'
 ```
 
-仅主入口、`layouts`、`effects`、`performance` 和 `package.json` 是稳定导出路径。`renderers` 等内部目录受 `exports` 限制，不属于公共 API。
+`core`、Cards/Points Renderer、布局集合与逐布局、`effects`、`performance`、`card-template` 和 `package.json` 都是稳定导出路径。根入口是便利聚合入口；需要严格控制产物时使用子路径。
 
 可序列化布局配置：
 
@@ -245,6 +252,7 @@ handle.remove() // 幂等；同时 abort signal、移除隔离 Group 并 dispose
 ```ts
 const stage = new MotionStage({
   container,
+  renderer: cardsRenderer(),
   motionPreference: 'auto', // 跟随 prefers-reduced-motion
   hoverEffect: 'highlight',
   onItemHover(item, index) {
@@ -298,8 +306,9 @@ await stage.updateItemsById([
 ```ts
 const stage = new MotionStage({
   container,
-  cardAspectRatio: 3 / 4, // Stage 内所有卡片共用，最长边仍为 1
-  cardStyle: {
+  renderer: cardsRenderer({
+    aspectRatio: 3 / 4, // Stage 内所有卡片共用，最长边仍为 1
+    style: {
     shape: 'rounded', // square | rounded | circle
     cornerRadius: 10,
     borderWidth: 2,
@@ -317,13 +326,13 @@ const stage = new MotionStage({
       fontSizeRatio: 0.12,
       maxLines: 2,
     },
-  },
-  resolveCardStyle(item) {
+    },
+    resolveStyle(item) {
     return (item.meta as { winner?: boolean }).winner
       ? { borderColor: '#ffd700', borderWidth: 4 }
       : undefined
   },
-  async drawCard(context, item, bounds, resolvedStyle) {
+    async draw(context, item, bounds, resolvedStyle) {
     context.fillStyle = '#16213e'
     context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height)
     context.fillStyle = '#fff'
@@ -333,18 +342,19 @@ const stage = new MotionStage({
       bounds.y + bounds.height / 2,
     )
     console.log(resolvedStyle.borderColor)
-  },
+    },
+  }),
 })
 ```
 
-不提供 `drawCard` 时，内置绘制器负责图片裁切、焦点定位、覆盖层和最多三行的标题排版；未设置新增字段时保持旧的方形卡片视觉。`resolveCardStyle()` 在 Stage 样式之上按卡片合并，嵌套 `imagePosition` 和 `titleStyle` 也按字段覆盖，异常时回退 Stage 样式。
+不提供 `draw` 时，内置绘制器负责图片裁切、焦点定位、覆盖层和最多三行的标题排版。`resolveStyle()` 在 Renderer 基础样式之上按卡片合并，嵌套 `imagePosition` 和 `titleStyle` 也按字段覆盖。
 
 绘制回调会在隔离的 Canvas 状态和卡片裁剪区域内执行；它替换内置内容，但仍沿用已解析的形状裁剪、背景和边框。抛错时回退为内置卡片。异步绘制同样受更新 token 保护，旧请求完成后不会覆盖新内容。核心库不会执行 HTML 模板或挂载框架组件。
 
 不希望直接编写 Canvas 时，可按需导入安全的 ES6 模板子入口：
 
 ```ts
-import { MotionStage } from '@itagan/spatial-motion'
+import { MotionStage, cardsRenderer } from '@itagan/spatial-motion'
 import { defineCardTemplate, html } from '@itagan/spatial-motion/card-template'
 
 const cardContent = defineCardTemplate<{ price: number }>(
@@ -371,18 +381,45 @@ const cardContent = defineCardTemplate<{ price: number }>(
   },
 )
 
-const stage = new MotionStage({ container, cardContent })
+const stage = new MotionStage({
+  container,
+  renderer: cardsRenderer({ content: cardContent }),
+})
 ```
 
-模板支持 `div`、`span`、`img`、`br`、嵌套条件/数组、scoped class、inline style 与常用 flex/定位/图文样式。它不会创建 DOM、执行脚本或解析任意 HTML；未知标签或样式会回退内置卡片。模板图片继续使用 Stage 的去重、并发、超时、LRU 与取消机制。`cardContent` 和 `drawCard` 是互斥的静态 Stage 配置。
+模板支持 `div`、`span`、`img`、`br`、嵌套条件/数组、scoped class、inline style 与常用 flex/定位/图文样式。它不会创建 DOM、执行脚本或解析任意 HTML；未知标签或样式会回退内置卡片。模板图片继续使用 Cards Renderer 的去重、并发、超时、LRU 与取消机制。`content` 和 `draw` 互斥。
 
-卡片内容能力按使用成本分为四层：内置 `cardStyle` / `resolveCardStyle()` 负责常见图片与标题调整，`defineCardTemplate()` 是推荐的组合内容方式，`drawCard()` 保留完整 Canvas 逃生口，直接实现 `CardContentRenderer` 只面向需要自主管理准备数据和图片资源的高级场景。Vanilla 示例中的产品、人物和指标卡是可复制的源码配方，不是随包发布或承诺兼容的官方预设；卡片比例也与内容配方独立选择。示例页可展开并复制当前基础配置、ES6 模板或 Canvas 写法。
+卡片内容能力按使用成本分为四层：`style` / `resolveStyle()` 负责常见图文调整，`defineCardTemplate()` 是推荐的组合内容方式，`draw()` 保留完整 Canvas 逃生口，直接实现 `CardContentRenderer` 面向高级资源准备场景。Vanilla 中的产品、人物和指标卡是可复制源码配方，不是官方预设。
+
+## 批量渲染器
+
+需要用同一套布局、过渡、质量、旋转和交互编排非卡片批量对象时，可显式导入 Points 入口：
+
+```ts
+import { MotionStage } from '@itagan/spatial-motion/core'
+import { pointsRenderer } from '@itagan/spatial-motion/renderers/points'
+
+const stage = new MotionStage({
+  container,
+  renderer: pointsRenderer({
+    size: 0.8,
+    resolveColor: (item) => item.meta?.color ?? '#67e8f9',
+  }),
+})
+
+await stage.setItems(items)
+```
+
+`pointsRenderer()` 只创建一个 `THREE.Points`、Geometry 和 Material，支持布局插值、质量裁剪、hover/focus、圆形拾取与资源恢复，不创建 Atlas。自定义 Factory 只能获得隔离 `Group`、GPU 限制和销毁信号，不能接管 Scene、Camera、WebGLRenderer 或 RAF。不支持流式特效的渲染器会稳定停在特效时间 0 的静态首帧。
+
+自定义 `MotionRenderer` 只需实现数据、Transform、过渡进度、质量可见比例、统计与销毁；局部 patch、视觉状态、高亮、viewport、资源恢复和流式特效通过 `capabilities` 按需声明。`descriptor.itemBounds` 可使用 quad、disc 或 `null`。`getPerformanceStats()` 将场景提交数据放在 `render`，将实例、GPU 字节与 Renderer 专属指标放在 `renderer`。
 
 拾取与聚焦：
 
 ```ts
 const stage = new MotionStage({
   container,
+  renderer: cardsRenderer(),
   onItemClick(item, index) {
     void stage.focusItems([item.id])
   },
@@ -462,7 +499,7 @@ npx spatial-motion-benchmark baseline.json current.json --preset transition-stre
 默认阈值覆盖 FPS、最大帧时间、P95/P99、33ms 长帧、Stage CPU、WebGL 提交、Atlas build/patch、纹理内存与估算上传量。配置不兼容或超过阈值时命令返回非零退出码；自定义阈值可对每个指标设置 `maxRegressionPercent`、`maxRegressionAbsolute` 或两者。随包提供的六个 `--preset` 覆盖 100/500/1000/2000 实例、low/medium/high/auto 质量和四类固定场景，CLI 会拒绝与预设不一致的结果。
 
 重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。同一 JavaScript turn 内的稳定 id 更新会合并；已初始化图集只上传变化单元对应的数据行。
-图集默认使用 4px 隔离、mipmap 和最高 4x 各向异性采样；`cardResolution` 会被限制在 32–256px，并在实例规模超过设备 `MAX_TEXTURE_SIZE` 时自动降低实际单元分辨率，避免创建无效纹理。首次上传和 WebGL context 恢复仍使用完整图集上传。
+图集默认使用 4px 隔离、mipmap 和最高 4x 各向异性采样；Cards `resolution` 会被限制在 32–256px，并在实例规模超过设备 `MAX_TEXTURE_SIZE` 时自动降低实际单元分辨率，避免创建无效纹理。首次上传和 WebGL context 恢复仍使用完整图集上传。
 
 ## 包构建与体积基准
 
@@ -470,10 +507,11 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| 主库 JavaScript gzip | ≤ 40 KB | 36.7 KB（37,537 bytes） |
+| 主库 JavaScript gzip | ≤ 40 KB | 39.4 KB（40,379 bytes） |
 | 按需 card-template gzip | ≤ 12 KB | 5.7 KB（5,820 bytes） |
-| npm tarball | ≤ 150 KB | 约 75.0 KB |
-| 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 3.9 KB（4,012 bytes） |
+| 按需 Points Renderer gzip | ≤ 12 KB | 2.5 KB（2,556 bytes） |
+| npm tarball | ≤ 150 KB | 78.1 KB（79,972 bytes） |
+| 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 5.5 KB（5,598 bytes） |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。
 
@@ -553,7 +591,7 @@ await stage.enterEffect(radialBurst({
 }), { duration: 1100 })
 ```
 
-`enterTunnel()` 和 `enterLinearShooter()` 继续作为兼容别名保留。所有内置流式特效使用统一的四分量路径缓冲和三组参数 uniform，切换效果不会创建新的 Mesh 或增加 Draw Call。
+所有内置流式特效统一通过 `enterEffect()` 进入，并使用同一套四分量路径缓冲和三组参数 uniform；切换效果不会创建新的 Mesh 或增加 Draw Call。
 
 球体头像朝向：
 
@@ -668,6 +706,7 @@ src/
 ├── layouts/       无渲染依赖的布局算法
 ├── effects/       隧道等固定对象池流式效果
 ├── renderers/     WebGL 实例渲染与纹理图集
+├── renderers/     稳定批量渲染协议、Cards、Points 与纹理图集
 └── performance/   设备质量检测与性能配置
 demo/              性能和连续动画演示
 examples/          Vanilla、Three.js extension 和 GSAP 单场景示例

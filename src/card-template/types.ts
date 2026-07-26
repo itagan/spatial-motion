@@ -59,8 +59,7 @@ export interface CardTemplateResult {
   readonly [templateResultBrand]: true
 }
 
-export type CardTemplateItem<TMeta = unknown> =
-  Omit<MotionItem, 'meta'> & { meta?: TMeta }
+export type CardTemplateItem<TMeta = unknown> = MotionItem<TMeta>
 
 export interface CardTemplateHelpers {
   when(
@@ -84,9 +83,9 @@ export interface CardTemplateHelpers {
   linearGradient(angle: number | string, ...colors: string[]): string
 }
 
-export interface DefineCardTemplateOptions {
+export interface DefineCardTemplateOptions<TMeta = unknown> {
   styles?: Readonly<Record<string, Readonly<CardTemplateStyle>>>
-  onError?: (error: CardTemplateError, item: Readonly<MotionItem>) => void
+  onError?: (error: CardTemplateError, item: Readonly<MotionItem<TMeta>>) => void
 }
 
 export class CardTemplateError extends Error {

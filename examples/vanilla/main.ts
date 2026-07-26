@@ -1,4 +1,11 @@
-import { MotionStage, cylinder, sphere } from '@itagan/spatial-motion'
+import {
+  MotionStage,
+  cardsRenderer,
+  cylinder,
+  pointsRenderer,
+  sphere,
+  type MotionStageOptions,
+} from '@itagan/spatial-motion'
 import { defineCardTemplate, html } from '@itagan/spatial-motion/card-template'
 import '../shared.css'
 import { recipeSources } from './recipeSources'
@@ -12,9 +19,16 @@ const search = new URLSearchParams(location.search)
 const requestedCount = Number(search.get('count'))
 const patchDemo = search.get('patch') === '1'
 const itemCount = [500, 1000, 2000].includes(requestedCount) ? requestedCount : 120
+const rendererMode = search.get('renderer') === 'points' ? 'points' : 'cards'
 
 type ContentMode = 'default' | 'product' | 'profile' | 'metric' | 'canvas'
 type AspectMode = 'square' | 'portrait' | 'landscape'
+interface DemoMeta {
+  featured: boolean
+  price: number
+  role: string
+  score: number
+}
 
 const legacyModes: Record<string, { content: ContentMode; aspect: AspectMode }> = {
   avatar: { content: 'default', aspect: 'square' },
@@ -122,11 +136,11 @@ const contentStyles = {
 const cardStyle = contentMode === 'default'
   ? aspectAppearance.defaultStyle
   : contentStyles[contentMode]
-recipeSource.textContent = recipeSources[contentMode]
+recipeSource.textContent = recipeSources[rendererMode === 'points' ? 'points' : contentMode]
 copyRecipe.addEventListener('click', async () => {
   const label = copyRecipe.textContent
   try {
-    await navigator.clipboard.writeText(recipeSources[contentMode])
+    await navigator.clipboard.writeText(recipeSources[rendererMode === 'points' ? 'points' : contentMode])
     copyRecipe.textContent = '已复制'
   } catch {
     copyRecipe.textContent = '复制失败'
@@ -148,9 +162,7 @@ const items = Array.from({ length: itemCount }, (_, index) => ({
   },
 }))
 
-const productTemplate = defineCardTemplate<{
-  price: number
-}>((item, { formatNumber, when }) => html`
+const productTemplate = defineCardTemplate<DemoMeta>((item, { formatNumber, when }) => html`
   <div class="product">
     ${when(item.image, () => html`
       <img src=${item.image} style="height:62%;object-fit:cover;object-position:50% 28%" />
@@ -176,9 +188,7 @@ const productTemplate = defineCardTemplate<{
   },
 })
 
-const profileTemplate = defineCardTemplate<{
-  role: string
-}>((item) => html`
+const profileTemplate = defineCardTemplate<DemoMeta>((item) => html`
   <div class="profile">
     <img src=${item.image} style="height:68%;object-fit:cover;object-position:50% 20%" />
     <div class="copy">
@@ -202,9 +212,7 @@ const profileTemplate = defineCardTemplate<{
   },
 })
 
-const metricTemplate = defineCardTemplate<{
-  score: number
-}>((item) => html`
+const metricTemplate = defineCardTemplate<DemoMeta>((item) => html`
   <div class="metric">
     <span class="label">${item.title}</span>
     <span class="score">${item.meta?.score}</span>
@@ -235,14 +243,20 @@ const cardContent = contentMode === 'product'
       ? metricTemplate
       : undefined
 
-const stage = new MotionStage({
+const baseStageOptions: Omit<MotionStageOptions<DemoMeta>, 'renderer'> = {
   container,
   quality: 'high',
   adaptivePerformance: false,
-  cardAspectRatio: aspectAppearance.ratio,
-  cardStyle,
-  cardContent,
-  drawCard: contentMode === 'canvas'
+  onItemClick(item) {
+    lastPicked = ` · PICK ${item.title ?? item.id}`
+  },
+  transition: { duration: 900 },
+}
+const cardRenderer = cardsRenderer<DemoMeta>({
+  aspectRatio: aspectAppearance.ratio,
+  style: cardStyle,
+  content: cardContent,
+  draw: contentMode === 'canvas'
     ? (context, item, bounds) => {
         const gradient = context.createLinearGradient(bounds.x, bounds.y, bounds.x + bounds.width, bounds.y)
         gradient.addColorStop(0, '#1e1b4b')
@@ -265,19 +279,28 @@ const stage = new MotionStage({
         context.fillText('ENGAGEMENT', bounds.x + bounds.width / 2, bounds.y + bounds.height - 7)
       }
     : undefined,
-  resolveCardStyle(item) {
+  resolveStyle(item) {
     return (item.meta as { featured?: boolean }).featured
       ? { borderColor: '#facc15', borderWidth: 4 }
       : undefined
   },
-  onItemClick(item) {
-    lastPicked = ` · PICK ${item.title ?? item.id}`
-  },
-  transition: { duration: 900 },
+})
+const stage = new MotionStage({
+  ...baseStageOptions,
+  renderer: rendererMode === 'points'
+    ? pointsRenderer<DemoMeta>({
+      size: 0.72,
+      resolveColor(item, index) {
+        if (item.meta?.featured) return '#facc15'
+        return `hsl(${index * 47 % 360} 72% 58%)`
+      },
+    })
+    : cardRenderer,
 })
 
 await stage.setItems(items)
-document.documentElement.dataset.atlasBuildMs = String(stage.getPerformanceStats().atlasBuildMs)
+document.documentElement.dataset.atlasBuildMs =
+  String(stage.getPerformanceStats().renderer.metrics.atlasBuildMs ?? 0)
 await stage.to(sphere({ fit: 'contain', poleMode: 'exclude', edgeFade: 0.06 }), { duration: 0 })
 stage.autoRotate({ y: 0.22 })
 if (patchDemo) {
@@ -297,6 +320,14 @@ document.querySelector('[data-layout="cylinder"]')?.addEventListener('click', ()
 })
 document.querySelector('#pause')?.addEventListener('click', () => stage.pause())
 document.querySelector('#resume')?.addEventListener('click', () => stage.resume())
+document.querySelectorAll<HTMLButtonElement>('[data-renderer]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const next = new URLSearchParams(location.search)
+    next.set('renderer', button.dataset.renderer ?? 'cards')
+    location.search = next.toString()
+  })
+  button.setAttribute('aria-pressed', String(button.dataset.renderer === rendererMode))
+})
 document.querySelectorAll<HTMLButtonElement>('[data-content]').forEach((button) => {
   button.addEventListener('click', () => {
     const next = new URLSearchParams(location.search)
@@ -306,6 +337,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-content]').forEach((button) 
     location.search = next.toString()
   })
   button.setAttribute('aria-pressed', String(button.dataset.content === contentMode))
+  button.disabled = rendererMode === 'points'
 })
 document.querySelectorAll<HTMLButtonElement>('[data-aspect]').forEach((button) => {
   button.addEventListener('click', () => {
@@ -316,15 +348,18 @@ document.querySelectorAll<HTMLButtonElement>('[data-aspect]').forEach((button) =
     location.search = next.toString()
   })
   button.setAttribute('aria-pressed', String(button.dataset.aspect === aspectMode))
+  button.disabled = rendererMode === 'points'
 })
 
 const statusTimer = window.setInterval(() => {
   const stats = stage.getPerformanceStats()
-  document.documentElement.dataset.atlasBuildMs = String(stats.atlasBuildMs)
-  document.documentElement.dataset.atlasPatchMs = String(stats.atlasPatchMs)
-  document.documentElement.dataset.atlasPatches = String(stats.atlasPatches)
-  document.documentElement.dataset.atlasCellsUpdated = String(stats.atlasCellsUpdated)
-  status.textContent = `${stats.fps.toFixed(0)} FPS · ${stats.drawCalls} CALL · ${stats.renderedItems} ITEMS${lastPicked}`
+  document.documentElement.dataset.atlasBuildMs = String(stats.renderer.metrics.atlasBuildMs ?? 0)
+  document.documentElement.dataset.atlasPatchMs = String(stats.renderer.metrics.atlasPatchMs ?? 0)
+  document.documentElement.dataset.atlasPatches = String(stats.renderer.metrics.atlasPatches ?? 0)
+  document.documentElement.dataset.atlasCellsUpdated =
+    String(stats.renderer.metrics.atlasCellsUpdated ?? 0)
+  status.textContent =
+    `${stats.fps.toFixed(0)} FPS · ${stats.render.drawCalls} CALL · ${stats.renderer.instanceCount} ITEMS${lastPicked}`
 }, 500)
 
 window.addEventListener('pagehide', () => {

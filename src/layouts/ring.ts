@@ -1,5 +1,6 @@
 import type { Layout, Transform } from '../core/types.js'
 import { distributeWeighted } from './distribution.js'
+import { defineLayout } from './defineLayout.js'
 
 export interface RingOptions {
   /** Radius of the innermost orbit. */
@@ -31,7 +32,7 @@ export function ring(options: RingOptions = {}): Layout {
   const stagger = options.stagger ?? true
   const direction = options.clockwise ? -1 : 1
 
-  return {
+  return defineLayout({
     name: 'ring',
     orientation: orientation === 'camera' ? 'camera' : 'surface',
     calculate(count): Transform[] {
@@ -74,7 +75,7 @@ export function ring(options: RingOptions = {}): Layout {
 
       return transforms
     },
-  }
+  })
 }
 
 function finite(value: number | undefined, fallback: number): number {

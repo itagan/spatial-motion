@@ -1,5 +1,6 @@
 import {
   MotionStage,
+  cardsRenderer,
   sphere,
   type QualityLevel,
   type StageExtension,
@@ -10,7 +11,12 @@ import '../shared.css'
 
 const container = document.querySelector<HTMLElement>('#stage')!
 const status = document.querySelector<HTMLElement>('#status')!
-const stage = new MotionStage({ container, quality: 'auto', adaptivePerformance: true })
+const stage = new MotionStage({
+  container,
+  renderer: cardsRenderer(),
+  quality: 'auto',
+  adaptivePerformance: true,
+})
 
 await stage.setItems(Array.from({ length: 180 }, (_, index) => ({
   id: `card-${index}`,
@@ -79,7 +85,7 @@ await addOrbit()
 const statusTimer = window.setInterval(() => {
   const stats = stage.getPerformanceStats()
   const diagnostic = stage.getExtensionStats().find(({ active }) => active)
-  status.textContent = `${diagnostic?.enabled ? 'ON' : 'OFF'} · P95 ${(diagnostic?.updateTimeP95 ?? 0).toFixed(2)} MS · ${stats.drawCalls} CALLS`
+  status.textContent = `${diagnostic?.enabled ? 'ON' : 'OFF'} · P95 ${(diagnostic?.updateTimeP95 ?? 0).toFixed(2)} MS · ${stats.render.drawCalls} CALLS`
 }, 500)
 
 window.addEventListener('pagehide', () => {

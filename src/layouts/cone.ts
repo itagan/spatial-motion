@@ -1,5 +1,6 @@
 import type { Layout, Transform } from '../core/types.js'
 import { distributeWeighted } from './distribution.js'
+import { defineLayout } from './defineLayout.js'
 
 export interface ConeOptions {
   radius?: number
@@ -21,7 +22,7 @@ export function cone(options: ConeOptions = {}): Layout {
   const startAngle = finite(options.startAngle, 0)
   const orientation = options.orientation ?? 'upright-surface'
 
-  return {
+  return defineLayout({
     name: 'cone',
     orientation: orientation === 'camera' ? 'camera' : 'surface',
     calculate(count): Transform[] {
@@ -81,7 +82,7 @@ export function cone(options: ConeOptions = {}): Layout {
 
       return transforms
     },
-  }
+  })
 }
 
 export function calculateConeRingDistribution(

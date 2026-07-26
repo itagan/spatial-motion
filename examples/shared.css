@@ -116,6 +116,11 @@ button {
 }
 
 button:hover { background: rgba(21, 59, 86, .92); }
+button:disabled {
+  opacity: .38;
+  cursor: not-allowed;
+}
+button:disabled:hover { background: rgba(15, 34, 55, .82); }
 button[aria-pressed="true"] {
   border-color: #67e8f9;
   color: #06101b;
