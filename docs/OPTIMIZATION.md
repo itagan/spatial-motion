@@ -184,6 +184,14 @@ Atlas patch 会按纹理行合并相邻卡片范围，模板实例保留最多 2
 
 2026-07-26 Chromium 150 / Apple M4 / 1265×633 的 2000 Cards/high/interaction-stress 3 秒结果：合成输入触发 707 次 `pointermove`，Stage 实际执行 180 次拾取，合并 74.5%；平均 59.99 FPS、P95/P99 17.70/17.70ms、0 个 33ms 长帧、1 Draw Call。拾取累计 584.8ms，平均每次 3.249ms。Points 2000 浏览器复验继续保持 1 Draw Call，控制台无 error。
 
+## 拾取热路径低分配化
+
+InteractionController 保留原有屏幕四边形、disc、padding、遮挡深度和稳定顺序语义，但把中心、相机方向、世界角点与屏幕坐标改为实例级固定缓冲。每次拾取只计算一次相机方向、Group 旋转和投影尺度；Quad 先用包含实际四角的投影包围圆做保守排除，剩余候选才执行四角精确测试。命中结果在扫描过程中按原 comparator 在线更新，不再建立候选数组或排序。
+
+高频 `pointermove` 同时改为标量坐标槽，不再为每个输入事件创建 pending 对象。焦点查询维护随 items 同步重建的稳定 id 索引，数据重排后仍正确更新 GPU highlight。自动化覆盖倾斜 surface 的粗筛边界、遮挡/距离排序、矩形/圆形边界、数据重排和 settled pick 期间零 `Vector3.clone()`。
+
+2026-07-26 Chromium 150 / Apple M4 / 2000 Cards/high/interaction-stress 三轮结果：180 次拾取累计 192.1/192.7/205.0ms，中位数 192.7ms，平均每次约 1.071ms；相对改造前 3.249ms 降低约 67.0%。三轮 P95 为 17.55–18.60ms，均为 0 个 24/33/50ms 长帧、主体 1 Draw Call；每轮约 750 次合成 pointermove 仍只执行 180 次拾取。完整包检查为 root/Core 37,572/13,509 bytes gzip，Cards-only 保持 12,227 bytes，均低于既有预算。
+
 ## 真实消费者体积与 Atlas 冷启动
 
 包体积门禁不再把所有 ESM 输出文件分别 gzip 后相加当作用户下载量。`pack:check` 会从真实 `.tgz` 创建 root、Core-only 和 Cards-only Vite/Terser 消费者，并把 Three.js 保持为 external；分模块 gzip 聚合值仍输出，专门用于观察内部模块增长。当前 root/Core-only/Cards-only 分别为 33,362 / 11,875 / 9,972 bytes gzip，均低于 40,960 / 16,384 / 12,288 bytes 预算；分模块聚合诊断为 41,500 bytes，但不对应任何单个消费者产物。

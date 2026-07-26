@@ -48,9 +48,32 @@ interface InteractionControllerOptions<TMeta> {
 export class InteractionController<TMeta> {
   private readonly projectionVector = new Vector3()
   private readonly groupEuler = new Euler()
+  private readonly itemEuler = new Euler()
+  private readonly center = new Vector3()
+  private readonly viewCenter = new Vector3()
+  private readonly groupOrigin = new Vector3()
+  private readonly cameraRight = new Vector3()
+  private readonly cameraUp = new Vector3()
+  private readonly edgeA = new Vector3()
+  private readonly edgeB = new Vector3()
+  private readonly normal = new Vector3()
+  private readonly cameraDirection = new Vector3()
+  private readonly corners = [
+    new Vector3(),
+    new Vector3(),
+    new Vector3(),
+    new Vector3(),
+  ] as const
+  private readonly centerScreen = new Float64Array(2)
+  private readonly edgeScreen = new Float64Array(2)
+  private readonly screenCorners = new Float64Array(8)
+  private indexedItems: readonly MotionItem<TMeta>[] | null = null
+  private readonly itemIndexById = new Map<string, number>()
   private hoveredIndex: number | null = null
   private focusedItemId: string | null = null
-  private pendingPointerMove: { clientX: number; clientY: number } | null = null
+  private pendingPointerMove = false
+  private pendingClientX = 0
+  private pendingClientY = 0
   private pickingMs = 0
   private pickOperations = 0
 
@@ -87,8 +110,9 @@ export class InteractionController<TMeta> {
 
   focusItem(id: string): boolean {
     const state = this.options.getState()
-    const index = state.items.findIndex((item) => item.id === id)
-    if (index < 0 || visibilityRank(index) > state.visibleRatio) return false
+    this.ensureItemIndex(state.items)
+    const index = this.itemIndexById.get(id)
+    if (index === undefined || visibilityRank(index) > state.visibleRatio) return false
     this.setFocusedIndex(index)
     this.options.element.focus()
     return true
@@ -102,6 +126,7 @@ export class InteractionController<TMeta> {
 
   syncItems(): void {
     const state = this.options.getState()
+    this.rebuildItemIndex(state.items)
     const index = this.focusedIndex(state.items)
     if (
       this.focusedItemId !== null
@@ -120,10 +145,9 @@ export class InteractionController<TMeta> {
   }
 
   flushPendingPointerMove(): void {
-    const pointer = this.pendingPointerMove
-    if (!pointer) return
-    this.pendingPointerMove = null
-    const result = this.pick(pointer.clientX, pointer.clientY)
+    if (!this.pendingPointerMove) return
+    this.pendingPointerMove = false
+    const result = this.pick(this.pendingClientX, this.pendingClientY)
     const index = result?.index ?? null
     if (index === this.hoveredIndex) return
     this.hoveredIndex = index
@@ -140,13 +164,15 @@ export class InteractionController<TMeta> {
 
   dispose(): void {
     const { element } = this.options
-    this.pendingPointerMove = null
+    this.pendingPointerMove = false
     element.removeEventListener('pointerup', this.handlePointerUp)
     element.removeEventListener('pointermove', this.handlePointerMove)
     element.removeEventListener('pointerleave', this.handlePointerLeave)
     element.removeEventListener('keydown', this.handleKeyDown)
     element.removeEventListener('focus', this.handleCanvasFocus)
     element.removeEventListener('blur', this.handleCanvasBlur)
+    this.indexedItems = null
+    this.itemIndexById.clear()
   }
 
   private pickInternal(
@@ -162,61 +188,105 @@ export class InteractionController<TMeta> {
     const transforms = this.options.resolveTransforms(performance.now())
     camera.updateMatrixWorld()
     this.groupEuler.set(state.rotationX, state.rotationY, 0, 'XYZ')
+    this.cameraRight.set(1, 0, 0).applyQuaternion(camera.quaternion)
+    this.cameraUp.set(0, 1, 0).applyQuaternion(camera.quaternion)
     const legacyRadius = typeof options === 'number' ? Math.max(0, options) : null
     const pickOptions = typeof options === 'number' ? {} : options
     const padding = Math.max(0, pickOptions.padding ?? 0)
     const billboard = itemBounds.facing === 'camera'
       || state.orientation === 'camera'
       || state.effectActive
-    const candidates: Array<InteractionPickResult<TMeta> & { depth: number }> = []
-    const groupOriginViewZ = new Vector3()
+    const includeOccluded = pickOptions.includeOccluded === true
+    const groupOriginViewZ = this.groupOrigin
+      .set(0, 0, 0)
       .applyMatrix4(camera.matrixWorldInverse)
       .z
     const itemWidth = itemBounds.kind === 'disc' ? itemBounds.diameter : itemBounds.width
     const itemHeight = itemBounds.kind === 'disc' ? itemBounds.diameter : itemBounds.height
+    const projectionScale = rect.height * camera.zoom / (
+      2 * Math.tan(camera.fov * Math.PI / 360)
+    )
+    let bestItem: MotionItem<TMeta> | null = null
+    let bestIndex = -1
+    let bestDistance = Number.POSITIVE_INFINITY
+    let bestDepth = Number.POSITIVE_INFINITY
 
-    transforms.forEach((transform, index) => {
+    for (let index = 0; index < transforms.length; index += 1) {
+      const transform = transforms[index]
       const item = state.items[index]
-      if (!item || transform.opacity < 0.05 || visibilityRank(index) > state.visibleRatio) return
-      const center = new Vector3(transform.x, transform.y, transform.z).applyEuler(this.groupEuler)
-      const centerViewZ = center.clone().applyMatrix4(camera.matrixWorldInverse).z
-      if (state.hideBackHemisphere && centerViewZ < groupOriginViewZ) return
-      const projectedCenter = this.projectToScreen(center, rect)
-      if (!projectedCenter) return
-      const distance = Math.hypot(clientX - projectedCenter.x, clientY - projectedCenter.y)
-      const depth = center.distanceTo(camera.position)
+      if (!item || transform.opacity < 0.05 || visibilityRank(index) > state.visibleRatio) continue
+      const center = this.center
+        .set(transform.x, transform.y, transform.z)
+        .applyEuler(this.groupEuler)
+      const centerViewZ = this.viewCenter
+        .copy(center)
+        .applyMatrix4(camera.matrixWorldInverse)
+        .z
+      if (state.hideBackHemisphere && centerViewZ < groupOriginViewZ) continue
+      if (!this.projectViewToScreen(this.viewCenter, rect, this.centerScreen)) continue
+      const distance = Math.hypot(
+        clientX - this.centerScreen[0],
+        clientY - this.centerScreen[1],
+      )
+      const depth = Math.sqrt(center.distanceToSquared(camera.position))
+      let hit = false
       if (legacyRadius !== null) {
-        if (distance <= legacyRadius) candidates.push({ item, index, distance, depth })
-        return
+        hit = distance <= legacyRadius
+      } else {
+        const halfWidth = Math.max(0, transform.scale) * itemWidth / 2
+        const halfHeight = Math.max(0, transform.scale) * itemHeight / 2
+        if (itemBounds.kind === 'disc') {
+          this.edgeA.copy(center).addScaledVector(this.cameraRight, halfWidth)
+          if (!this.projectToScreen(this.edgeA, rect, this.edgeScreen)) continue
+          const radius = Math.hypot(
+            this.edgeScreen[0] - this.centerScreen[0],
+            this.edgeScreen[1] - this.centerScreen[1],
+          )
+          hit = distance <= radius + padding
+        } else {
+          const halfDiagonal = Math.hypot(halfWidth, halfHeight)
+          const nearestDepth = -centerViewZ - halfDiagonal
+          if (
+            nearestDepth > 0
+            && distance > projectionScale * halfDiagonal / nearestDepth + padding
+          ) continue
+
+          if (billboard) {
+            this.setBillboardCorners(center, halfWidth, halfHeight)
+          } else {
+            this.setSurfaceCorners(center, halfWidth, halfHeight, transform)
+            if (!this.isFrontFacing(center, camera.position)) continue
+          }
+          let projected = true
+          for (let cornerIndex = 0; cornerIndex < 4; cornerIndex += 1) {
+            if (!this.projectToScreen(
+              this.corners[cornerIndex],
+              rect,
+              this.screenCorners,
+              cornerIndex * 2,
+            )) {
+              projected = false
+              break
+            }
+          }
+          if (!projected) continue
+          hit = pointHitsQuad(clientX, clientY, this.screenCorners, padding)
+        }
       }
+      if (!hit) continue
+      const better = includeOccluded
+        ? distance < bestDistance || (distance === bestDistance && depth < bestDepth)
+        : depth < bestDepth || (depth === bestDepth && distance < bestDistance)
+      if (!better) continue
+      bestItem = item
+      bestIndex = index
+      bestDistance = distance
+      bestDepth = depth
+    }
 
-      const halfWidth = Math.max(0, transform.scale) * itemWidth / 2
-      const halfHeight = Math.max(0, transform.scale) * itemHeight / 2
-      if (itemBounds.kind === 'disc') {
-        const right = new Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
-        const edge = this.projectToScreen(center.clone().addScaledVector(right, halfWidth), rect)
-        if (!edge) return
-        const radius = Math.hypot(edge.x - projectedCenter.x, edge.y - projectedCenter.y)
-        if (distance <= radius + padding) candidates.push({ item, index, distance, depth })
-        return
-      }
-
-      const corners = billboard
-        ? this.billboardCorners(center, halfWidth, halfHeight)
-        : this.surfaceCorners(center, halfWidth, halfHeight, transform)
-      if (!billboard && !isFrontFacing(corners, center, camera.position)) return
-      const screenCorners = corners.map((corner) => this.projectToScreen(corner, rect))
-      if (screenCorners.some((corner) => !corner)) return
-      if (!pointHitsQuad(clientX, clientY, screenCorners as ScreenPoint[], padding)) return
-      candidates.push({ item, index, distance, depth })
-    })
-
-    if (!candidates.length) return null
-    candidates.sort((left, right) => pickOptions.includeOccluded
-      ? left.distance - right.distance || left.depth - right.depth
-      : left.depth - right.depth || left.distance - right.distance)
-    const { depth: _depth, ...result } = candidates[0]
-    return result
+    return bestItem
+      ? { item: bestItem, index: bestIndex, distance: bestDistance }
+      : null
   }
 
   private readonly handlePointerUp = (event: PointerEvent) => {
@@ -226,12 +296,14 @@ export class InteractionController<TMeta> {
   }
 
   private readonly handlePointerMove = (event: PointerEvent) => {
-    this.pendingPointerMove = { clientX: event.clientX, clientY: event.clientY }
+    this.pendingClientX = event.clientX
+    this.pendingClientY = event.clientY
+    this.pendingPointerMove = true
     if (!this.options.hasScheduledFrame()) this.flushPendingPointerMove()
   }
 
   private readonly handlePointerLeave = () => {
-    this.pendingPointerMove = null
+    this.pendingPointerMove = false
     if (this.hoveredIndex === null) return
     this.hoveredIndex = null
     this.updateHighlight()
@@ -289,8 +361,8 @@ export class InteractionController<TMeta> {
 
   private focusedIndex(items: readonly MotionItem<TMeta>[]): number | null {
     if (this.focusedItemId === null) return null
-    const index = items.findIndex((item) => item.id === this.focusedItemId)
-    return index >= 0 ? index : null
+    this.ensureItemIndex(items)
+    return this.itemIndexById.get(this.focusedItemId) ?? null
   }
 
   private visibleItemIndices(count: number, visibleRatio: number): number[] {
@@ -331,81 +403,133 @@ export class InteractionController<TMeta> {
     this.options.element.setAttribute('aria-label', `${this.options.ariaLabel}${detail}`)
   }
 
-  private projectToScreen(point: Vector3, rect: DOMRect): ScreenPoint | null {
+  private projectToScreen(
+    point: Vector3,
+    rect: DOMRect,
+    output: Float64Array,
+    offset = 0,
+  ): boolean {
     this.projectionVector.copy(point).project(this.options.camera)
-    if (this.projectionVector.z < -1 || this.projectionVector.z > 1) return null
-    return {
-      x: rect.left + (this.projectionVector.x + 1) * rect.width / 2,
-      y: rect.top + (1 - this.projectionVector.y) * rect.height / 2,
-    }
+    if (this.projectionVector.z < -1 || this.projectionVector.z > 1) return false
+    output[offset] = rect.left + (this.projectionVector.x + 1) * rect.width / 2
+    output[offset + 1] = rect.top + (1 - this.projectionVector.y) * rect.height / 2
+    return true
   }
 
-  private billboardCorners(center: Vector3, halfWidth: number, halfHeight: number): Vector3[] {
-    const right = new Vector3(1, 0, 0).applyQuaternion(this.options.camera.quaternion)
-    const up = new Vector3(0, 1, 0).applyQuaternion(this.options.camera.quaternion)
-    return [
-      center.clone().addScaledVector(right, -halfWidth).addScaledVector(up, -halfHeight),
-      center.clone().addScaledVector(right, halfWidth).addScaledVector(up, -halfHeight),
-      center.clone().addScaledVector(right, halfWidth).addScaledVector(up, halfHeight),
-      center.clone().addScaledVector(right, -halfWidth).addScaledVector(up, halfHeight),
-    ]
+  private projectViewToScreen(
+    point: Vector3,
+    rect: DOMRect,
+    output: Float64Array,
+  ): boolean {
+    this.projectionVector.copy(point).applyMatrix4(this.options.camera.projectionMatrix)
+    if (this.projectionVector.z < -1 || this.projectionVector.z > 1) return false
+    output[0] = rect.left + (this.projectionVector.x + 1) * rect.width / 2
+    output[1] = rect.top + (1 - this.projectionVector.y) * rect.height / 2
+    return true
   }
 
-  private surfaceCorners(
+  private setBillboardCorners(center: Vector3, halfWidth: number, halfHeight: number): void {
+    this.corners[0].copy(center)
+      .addScaledVector(this.cameraRight, -halfWidth)
+      .addScaledVector(this.cameraUp, -halfHeight)
+    this.corners[1].copy(center)
+      .addScaledVector(this.cameraRight, halfWidth)
+      .addScaledVector(this.cameraUp, -halfHeight)
+    this.corners[2].copy(center)
+      .addScaledVector(this.cameraRight, halfWidth)
+      .addScaledVector(this.cameraUp, halfHeight)
+    this.corners[3].copy(center)
+      .addScaledVector(this.cameraRight, -halfWidth)
+      .addScaledVector(this.cameraUp, halfHeight)
+  }
+
+  private setSurfaceCorners(
     center: Vector3,
     halfWidth: number,
     halfHeight: number,
     transform: Transform,
-  ): Vector3[] {
-    const itemEuler = new Euler(transform.rotationX, transform.rotationY, transform.rotationZ, 'XYZ')
-    return [
-      [-halfWidth, -halfHeight],
-      [halfWidth, -halfHeight],
-      [halfWidth, halfHeight],
-      [-halfWidth, halfHeight],
-    ].map(([x, y]) => new Vector3(x, y, 0)
-      .applyEuler(itemEuler)
-      .applyEuler(this.groupEuler)
-      .add(center))
+  ): void {
+    this.itemEuler.set(
+      transform.rotationX,
+      transform.rotationY,
+      transform.rotationZ,
+      'XYZ',
+    )
+    this.corners[0].set(-halfWidth, -halfHeight, 0)
+    this.corners[1].set(halfWidth, -halfHeight, 0)
+    this.corners[2].set(halfWidth, halfHeight, 0)
+    this.corners[3].set(-halfWidth, halfHeight, 0)
+    for (const corner of this.corners) {
+      corner.applyEuler(this.itemEuler).applyEuler(this.groupEuler).add(center)
+    }
+  }
+
+  private isFrontFacing(center: Vector3, cameraPosition: Vector3): boolean {
+    this.edgeA.copy(this.corners[1]).sub(this.corners[0])
+    this.edgeB.copy(this.corners[3]).sub(this.corners[0])
+    this.normal.crossVectors(this.edgeA, this.edgeB)
+    this.cameraDirection.copy(cameraPosition).sub(center)
+    return this.normal.dot(this.cameraDirection) > 0
+  }
+
+  private ensureItemIndex(items: readonly MotionItem<TMeta>[]): void {
+    if (items !== this.indexedItems) this.rebuildItemIndex(items)
+  }
+
+  private rebuildItemIndex(items: readonly MotionItem<TMeta>[]): void {
+    this.indexedItems = items
+    this.itemIndexById.clear()
+    for (let index = 0; index < items.length; index += 1) {
+      this.itemIndexById.set(items[index].id, index)
+    }
   }
 }
 
-interface ScreenPoint {
-  x: number
-  y: number
-}
-
-function isFrontFacing(corners: Vector3[], center: Vector3, cameraPosition: Vector3): boolean {
-  const edgeA = corners[1].clone().sub(corners[0])
-  const edgeB = corners[3].clone().sub(corners[0])
-  const normal = edgeA.cross(edgeB)
-  return normal.dot(cameraPosition.clone().sub(center)) > 0
-}
-
-function pointHitsQuad(x: number, y: number, corners: ScreenPoint[], padding: number): boolean {
+function pointHitsQuad(x: number, y: number, corners: Float64Array, padding: number): boolean {
   let hasPositive = false
   let hasNegative = false
-  for (let index = 0; index < corners.length; index += 1) {
-    const start = corners[index]
-    const end = corners[(index + 1) % corners.length]
-    const cross = (end.x - start.x) * (y - start.y) - (end.y - start.y) * (x - start.x)
+  for (let index = 0; index < 4; index += 1) {
+    const start = index * 2
+    const end = ((index + 1) % 4) * 2
+    const cross = (corners[end] - corners[start]) * (y - corners[start + 1])
+      - (corners[end + 1] - corners[start + 1]) * (x - corners[start])
     hasPositive ||= cross > 0
     hasNegative ||= cross < 0
   }
   if (!(hasPositive && hasNegative)) return true
   if (!padding) return false
-  return corners.some((start, index) =>
-    distanceToSegment(x, y, start, corners[(index + 1) % corners.length]) <= padding,
-  )
+  for (let index = 0; index < 4; index += 1) {
+    const start = index * 2
+    const end = ((index + 1) % 4) * 2
+    if (distanceToSegment(
+      x,
+      y,
+      corners[start],
+      corners[start + 1],
+      corners[end],
+      corners[end + 1],
+    ) <= padding) return true
+  }
+  return false
 }
 
-function distanceToSegment(x: number, y: number, start: ScreenPoint, end: ScreenPoint): number {
-  const dx = end.x - start.x
-  const dy = end.y - start.y
+function distanceToSegment(
+  x: number,
+  y: number,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+): number {
+  const dx = endX - startX
+  const dy = endY - startY
   const lengthSquared = dx * dx + dy * dy
-  if (!lengthSquared) return Math.hypot(x - start.x, y - start.y)
-  const amount = Math.min(1, Math.max(0, ((x - start.x) * dx + (y - start.y) * dy) / lengthSquared))
-  return Math.hypot(x - (start.x + amount * dx), y - (start.y + amount * dy))
+  if (!lengthSquared) return Math.hypot(x - startX, y - startY)
+  const amount = Math.min(
+    1,
+    Math.max(0, ((x - startX) * dx + (y - startY) * dy) / lengthSquared),
+  )
+  return Math.hypot(x - (startX + amount * dx), y - (startY + amount * dy))
 }
 
 export function visibilityRank(index: number): number {
