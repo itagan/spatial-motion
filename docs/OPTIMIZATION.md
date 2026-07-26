@@ -195,3 +195,5 @@ Atlas 指标拆分为 prepare、图片加载墙钟、单元绘制和整图像素
 随后增加基础级 Atlas 策略：内置默认卡片的 `resolution` 未配置或为 `'auto'` 时，超过 1024 项使用 48px，否则使用 64px；显式数值始终优先。模板与自定义 `drawCard` 的未配置行为保持 64px，避免基于像素的内容布局被隐式缩放。`mipmaps` 默认开启但允许显式关闭，实际 resolution/mipmap 状态进入 Renderer metrics；Benchmark 摘要同时报告最大 CPU/submit、紧邻冷启动的首次 render submit 和 Atlas 设置。
 
 同环境 2000/high/cold-start 的自动 48px 三轮 Atlas build 为 40.1/44.2/39.1ms，中位数 40.1ms，readback 中位数 33.1ms，纹理内存由固定 64px 的约 53.4MB 降至 33.9MB；主体保持 1 Draw Call，P95 为 17.50–18.25ms。40px 单轮为 build/readback 32.2/24.7ms、约 24.9MB，但仍记录一次 33ms 长帧，因此不继续牺牲清晰度。64px 关闭 mipmap 后纹理约 42.0MB，但 build/readback 仍为 56.4/46.5ms，说明 mipmap 不是 CPU 冷启动主瓶颈，默认继续开启。后续方向修正为离主线程默认绘制/readback，并单独评估纹理首传；不直接引入分页 Atlas。完整验证为 20 个测试文件、269 项测试，Library/Demo/Examples 与 tgz 消费检查全部通过。
+
+无图片的内置默认卡片在 256 项以上且浏览器同时支持 Worker/OffscreenCanvas 时，会把首次整图绘制与 `getImageData()` readback 移到独立模块 Worker。Worker 只接收稳定 id、标题、已解析样式和 Atlas 尺寸，返回可转移像素缓冲；失败、构造受限或中止时立即终止 Worker 并回退原主线程实现。图片解码、模板、`drawCard` 和局部 patch 不跨线程，避免改变 Canvas 回调、图片缓存和异步失效契约；现有头像 benchmark 因包含图片不会命中此优化，应另用无图片 cold-start 对照评估。

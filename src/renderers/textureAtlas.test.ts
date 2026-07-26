@@ -148,6 +148,107 @@ describe('texture atlas card rendering', () => {
     customAtlas.texture.dispose()
   })
 
+  it('moves the image-free built-in atlas raster and readback into an OffscreenCanvas worker', async () => {
+    const workers: TestWorker[] = []
+    class TestWorker {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: (() => void) | null = null
+      terminate = vi.fn()
+      postMessage = vi.fn((request: { width: number; height: number }) => {
+        const pixels = new Uint8ClampedArray(request.width * request.height * 4).fill(11)
+        queueMicrotask(() => this.onmessage?.({
+          data: {
+            data: pixels.buffer,
+            cellRenderMs: 3,
+            readbackMs: 2,
+          },
+        } as MessageEvent))
+      })
+      constructor() {
+        workers.push(this)
+      }
+    }
+    vi.stubGlobal('Worker', TestWorker)
+    vi.stubGlobal('OffscreenCanvas', class {})
+    const createElement = vi.spyOn(document, 'createElement')
+
+    const items = Array.from({ length: 256 }, (_, index) => ({
+      id: `item-${index}`,
+      title: `Item ${index}`,
+    }))
+    const atlas = await createTextureAtlas(items, 32)
+
+    expect(workers).toHaveLength(1)
+    expect(workers[0].postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: 'item-0', title: 'Item 0' }),
+        expect.objectContaining({ id: 'item-255', title: 'Item 255' }),
+      ]),
+    }))
+    expect(workers[0].terminate).toHaveBeenCalledOnce()
+    expect(createElement).not.toHaveBeenCalledWith('canvas')
+    expect(atlas.data.every((value) => value === 11)).toBe(true)
+    expect(atlas.metrics).toMatchObject({
+      cells: 256,
+      cellRenderMs: 3,
+      readbackMs: 2,
+      imageRequests: 0,
+      uploadRanges: 1,
+      workerRenders: 1,
+    })
+    atlas.texture.dispose()
+  })
+
+  it('falls back to the main-thread atlas when the raster worker fails', async () => {
+    class FailingWorker {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: (() => void) | null = null
+      terminate = vi.fn()
+      postMessage = vi.fn(() => queueMicrotask(() => this.onerror?.()))
+    }
+    vi.stubGlobal('Worker', FailingWorker)
+    vi.stubGlobal('OffscreenCanvas', class {})
+    const createElement = vi.spyOn(document, 'createElement')
+
+    const atlas = await createTextureAtlas(
+      Array.from({ length: 256 }, (_, index) => ({ id: `fallback-${index}` })),
+      32,
+    )
+
+    expect(createElement).toHaveBeenCalledWith('canvas')
+    expect(atlas.data).toBeInstanceOf(Uint8ClampedArray)
+    atlas.texture.dispose()
+  })
+
+  it('terminates pending atlas worker work when its signal is aborted', async () => {
+    const workers: WaitingWorker[] = []
+    class WaitingWorker {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: (() => void) | null = null
+      terminate = vi.fn()
+      postMessage = vi.fn()
+      constructor() {
+        workers.push(this)
+      }
+    }
+    vi.stubGlobal('Worker', WaitingWorker)
+    vi.stubGlobal('OffscreenCanvas', class {})
+    const controller = new AbortController()
+    const pending = createTextureAtlas(
+      Array.from({ length: 256 }, (_, index) => ({ id: `pending-${index}` })),
+      32,
+      {
+      signal: controller.signal,
+      },
+    )
+
+    await vi.waitFor(() => expect(workers).toHaveLength(1))
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(workers[0].terminate).toHaveBeenCalledOnce()
+  })
+
   it('falls back when an image does not settle before the configured timeout', async () => {
     vi.useFakeTimers()
     class NeverImage {

@@ -58,6 +58,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private atlasImageLoadWallMs = 0
   private atlasCellRenderMs = 0
   private atlasReadbackMs = 0
+  private atlasWorkerRenders = 0
   private imageLoadMs = 0
   private imageRequests = 0
   private imageFailures = 0
@@ -575,6 +576,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
         atlasImageLoadWallMs: this.atlasImageLoadWallMs,
         atlasCellRenderMs: this.atlasCellRenderMs,
         atlasReadbackMs: this.atlasReadbackMs,
+        atlasWorkerRenders: this.atlasWorkerRenders,
         imageLoadMs: this.imageLoadMs,
         imageRequests: this.imageRequests,
         imageFailures: this.imageFailures,
@@ -623,6 +625,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.atlasImageLoadWallMs += atlas.metrics.imageLoadWallMs
     this.atlasCellRenderMs += atlas.metrics.cellRenderMs
     this.atlasReadbackMs += atlas.metrics.readbackMs
+    this.atlasWorkerRenders += atlas.metrics.workerRenders ?? 0
     this.imageLoadMs += atlas.metrics.imageLoadMs
     this.imageRequests += atlas.metrics.imageRequests
     this.imageFailures += atlas.metrics.imageFailures

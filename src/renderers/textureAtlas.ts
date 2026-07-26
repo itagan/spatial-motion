@@ -13,6 +13,7 @@ import {
 import {
   rasterizeCards,
 } from './atlas/CardRasterizer.js'
+import { renderDefaultAtlasInWorker } from './atlas/DefaultCardWorkerClient.js'
 import {
   applyAtlasPatch,
   drawPatchToCanvas,
@@ -75,6 +76,7 @@ export interface TextureAtlasMetrics {
   imageFailures: number
   uploadBytes: number
   uploadRanges?: number
+  workerRenders?: number
 }
 
 export async function createTextureAtlas<TMeta = unknown>(
@@ -91,7 +93,6 @@ export async function createTextureAtlas<TMeta = unknown>(
   )
   const {
     padding,
-    stride,
     strideX,
     strideY,
     columns,
@@ -100,11 +101,8 @@ export async function createTextureAtlas<TMeta = unknown>(
     cellWidth,
     cellHeight,
   } = metrics
-  const canvas = document.createElement('canvas')
-  canvas.width = columns * strideX
-  canvas.height = rows * strideY
-  const context = canvas.getContext('2d')
-  if (!context) throw new Error('Canvas 2D context is unavailable')
+  const width = columns * strideX
+  const height = rows * strideY
 
   const rects = new Float32Array(items.length * 4)
   items.forEach((_item, index) => {
@@ -112,15 +110,54 @@ export async function createTextureAtlas<TMeta = unknown>(
     const y = Math.floor(index / columns) * strideY + padding
     rects.set(
       [
-        x / canvas.width,
-        1 - (y + cellHeight) / canvas.height,
-        cellWidth / canvas.width,
-        cellHeight / canvas.height,
+        x / width,
+        1 - (y + cellHeight) / height,
+        cellWidth / width,
+        cellHeight / height,
       ],
       index * 4,
     )
   })
 
+  const workerResult = await renderDefaultAtlasInWorker(items, {
+    width,
+    height,
+    columns,
+    cellWidth,
+    cellHeight,
+    padding,
+    strideX,
+    strideY,
+  }, options)
+  if (workerResult) {
+    return createAtlasResult(
+      workerResult.data,
+      rects,
+      metrics,
+      options,
+      {
+        cells: items.length,
+        renderMs: now() - startedAt,
+        prepareMs: 0,
+        imageLoadWallMs: 0,
+        cellRenderMs: workerResult.cellRenderMs,
+        applyMs: 0,
+        readbackMs: workerResult.readbackMs,
+        imageLoadMs: 0,
+        imageRequests: 0,
+        imageFailures: 0,
+        uploadBytes: workerResult.data.byteLength,
+        uploadRanges: 1,
+        workerRenders: 1,
+      },
+    )
+  }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Canvas 2D context is unavailable')
   const patch = await rasterizeCards(
     items,
     items.map((_item, index) => index),
@@ -134,7 +171,37 @@ export async function createTextureAtlas<TMeta = unknown>(
   const readbackStartedAt = now()
   const data = context.getImageData(0, 0, canvas.width, canvas.height).data
   patch.metrics.readbackMs = now() - readbackStartedAt
-  const texture = new DataTexture(data, canvas.width, canvas.height)
+  patch.metrics = {
+    ...patch.metrics,
+    renderMs: now() - startedAt,
+    uploadBytes: data.byteLength,
+    uploadRanges: 1,
+    workerRenders: 0,
+  }
+  return createAtlasResult(data, rects, metrics, options, patch.metrics)
+}
+
+function createAtlasResult<TMeta>(
+  data: Uint8Array | Uint8ClampedArray,
+  rects: Float32Array,
+  dimensions: ReturnType<typeof resolveAtlasMetrics>,
+  options: TextureAtlasOptions<TMeta>,
+  atlasMetrics: TextureAtlasMetrics,
+): TextureAtlasResult {
+  const {
+    columns,
+    rows,
+    cellSize,
+    cellWidth,
+    cellHeight,
+    padding,
+    stride,
+    strideX,
+    strideY,
+  } = dimensions
+  const width = columns * strideX
+  const height = rows * strideY
+  const texture = new DataTexture(data, width, height)
   const mipmaps = options.mipmaps !== false
   texture.colorSpace = SRGBColorSpace
   texture.minFilter = mipmaps ? LinearMipmapLinearFilter : LinearFilter
@@ -146,12 +213,12 @@ export async function createTextureAtlas<TMeta = unknown>(
   const atlas: TextureAtlasResult = {
     texture,
     rects,
-    width: canvas.width,
-    height: canvas.height,
+    width,
+    height,
     data,
     columns,
     rows,
-    cellSize: resolvedCellSize,
+    cellSize,
     cellWidth,
     cellHeight,
     padding,
@@ -160,16 +227,10 @@ export async function createTextureAtlas<TMeta = unknown>(
     strideY,
     mipmaps,
     initialized: false,
-    metrics: patch.metrics,
+    metrics: atlasMetrics,
   }
   texture.onUpdate = () => {
     atlas.initialized = true
-  }
-  atlas.metrics = {
-    ...patch.metrics,
-    renderMs: now() - startedAt,
-    uploadBytes: data.byteLength,
-    uploadRanges: 1,
   }
   return atlas
 }
