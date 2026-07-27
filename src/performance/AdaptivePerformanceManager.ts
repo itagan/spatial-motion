@@ -1,5 +1,6 @@
 import type { QualityLevel } from '../core/types.js'
-import { qualityProfiles } from './quality.js'
+import { qualityProfiles as defaultQualityProfiles } from './quality.js'
+import type { QualityProfiles } from '../core/types.js'
 
 export interface AdaptivePerformanceOptions {
   sampleWindowMs?: number
@@ -39,7 +40,11 @@ export class AdaptivePerformanceManager {
   private ignoredFrames = 0
   private stats: PerformanceStats
 
-  constructor(private quality: QualityLevel, options: AdaptivePerformanceOptions = {}) {
+  constructor(
+    private quality: QualityLevel,
+    options: AdaptivePerformanceOptions = {},
+    private readonly profiles: QualityProfiles = defaultQualityProfiles,
+  ) {
     this.options = {
       sampleWindowMs: options.sampleWindowMs ?? 2500,
       recoveryWindowMs: options.recoveryWindowMs ?? 8000,
@@ -101,7 +106,7 @@ export class AdaptivePerformanceManager {
     if (!allowQualityChange) return null
     if (now - this.lastChangedAt < this.options.cooldownMs) return null
     const currentIndex = levels.indexOf(this.quality)
-    const currentTarget = qualityProfiles[this.quality].targetFps
+    const currentTarget = this.profiles[this.quality].targetFps
 
     const degradeFps = currentTarget * this.options.degradeThreshold
     const exceedsFrameBudget = frameTimeP95 > 1000 / degradeFps
@@ -115,7 +120,7 @@ export class AdaptivePerformanceManager {
     }
 
     if (currentIndex < levels.length - 1) {
-      const nextTarget = qualityProfiles[levels[currentIndex + 1]].targetFps
+      const nextTarget = this.profiles[levels[currentIndex + 1]].targetFps
       const recoveryFps = nextTarget * this.options.recoveryThreshold
       const recoveredFrameBudget = frameTimeP95 <= 1000 / recoveryFps
       const recoveredLongFrames = windowLongFrameRatio <= this.options.recoveryLongFrameRatio

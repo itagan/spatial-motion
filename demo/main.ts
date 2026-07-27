@@ -49,22 +49,6 @@ const stage = new MotionStage({
   container,
   quality: 'auto',
   adaptivePerformance: true,
-  onQualityChange(quality, stats) {
-    document.querySelector('#quality')!.textContent = `${quality.toUpperCase()} QUALITY`
-    console.info(`Spatial Motion quality changed to ${quality} at ${stats.fps.toFixed(1)} FPS`)
-  },
-  onItemClick(item) {
-    activeTimeline?.cancel()
-    stage.stopRotation()
-    stage.setRotation(0, 0)
-    updateSelection(1)
-    void stage.focusItems([item.id])
-  },
-  onItemHover(item) {
-    if (!pickDebug) return
-    pickDebug.hidden = !item
-    if (item) pickDebug.textContent = `${item.title ?? item.id} · depth pick`
-  },
   hoverEffect: 'highlight',
   motionPreference: 'auto',
   renderer: cardsRenderer({
@@ -75,9 +59,25 @@ const stage = new MotionStage({
       backgroundColor: '#111827',
     },
   }),
-  onExtensionError(error, extension) {
-    console.error(`Stage extension failed: ${extension.name ?? 'anonymous'}`, error)
-  },
+})
+stage.on('qualitychange', ({ quality, stats }) => {
+  document.querySelector('#quality')!.textContent = `${quality.toUpperCase()} QUALITY`
+  console.info(`Spatial Motion quality changed to ${quality} at ${stats.fps.toFixed(1)} FPS`)
+})
+stage.on('itemclick', ({ item }) => {
+  activeTimeline?.cancel()
+  stage.stopRotation()
+  stage.setRotation(0, 0)
+  updateSelection(1)
+  void stage.focusItems([item.id])
+})
+stage.on('itemhover', ({ item }) => {
+  if (!pickDebug) return
+  pickDebug.hidden = !item
+  if (item) pickDebug.textContent = `${item.title ?? item.id} · depth pick`
+})
+stage.on('extensionerror', ({ error, extension }) => {
+  console.error(`Stage extension failed: ${extension.name ?? 'anonymous'}`, error)
 })
 await stage.setItems(items)
 let activeTimeline: Timeline | null = null

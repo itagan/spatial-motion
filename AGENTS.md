@@ -39,6 +39,10 @@ examples/          从正式包名导入的单场景集成示例
 scripts/           包发布形态与消费者验证脚本
 ```
 
+`core` 内部控制器各自拥有唯一状态：`QualityController` 管理质量档位与 Profile，
+`EffectController` 管理活动特效与时钟，`MotionController` 管理布局过渡，
+`StageRuntime` 管理 RAF/暂停/Context。不要把这些状态重新复制回 `MotionStage`。
+
 依赖方向应尽量保持为：`core` 负责编排，调用布局、特效、渲染和性能模块；`layouts` 不应依赖 DOM、WebGL 渲染器或框架；`renderers` 不承载业务流程；`demo` 不包含库运行所必需的逻辑。
 
 稳定公共入口仅限：

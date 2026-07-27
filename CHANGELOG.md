@@ -4,8 +4,23 @@
 
 ## Unreleased
 
+- Cards 新增受约束的 Motion/Effect Program；四个内置 GPU 特效迁移为按需动态
+  chunk，自定义 Program 可声明私有 Attribute、Uniform、GLSL 和 payload 上传。
+- `StreamingEffectGpuData` 收敛为 `{ kind, activeCount, payload }`，异步特效激活
+  使用 generation 隔离竞态并通过 `effecterror` 报告失败。
+- 新增内部 `StageRenderHost` 与 `RendererStateCoordinator`，统一 WebGL 所有权、
+  context 恢复和 setItems 后的渲染状态恢复。
+- Cards-only 消费预算收紧到 10 KB gzip；Atlas 引擎、Array Shader 和内置 Effect
+  Program 均在需要时加载。
+
 ### Added
 
+- 新增独立 `QualityController`、可覆盖质量 Profile/自适应参数、类型化 `stage.on()`
+  事件和开放式 Renderer effect key 协商。
+- `LayoutContext<TMeta>` 新增当前可见 items 与质量档位，自定义布局可直接使用业务
+  meta 生成数据驱动布局。
+- 新增内部 `EffectController`，统一拥有特效准备、Renderer 激活、暂停时钟、质量
+  重配、恢复和低动态结算。
 - Sphere 新增 `fit: 'contain'`、`viewportPadding`、`startAngle` 和 `edgeFade`，参数实验室的经典头像球体默认完整适配视口、避开精确极点并启用轻量轮廓淡出。
 - 卡片增加图片定位、多行标题、逐卡样式和统一宽高比，并收口为稳定 `cardsRenderer()` 配置。
 - 新增按需 `card-template` 入口、`html` tagged template、`defineCardTemplate()` 和受控 HTML/CSS 子集；模板图片复用 Atlas 资源管线。
@@ -22,7 +37,8 @@
 - Canvas 的 CSS 尺寸现在始终跟随 Stage 容器，避免高 DPR 设备把内部像素尺寸当作布局尺寸，导致画面放大、偏移和裁切。
 - Sphere `surface` 朝向现在让每张卡片的法线精确对齐球面外法线；默认球体与经典 Demo 预设也改用完整球面贴合朝向，`upright-surface` 仍可显式选用。
 - Sphere `surface` 卡片的顶部统一朝向球面北极，避免头像随经纬度发生无规则滚转或倒置。
-- 质量切换现在异步协调 2000/1000/500 实例容量并从完整输入恢复升级数据，不再把实例上限与固定可见比例重复削减；等待缩容的实例会在顶点着色阶段提前裁剪。
+- 质量下降保留已有 resident pool，只立即降低 submitted/visible 比例，避免承压时
+  重建 Atlas；从低档启动后升级才异步扩展 resident pool。
 - Cards/Points 现在按容量桶复用 Geometry、Material、过渡 Attribute 和 TypedArray；Atlas 相邻单元合并上传范围，模板复用有界文字测量结果。
 - 稳态布局与交互读取直接复用 Stage 持有的 Transform 快照，Stage wait 直接遍历现有集合；高频 `pointermove` 合并到 Stage 下一帧并只拾取最新坐标，避免 hover、pick 和每帧计时产生重复工作或临时数组。
 - Atlas 默认卡片首次构建直接写入整图 Canvas，不再创建逐卡临时 Canvas 或执行逐卡 `drawImage`；`DataTexture` 直接复用整图 `ImageData` 像素缓冲，移除同尺寸 `Uint8Array` 二次复制。
@@ -37,6 +53,12 @@
 
 ### Compatibility
 
+- 未发布事件 API 直接重构：删除 `MotionStageOptions` 的单回调字段和 `stage.off()`，
+  统一使用 `stage.on()` 返回的取消订阅函数；仅需要 hover 事件时显式设置
+  `hover: true`。
+- preserved-module 总量检查改为 170 KB anti-bundling sentinel，以容纳拆分后的内部
+  Host/Coordinator 模块；真实 root 40 KB、
+  Core 16 KB、Cards 10 KB gzip、layout-only 8 KB 和 tarball 150 KB 为当前产品预算。
 - 发布构建改用 Terser 保持既有 40 KB gzip 预算；本地继续生成隐藏 JavaScript source map，但 npm tarball 不再携带 `.js.map`，类型声明和运行时导出不变。
 - 主库继续受 40 KB gzip 门禁约束，模板与 Points 入口分别限制为 12 KB；Cards `content` 与 `draw` 互斥。
 - Vanilla 卡片示例将内容配方与 `1:1`、`3:4`、`16:9` 比例拆分，产品、人物和指标展示明确为可复制源码而非公共预设，并可展开复制当前 ES6 或 Canvas 写法；旧 `card=` 演示链接继续映射到新参数。

@@ -11,6 +11,11 @@ import {
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TextureAtlasPatch, TextureAtlasResult } from './textureAtlas'
 import { InstancedCardRenderer } from './InstancedCardRenderer'
+import {
+  defineCardEffectProgram,
+  defineCardMotionProgram,
+  type CardEffectProgram,
+} from './cards/programs'
 
 const atlasMock = vi.hoisted(() => ({
   create: vi.fn(),
@@ -183,7 +188,7 @@ describe('InstancedCardRenderer item loading', () => {
     pending.resolve(pendingAtlas.result)
 
     expect(await loading).toBe(false)
-    expect(pendingAtlas.dispose).toHaveBeenCalledOnce()
+    expect(pendingAtlas.dispose).not.toHaveBeenCalled()
     expect(scene.children).toHaveLength(0)
   })
 
@@ -582,20 +587,22 @@ describe('InstancedCardRenderer item loading', () => {
     await renderer.setItems([{ id: 'a' }, { id: 'b' }])
     const parameters = Float32Array.from({ length: 12 }, (_, index) => index + 1)
 
-    renderer.enableEffect({
+    await renderer.enableEffect({
       kind: 'vortex',
-      paths: new Float32Array(8),
-      speedFactors: new Float32Array([1, -1]),
-      parameters,
+      activeCount: 1,
+      payload: {
+        paths: new Float32Array(8),
+        speedFactors: new Float32Array([1, -1]),
+        parameters,
+      },
     })
 
     const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
-    expect(mesh.geometry.getAttribute('effectPath').itemSize).toBe(4)
-    expect(mesh.geometry.getAttribute('effectSpeedFactor').count).toBe(2)
+    expect(mesh.geometry.getAttribute('program_vortex_path').itemSize).toBe(4)
+    expect(mesh.geometry.getAttribute('program_vortex_speed').count).toBe(2)
     expect(Array.from(mesh.geometry.getAttribute('itemIndex').array)).toEqual([0, 1])
-    expect(mesh.material.uniforms.effectMode.value).toBe(3)
-    expect(mesh.material.uniforms.effectParamsA.value.toArray()).toEqual([1, 2, 3, 4])
-    expect(mesh.material.uniforms.effectParamsC.value.toArray()).toEqual([9, 10, 11, 12])
+    expect(mesh.material.uniforms.program_vortex_a.value.toArray()).toEqual([1, 2, 3, 4])
+    expect(mesh.material.uniforms.program_vortex_c.value.toArray()).toEqual([9, 10, 11, 12])
     expect(mesh.geometry.instanceCount).toBe(1)
     expect(renderer.getStats()).toMatchObject({ instanceCount: 2, submittedInstanceCount: 1 })
     renderer.disableEffect()
@@ -604,6 +611,149 @@ describe('InstancedCardRenderer item loading', () => {
     expect(mesh.material.uniforms.hoverIndex.value).toBe(1)
     renderer.setHoverIndex(null)
     expect(mesh.material.uniforms.hoverIndex.value).toBe(-1)
+    renderer.dispose()
+  })
+
+  it('loads, caches, uploads, and switches a custom effect program', async () => {
+    const currentAtlas = atlas(2)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const loader = vi.fn(async () => defineCardEffectProgram<Float32Array>({
+      kind: 'custom-wave',
+      prefix: 'program_wave_',
+      attributes: [{ name: 'program_wave_phase', itemSize: 1 }],
+      uniforms: [{ name: 'program_wave_time', type: 'float' }],
+      vertexBody: 'center.y += sin(program_wave_phase + program_wave_time);',
+      upload(context, payload) {
+        context.setAttribute('program_wave_phase', payload)
+        context.setUniform('program_wave_time', 0)
+      },
+    }))
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene, {
+      effectPrograms: { 'custom-wave': loader },
+    })
+    await renderer.setItems([{ id: 'a' }, { id: 'b' }])
+
+    await expect(renderer.enableEffect({
+      kind: 'custom-wave',
+      activeCount: 2,
+      payload: new Float32Array([0.25, 0.5]),
+    })).resolves.toBe(true)
+    await expect(renderer.enableEffect({
+      kind: 'custom-wave',
+      activeCount: 1,
+      payload: new Float32Array([0.75]),
+    })).resolves.toBe(true)
+
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+    expect(loader).toHaveBeenCalledOnce()
+    expect(mesh.geometry.getAttribute('program_wave_phase').array[0]).toBe(0.75)
+    expect(renderer.getStats().metrics).toMatchObject({
+      programLoads: 1,
+      programSwitches: 2,
+      cachedPrograms: 1,
+    })
+    await expect(renderer.enableEffect({
+      kind: 'missing',
+      activeCount: 1,
+      payload: null,
+    })).resolves.toBe(false)
+    renderer.dispose()
+  })
+
+  it('uploads a custom motion Program through the common layout pipeline', async () => {
+    const currentAtlas = atlas(2)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const motionProgram = defineCardMotionProgram<{ offset: number }>({
+      kind: 'business-offset',
+      prefix: 'program_offset_',
+      attributes: [{ name: 'program_offset_value', itemSize: 1 }],
+      vertexBody: 'center.y += program_offset_value;',
+      upload(context, items) {
+        context.setAttribute(
+          'program_offset_value',
+          Float32Array.from(items, ({ meta }) => meta?.offset ?? 0),
+        )
+      },
+    })
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene, { motionProgram })
+    await renderer.setItems([
+      { id: 'a', meta: { offset: 2 } },
+      { id: 'b', meta: { offset: -1 } },
+    ])
+
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+    expect(Array.from(mesh.geometry.getAttribute('program_offset_value').array).slice(0, 2))
+      .toEqual([2, -1])
+    expect(mesh.material.vertexShader).toContain('center.y += program_offset_value;')
+    renderer.dispose()
+  })
+
+  it('does not let a slow Program replace a newer effect material', async () => {
+    const currentAtlas = atlas(1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const slowProgram = deferred<CardEffectProgram<null>>()
+    const define = (kind: string, marker: string) => defineCardEffectProgram<null>({
+      kind,
+      prefix: `program_${kind}_`,
+      vertexBody: `center.x += 0.0; // ${marker}`,
+      upload() {},
+    })
+    const fast = define('fast', 'FAST_PROGRAM')
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene, {
+      effectPrograms: {
+        slow: () => slowProgram.promise,
+        fast,
+      },
+    })
+    await renderer.setItems([{ id: 'a' }])
+
+    const slow = renderer.enableEffect({ kind: 'slow', activeCount: 1, payload: null })
+    await expect(renderer.enableEffect({
+      kind: 'fast',
+      activeCount: 1,
+      payload: null,
+    })).resolves.toBe(true)
+    slowProgram.resolve(define('slow', 'SLOW_PROGRAM'))
+    await expect(slow).resolves.toBe(false)
+
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+    expect(mesh.material.vertexShader).toContain('FAST_PROGRAM')
+    expect(mesh.material.vertexShader).not.toContain('SLOW_PROGRAM')
+    renderer.dispose()
+  })
+
+  it('releases a newly prepared Program runtime when payload upload fails', async () => {
+    const currentAtlas = atlas(1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const broken = defineCardEffectProgram<null>({
+      kind: 'broken',
+      prefix: 'program_broken_',
+      vertexBody: 'center.x += 0.0;',
+      upload() {
+        throw new Error('upload failed')
+      },
+    })
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene, {
+      effectPrograms: { broken },
+    })
+    await renderer.setItems([{ id: 'a' }])
+    const baseMaterial = (scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>).material
+
+    await expect(renderer.enableEffect({
+      kind: 'broken',
+      activeCount: 1,
+      payload: null,
+    })).rejects.toThrow('upload failed')
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+    expect(mesh.material).toBe(baseMaterial)
+    expect(renderer.getStats().metrics).toMatchObject({
+      programFailures: 1,
+      cachedPrograms: 0,
+    })
     renderer.dispose()
   })
 

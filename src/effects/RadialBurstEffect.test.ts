@@ -8,9 +8,9 @@ describe('RadialBurstEffect', () => {
     const data = effect.getGpuData()
 
     expect(data.kind).toBe('radial-burst')
-    expect(data.paths).toHaveLength(2000)
-    expect(data.speedFactors).toHaveLength(500)
-    expect(Array.from(data.speedFactors).filter((speed) => speed >= 0)).toHaveLength(120)
+    expect(data.payload.paths).toHaveLength(2000)
+    expect(data.payload.speedFactors).toHaveLength(500)
+    expect(Array.from(data.payload.speedFactors).filter((speed) => speed >= 0)).toHaveLength(120)
   })
 
   it('moves active cards along finite radial paths with depth variation', () => {

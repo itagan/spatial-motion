@@ -16,7 +16,9 @@ const transformKeys = [
   'opacity',
 ] as const satisfies readonly (keyof Transform)[]
 
-export function defineLayout(definition: LayoutDefinition): Layout {
+export function defineLayout<TMeta = unknown>(
+  definition: LayoutDefinition<TMeta>,
+): Layout<TMeta> {
   if (!definition || typeof definition !== 'object') {
     throw new TypeError('Layout definition must be an object')
   }
@@ -41,12 +43,12 @@ export function defineLayout(definition: LayoutDefinition): Layout {
     throw new TypeError('Layout calculate must be a function')
   }
 
-  const layout: Layout = {
+  const layout: Layout<TMeta> = {
     name,
     orientation: definition.orientation,
     hideBackHemisphere: definition.hideBackHemisphere,
     hemisphereEdgeFade: definition.hemisphereEdgeFade,
-    calculate(count: number, context: LayoutContext): readonly Transform[] {
+    calculate(count: number, context: LayoutContext<TMeta>): readonly Transform[] {
       if (!Number.isInteger(count) || count < 0) {
         throw new RangeError('Layout count must be a non-negative integer')
       }

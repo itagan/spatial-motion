@@ -85,9 +85,13 @@ export interface Transform {
   readonly opacity: number
 }
 
-export interface LayoutContext {
+export interface LayoutContext<TMeta = unknown> {
   width: number
   height: number
+  /** Current visible items. Custom layouts can group or weight transforms from business data. */
+  items?: readonly MotionItem<TMeta>[]
+  /** Current quality selected by the Stage. */
+  quality?: QualityLevel
   /** Camera-visible width in world units at the default layout plane. */
   viewportWidth?: number
   /** Camera-visible height in world units at the default layout plane. */
@@ -98,20 +102,20 @@ export interface LayoutContext {
   itemHeight?: number
 }
 
-export interface Layout {
+export interface Layout<TMeta = unknown> {
   readonly name: string
   readonly orientation?: 'surface' | 'camera'
   readonly hideBackHemisphere?: boolean
   readonly hemisphereEdgeFade?: number
-  calculate(count: number, context: LayoutContext): readonly Transform[]
+  calculate(count: number, context: LayoutContext<TMeta>): readonly Transform[]
 }
 
-export interface LayoutDefinition {
+export interface LayoutDefinition<TMeta = unknown> {
   readonly name: string
   readonly orientation?: 'surface' | 'camera'
   readonly hideBackHemisphere?: boolean
   readonly hemisphereEdgeFade?: number
-  readonly calculate: (count: number, context: LayoutContext) => readonly Transform[]
+  readonly calculate: (count: number, context: LayoutContext<TMeta>) => readonly Transform[]
 }
 
 export interface TransitionOptions {
@@ -131,3 +135,5 @@ export interface QualityProfile {
 }
 
 export type QualityLevel = 'high' | 'medium' | 'low'
+export type QualityMode = QualityLevel | 'auto'
+export type QualityProfiles = Readonly<Record<QualityLevel, Readonly<QualityProfile>>>

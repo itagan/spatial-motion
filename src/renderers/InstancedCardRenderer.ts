@@ -1,7 +1,6 @@
 import {
   DynamicDrawUsage,
   Euler,
-  FrontSide,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
   Mesh,
@@ -9,26 +8,28 @@ import {
   PlaneGeometry,
   Quaternion,
   ShaderMaterial,
-  Vector4,
 } from 'three'
 import type { Texture } from 'three'
 import type { MotionItem, Transform } from '../core/types.js'
-import type { StreamingEffectGpuData, StreamingEffectKind } from '../effects/types.js'
-import {
-  advanceTextureAtlasUploads,
-  applyTextureAtlasPatch,
-  clearTextureAtlasPatchQueue,
-  createTextureAtlas,
-  createTextureAtlasPatch,
+import type { StreamingEffectGpuData } from '../effects/types.js'
+import { createCardProgramMaterial } from './CardProgramMaterial.js'
+import type {
+  CardEffectProgram,
+  CardEffectProgramLoader,
+  CardMotionProgram,
+  CardProgramUploadContext,
+} from './cards/programs.js'
+import type {
   TextureAtlasImageCache,
-  type TextureAtlasOptions,
-  type TextureAtlasPatch,
-  type TextureAtlasResult,
+  TextureAtlasOptions,
+  TextureAtlasPatch,
+  TextureAtlasResult,
 } from './textureAtlas.js'
 import type {
   MotionRenderer,
   MotionRendererCapabilities,
   MotionRendererDescriptor,
+  MotionRendererFactoryContext,
   MotionRendererStats,
   MotionRendererViewport,
   MotionRendererVisualState,
@@ -38,6 +39,14 @@ export interface CardRendererOptions<TMeta = unknown> extends TextureAtlasOption
   cellSize?: number | 'auto'
   prepareTexture?: (texture: Texture) => number
   texturePrewarm?: boolean
+  prepareProgram?: MotionRendererFactoryContext['prepareProgram']
+  motionProgram?: CardMotionProgram<TMeta>
+  effectPrograms?: Readonly<Record<string, CardEffectProgramLoader>>
+}
+
+interface CardProgramRuntime {
+  program: CardEffectProgram
+  material: ShaderMaterial
 }
 
 const INITIAL_ARRAY_UPLOAD_BYTES = 3 * 1024 * 1024
@@ -50,6 +59,17 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private instanceCapacity = 0
   private itemCount = 0
   private material: ShaderMaterial | null = null
+  private baseMaterial: ShaderMaterial | null = null
+  private readonly programRuntimes = new Map<string, CardProgramRuntime>()
+  private readonly programLoads = new Map<string, Promise<CardEffectProgram | null>>()
+  private effectGeneration = 0
+  private activeProgram: CardProgramRuntime | null = null
+  private configureArrayMaterial: ((material: ShaderMaterial) => void) | undefined
+  private programLoadCount = 0
+  private programLoadMs = 0
+  private programPrepareMs = 0
+  private programSwitches = 0
+  private programFailures = 0
   private generation = 0
   private itemFingerprints: string[] = []
   private fingerprintFullScans = 0
@@ -87,14 +107,16 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private atlasUploadRanges = 0
   private readonly euler = new Euler()
   private readonly quaternion = new Quaternion()
-  private readonly imageCache: TextureAtlasImageCache
+  private imageCache: TextureAtlasImageCache | null = null
+  private atlasApi: typeof import('./textureAtlas.js') | null = null
+  private atlasApiPromise: Promise<typeof import('./textureAtlas.js')> | null = null
   private atlasAbortController: AbortController | null = null
+  private disposed = false
 
   constructor(
     private readonly root: Object3D,
     private readonly atlasOptions: CardRendererOptions<TMeta> = {},
   ) {
-    this.imageCache = new TextureAtlasImageCache(normalizeImageCacheSize(atlasOptions.imageCacheSize))
     const aspectRatio = resolveAspectRatio(atlasOptions.aspectRatio)
     this.descriptor = {
       itemBounds: {
@@ -123,6 +145,8 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   }
 
   async setItems(items: readonly MotionItem<TMeta>[]): Promise<boolean> {
+    const atlasApi = await this.loadAtlasApi()
+    if (this.disposed) return false
     const fingerprints = createItemFingerprints(items, this.atlasOptions)
     this.fingerprintFullScans += 1
     this.fingerprintItemsScanned += items.length
@@ -131,10 +155,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       && equalFingerprints(fingerprints, this.itemFingerprints)
       && !this.atlasAbortController
     ) return true
-    const { controller, generation, options } = this.beginAtlasOperation()
+    const { controller, generation, options } = this.beginAtlasOperation(atlasApi)
     let atlas: TextureAtlasResult
     try {
-      atlas = await createTextureAtlas(
+      atlas = await atlasApi.createTextureAtlas(
         items,
         resolveAtlasResolution(
           this.atlasOptions.cellSize,
@@ -162,6 +186,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       && atlas.mode === this.atlas?.mode
     ) {
       this.replaceAtlas(atlas, items.length)
+      this.uploadMotionProgram(items)
       this.prewarmAtlas(atlas)
       this.itemFingerprints = fingerprints
       this.recordAtlasBuild(atlas)
@@ -197,8 +222,6 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     geometry.setAttribute('uv', plane.getAttribute('uv'))
     geometry.instanceCount = items.length
     geometry.setAttribute('atlasRect', dynamicAttribute(new Float32Array(nextCapacity * 4), 4))
-    geometry.setAttribute('effectPath', dynamicAttribute(new Float32Array(nextCapacity * 4), 4))
-    geometry.setAttribute('effectSpeedFactor', dynamicAttribute(new Float32Array(nextCapacity), 1))
     geometry.setAttribute('visibilityRank', new InstancedBufferAttribute(createVisibilityRanks(nextCapacity), 1))
     geometry.setAttribute('itemIndex', new InstancedBufferAttribute(createItemIndices(nextCapacity), 1))
     geometry.setAttribute('fromPosition', dynamicAttribute(new Float32Array(nextCapacity * 3), 3))
@@ -210,226 +233,25 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     geometry.setAttribute('fromOpacity', dynamicAttribute(new Float32Array(nextCapacity), 1))
     geometry.setAttribute('toOpacity', dynamicAttribute(new Float32Array(nextCapacity), 1))
     copyAttribute(geometry.getAttribute('atlasRect') as InstancedBufferAttribute, atlas.rects)
-    const arrayAtlas = atlas.mode === 'array'
-    this.material = new ShaderMaterial({
-      uniforms: {
-        atlas: { value: atlas.texture },
-        progress: { value: 1 },
-        fromBillboard: { value: 0 },
-        toBillboard: { value: 0 },
-        fromHideBackHemisphere: { value: 0 },
-        toHideBackHemisphere: { value: 0 },
-        fromHemisphereEdgeFade: { value: 0 },
-        toHemisphereEdgeFade: { value: 0 },
-        effectMode: { value: 0 },
-        effectTime: { value: 0 },
-        effectParamsA: { value: new Vector4() },
-        effectParamsB: { value: new Vector4() },
-        effectParamsC: { value: new Vector4() },
-        visibleRatio: { value: 1 },
-        hoverIndex: { value: -1 },
-        uLayers: { value: arrayAtlas ? this.nextLayer : 1_000_000 },
-      },
-      vertexShader: `
-        attribute vec4 atlasRect;
-        attribute vec3 fromPosition;
-        attribute vec3 toPosition;
-        attribute vec4 fromQuaternion;
-        attribute vec4 toQuaternion;
-        attribute float fromScale;
-        attribute float toScale;
-        attribute float fromOpacity;
-        attribute float toOpacity;
-        attribute vec4 effectPath;
-        attribute float effectSpeedFactor;
-        attribute float visibilityRank;
-        attribute float itemIndex;
-        uniform float progress;
-        uniform float fromBillboard;
-        uniform float toBillboard;
-        uniform float fromHideBackHemisphere;
-        uniform float toHideBackHemisphere;
-        uniform float fromHemisphereEdgeFade;
-        uniform float toHemisphereEdgeFade;
-        uniform float effectMode;
-        uniform float effectTime;
-        uniform vec4 effectParamsA;
-        uniform vec4 effectParamsB;
-        uniform vec4 effectParamsC;
-        uniform float visibleRatio;
-        uniform float hoverIndex;
-        varying vec2 vAtlasUv;
-        varying float vOpacity;
-        varying float vInstanceVisible;
-        varying float vHighlight;
-
-        vec3 rotateByQuaternion(vec3 value, vec4 quaternion) {
-          return value + 2.0 * cross(quaternion.xyz, cross(quaternion.xyz, value) + quaternion.w * value);
-        }
-
-        vec4 interpolateQuaternion(vec4 fromValue, vec4 toValue, float amount) {
-          vec4 target = dot(fromValue, toValue) < 0.0 ? -toValue : toValue;
-          return normalize(mix(fromValue, target, amount));
-        }
-
-        float emissionEnvelope(float time, float mode, float burstInterval, float burstDuration, float waveFrequency, float waveStrength) {
-          if (mode < 0.5) return 1.0;
-          if (mode > 1.5) {
-            float wave = sin(time * waveFrequency * 6.28318530718) * 0.5 + 0.5;
-            return mix(1.0 - waveStrength, 1.0, wave);
-          }
-          float phase = mod(time, max(0.001, burstInterval));
-          float edge = min(0.1, burstDuration * 0.25);
-          return smoothstep(0.0, edge, phase)
-            * (1.0 - smoothstep(burstDuration - edge, burstDuration, phase));
-        }
-
-        float effectTravel(float progress) {
-          float value = clamp(progress, 0.0, 1.0);
-          return value * value * value * (value * (value * 6.0 - 15.0) + 10.0);
-        }
-
-        float effectEdgeFade(float progress, float fadeIn, float fadeOut) {
-          return smoothstep(0.0, fadeIn, progress)
-            * (1.0 - smoothstep(1.0 - fadeOut, 1.0, progress));
-        }
-
-        vec2 tunnelCrossSection(float angle, float radius, float squareShape) {
-          vec2 direction = vec2(cos(angle), sin(angle));
-          if (squareShape > 0.5) direction /= max(max(abs(direction.x), abs(direction.y)), 0.000001);
-          return direction * radius;
-        }
-
-        void main() {
-          vAtlasUv = atlasRect.xy + uv * atlasRect.zw;
-          if (visibilityRank > visibleRatio) {
-            vOpacity = 0.0;
-            vInstanceVisible = 0.0;
-            vHighlight = 0.0;
-            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-            return;
-          }
-          vOpacity = mix(fromOpacity, toOpacity, progress);
-          vec3 center = mix(fromPosition, toPosition, progress);
-          float itemScale = mix(fromScale, toScale, progress);
-          vHighlight = 1.0 - step(0.5, abs(itemIndex - hoverIndex));
-          itemScale *= mix(1.0, 1.08, vHighlight);
-          vec4 itemQuaternion = interpolateQuaternion(fromQuaternion, toQuaternion, progress);
-          float effectVisible = 1.0;
-
-          if (effectMode > 3.5) {
-            effectVisible = step(0.0, effectSpeedFactor);
-            float radialProgress = fract(effectPath.w + effectTime * effectParamsA.z * abs(effectSpeedFactor));
-            float radialCurvedProgress = effectTravel(radialProgress);
-            float radialTravel = effectParamsB.z > 0.5 ? radialCurvedProgress : 1.0 - radialCurvedProgress;
-            float radialDistance = mix(effectParamsA.x, effectPath.z, smoothstep(0.0, 1.0, radialTravel));
-            float radialHorizontal = cos(effectPath.y) * radialDistance;
-            center = vec3(
-              cos(effectPath.x) * radialHorizontal,
-              sin(effectPath.y) * radialDistance,
-              effectParamsA.w + sin(effectPath.x) * radialHorizontal * effectParamsB.w
-            );
-            itemScale = mix(effectParamsB.x, effectParamsB.y, radialTravel);
-            vOpacity *= effectEdgeFade(radialProgress, 0.06, 0.2);
-          } else if (effectMode > 2.5) {
-            effectVisible = step(0.0, effectSpeedFactor);
-            float vortexProgress = fract(effectPath.z + effectTime * effectParamsB.x * abs(effectSpeedFactor));
-            float vortexCurvedProgress = effectTravel(vortexProgress);
-            float vortexTravel = effectParamsC.x > 0.5 ? vortexCurvedProgress : 1.0 - vortexCurvedProgress;
-            float vortexSpread = smoothstep(0.0, 1.0, vortexTravel);
-            float vortexDirection = effectParamsC.x > 0.5 ? 1.0 : -1.0;
-            float vortexAngle = effectPath.x + vortexProgress * effectParamsB.y * 6.28318530718 * vortexDirection;
-            float vortexRadius = mix(effectParamsA.x, effectPath.y, vortexSpread);
-            center = vec3(
-              cos(vortexAngle) * vortexRadius,
-              sin(vortexAngle) * vortexRadius,
-              mix(effectParamsA.w, effectParamsA.z, vortexTravel)
-            );
-            itemScale = mix(effectParamsB.z, effectParamsB.w, vortexTravel);
-            vOpacity *= effectEdgeFade(vortexProgress, 0.07, 0.18);
-          } else if (effectMode > 1.5) {
-            effectVisible = step(0.0, effectSpeedFactor);
-            float shooterProgress = fract(effectPath.z + effectTime * effectParamsA.y * abs(effectSpeedFactor));
-            float shooterTravel = effectTravel(shooterProgress);
-            float currentDistance = mix(effectParamsA.x, effectPath.y, shooterTravel);
-            center = vec3(
-              cos(effectPath.x) * currentDistance,
-              sin(effectPath.x) * currentDistance,
-              effectParamsB.x
-            );
-            itemScale = mix(effectParamsA.z, effectParamsA.w, shooterTravel);
-            vOpacity *= effectEdgeFade(shooterProgress, 0.06, 0.22);
-            vOpacity *= emissionEnvelope(effectTime, effectParamsB.w, effectParamsC.x, effectParamsC.y, effectParamsC.z, effectParamsC.w);
-          } else if (effectMode > 0.5) {
-            effectVisible = step(0.0, effectSpeedFactor);
-            float tunnelProgress = fract(effectPath.z + effectTime * effectParamsA.w * abs(effectSpeedFactor));
-            float tunnelTravel = effectTravel(tunnelProgress);
-            float spread = smoothstep(0.0, 1.0, tunnelTravel);
-            float currentAngle = effectPath.x + tunnelProgress * effectParamsB.x;
-            float currentRadius = mix(effectParamsA.z, effectPath.y, spread);
-            vec2 tunnelPoint = tunnelCrossSection(currentAngle, currentRadius, effectPath.w);
-            center = vec3(
-              tunnelPoint,
-              mix(effectParamsA.x, effectParamsA.y, tunnelTravel)
-            );
-            itemScale = mix(effectParamsB.y, effectParamsB.z, tunnelTravel);
-            vOpacity *= effectEdgeFade(tunnelProgress, 0.08, 0.18);
-            vOpacity *= emissionEnvelope(effectTime, effectParamsB.w, effectParamsC.x, effectParamsC.y, effectParamsC.z, effectParamsC.w);
-          }
-
-          vec4 centerView = modelViewMatrix * vec4(center, 1.0);
-          if (effectMode > 0.5) {
-            vInstanceVisible = effectVisible;
-            centerView.xy += position.xy * itemScale;
-            gl_Position = projectionMatrix * centerView;
-          } else {
-            vec3 localPosition = rotateByQuaternion(position * itemScale, itemQuaternion);
-            vec4 surfaceView = modelViewMatrix * vec4(center + localPosition, 1.0);
-            vec4 billboardView = centerView;
-            billboardView.xy += position.xy * itemScale;
-            float billboardAmount = mix(fromBillboard, toBillboard, progress);
-            gl_Position = projectionMatrix * mix(surfaceView, billboardView, billboardAmount);
-
-            vec4 sphereCenterView = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-            float hemisphereVisible = step(sphereCenterView.z, centerView.z);
-            float hideBackAmount = mix(fromHideBackHemisphere, toHideBackHemisphere, progress);
-            vOpacity *= mix(1.0, hemisphereVisible, hideBackAmount);
-            float edgeFade = mix(fromHemisphereEdgeFade, toHemisphereEdgeFade, progress);
-            if (edgeFade > 0.0) {
-              vec3 radialView = normalize(centerView.xyz - sphereCenterView.xyz);
-              float facing = dot(radialView, normalize(-centerView.xyz));
-              vOpacity *= smoothstep(0.0, edgeFade, facing);
-            }
-            vInstanceVisible = 1.0;
-          }
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D atlas;
-        varying vec2 vAtlasUv;
-        varying float vOpacity;
-        varying float vInstanceVisible;
-        varying float vHighlight;
-        void main() {
-          if (vInstanceVisible < 0.5) discard;
-          vec4 color = texture2D(atlas, vAtlasUv);
-          vec3 highlighted = mix(color.rgb, min(vec3(1.0), color.rgb * 1.16 + 0.06), vHighlight);
-          gl_FragColor = vec4(highlighted, color.a * vOpacity);
-        }
-      `,
-      transparent: true,
-      side: FrontSide,
-      glslVersion: null,
-    })
-    configureArrayMaterial?.(this.material)
-    this.mesh = new Mesh(geometry, this.material)
     this.instanceCapacity = nextCapacity
+    this.ensureProgramAttributes(geometry, this.atlasOptions.motionProgram)
+    const arrayAtlas = atlas.mode === 'array'
+    this.baseMaterial = createCardProgramMaterial(
+      atlas.texture,
+      arrayAtlas ? this.nextLayer : 1_000_000,
+      this.atlasOptions.motionProgram,
+    )
+    this.configureArrayMaterial = configureArrayMaterial
+    configureArrayMaterial?.(this.baseMaterial)
+    this.material = this.baseMaterial
+    this.mesh = new Mesh(geometry, this.material)
     this.itemCount = items.length
     this.geometryBuilds += 1
     this.mesh.frustumCulled = false
     this.root.add(this.mesh)
     this.itemFingerprints = fingerprints
     this.atlas = atlas
+    this.uploadMotionProgram(items)
     this.recordAtlasBuild(atlas)
     return true
   }
@@ -452,10 +274,12 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       fingerprints.every(({ index, value }) => this.itemFingerprints[index] === value)
       && !this.atlasAbortController
     ) return true
-    const { controller, generation, options } = this.beginAtlasOperation()
+    const atlasApi = await this.loadAtlasApi()
+    if (this.disposed) return false
+    const { controller, generation, options } = this.beginAtlasOperation(atlasApi)
     let patch: TextureAtlasPatch
     try {
-      patch = await createTextureAtlasPatch(items, indices, this.atlas.cellSize, options)
+      patch = await atlasApi.createTextureAtlasPatch(items, indices, this.atlas.cellSize, options)
     } catch (error) {
       if (generation !== this.generation || isAbortError(error)) return false
       throw error
@@ -469,7 +293,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     const atlas = this.atlas
     const metrics = patch.metrics
     const arrayAtlas = atlas.mode === 'array'
-    const applyMs = applyTextureAtlasPatch(
+    const applyMs = atlasApi.applyTextureAtlasPatch(
       atlas,
       patch,
       arrayAtlas ? this.nextLayer : undefined,
@@ -489,6 +313,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     fingerprints.forEach(({ index, value }) => {
       this.itemFingerprints[index] = value
     })
+    this.uploadMotionProgram(items)
     return true
   }
 
@@ -545,76 +370,122 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     from: MotionRendererVisualState,
     to: MotionRendererVisualState,
   ): void {
-    if (!this.material) return
-    const uniforms = this.material.uniforms
-    uniforms.fromBillboard.value = from.billboard
-    uniforms.toBillboard.value = to.billboard
-    uniforms.fromHideBackHemisphere.value = from.hideBackHemisphere
-    uniforms.toHideBackHemisphere.value = to.hideBackHemisphere
-    uniforms.fromHemisphereEdgeFade.value = from.hemisphereEdgeFade
-    uniforms.toHemisphereEdgeFade.value = to.hemisphereEdgeFade
+    this.forEachMaterial(({ uniforms }) => {
+      uniforms.fromBillboard!.value = from.billboard
+      uniforms.toBillboard!.value = to.billboard
+      uniforms.fromHideBackHemisphere!.value = from.hideBackHemisphere
+      uniforms.toHideBackHemisphere!.value = to.hideBackHemisphere
+      uniforms.fromHemisphereEdgeFade!.value = from.hemisphereEdgeFade
+      uniforms.toHemisphereEdgeFade!.value = to.hemisphereEdgeFade
+    })
   }
 
   setProgress(progress: number): void {
-    if (this.material) this.material.uniforms.progress.value = progress
+    this.forEachMaterial(({ uniforms }) => {
+      uniforms.progress!.value = progress
+    })
   }
 
   setVisualState(state: MotionRendererVisualState): void {
-    if (!this.material) return
-    const uniforms = this.material.uniforms
-    uniforms.fromBillboard.value = state.billboard
-    uniforms.toBillboard.value = state.billboard
-    uniforms.fromHideBackHemisphere.value = state.hideBackHemisphere
-    uniforms.toHideBackHemisphere.value = state.hideBackHemisphere
-    uniforms.fromHemisphereEdgeFade.value = state.hemisphereEdgeFade
-    uniforms.toHemisphereEdgeFade.value = state.hemisphereEdgeFade
+    this.forEachMaterial(({ uniforms }) => {
+      uniforms.fromBillboard!.value = state.billboard
+      uniforms.toBillboard!.value = state.billboard
+      uniforms.fromHideBackHemisphere!.value = state.hideBackHemisphere
+      uniforms.toHideBackHemisphere!.value = state.hideBackHemisphere
+      uniforms.fromHemisphereEdgeFade!.value = state.hemisphereEdgeFade
+      uniforms.toHemisphereEdgeFade!.value = state.hemisphereEdgeFade
+    })
   }
 
-  enableEffect(data: StreamingEffectGpuData): void {
-    if (!this.mesh || !this.material) return
-    const effectPath = this.mesh.geometry.getAttribute('effectPath') as InstancedBufferAttribute
-    const effectSpeed = this.mesh.geometry.getAttribute('effectSpeedFactor') as InstancedBufferAttribute
-    ;(effectPath.array as Float32Array).fill(0)
-    ;(effectSpeed.array as Float32Array).fill(-1)
-    ;(effectPath.array as Float32Array).set(data.paths.subarray(0, effectPath.array.length))
-    ;(effectSpeed.array as Float32Array).set(
-      data.speedFactors.subarray(0, effectSpeed.array.length),
-    )
-    markAttribute(effectPath, Math.min(effectPath.array.length, data.paths.length))
-    markAttribute(effectSpeed, Math.min(effectSpeed.array.length, data.speedFactors.length))
-    this.attributeReuses += 2
-    const uniforms = this.material.uniforms
-    setVector4(uniforms.effectParamsA.value as Vector4, data.parameters, 0)
-    setVector4(uniforms.effectParamsB.value as Vector4, data.parameters, 4)
-    setVector4(uniforms.effectParamsC.value as Vector4, data.parameters, 8)
-    uniforms.effectTime.value = 0
-    uniforms.effectMode.value = effectMode(data.kind)
-    uniforms.fromHideBackHemisphere.value = 0
-    uniforms.toHideBackHemisphere.value = 0
-    uniforms.fromHemisphereEdgeFade.value = 0
-    uniforms.toHemisphereEdgeFade.value = 0
-    let activeCount = 0
-    while (activeCount < data.speedFactors.length && data.speedFactors[activeCount] >= 0) {
-      activeCount += 1
+  async enableEffect(data: StreamingEffectGpuData): Promise<boolean> {
+    if (!this.mesh || !this.baseMaterial) return false
+    const generation = ++this.effectGeneration
+    let temporaryRuntime: CardProgramRuntime | null = null
+    let createdRuntimeKind: string | null = null
+    try {
+      const program = await this.loadEffectProgram(data.kind)
+      if (!program || generation !== this.effectGeneration || !this.mesh) return false
+      let runtime = this.programRuntimes.get(program.kind)
+      if (!runtime) {
+        const preparedAt = performance.now()
+        this.ensureProgramAttributes(this.mesh.geometry, program)
+        const material = createCardProgramMaterial(
+          this.atlas!.texture,
+          this.atlas?.mode === 'array' ? this.nextLayer : 1_000_000,
+          program,
+        )
+        this.configureArrayMaterial?.(material)
+        temporaryRuntime = { program, material }
+        try {
+          if (this.atlasOptions.prepareProgram) {
+            await this.atlasOptions.prepareProgram(material, this.mesh.geometry)
+          }
+        } catch (error) {
+          material.dispose()
+          temporaryRuntime = null
+          throw error
+        }
+        if (generation !== this.effectGeneration) {
+          material.dispose()
+          temporaryRuntime = null
+          return false
+        }
+        runtime = temporaryRuntime
+        this.programRuntimes.set(program.kind, runtime)
+        createdRuntimeKind = program.kind
+        temporaryRuntime = null
+        this.programPrepareMs += performance.now() - preparedAt
+      }
+      if (generation !== this.effectGeneration) return false
+      this.syncCommonUniforms(runtime.material)
+      program.upload(this.createUploadContext(program, runtime.material), data.payload)
+      if (generation !== this.effectGeneration) return false
+      this.activeProgram = runtime
+      this.material = runtime.material
+      this.mesh.material = runtime.material
+      this.mesh.geometry.instanceCount = Math.min(this.itemCount, data.activeCount)
+      this.programSwitches += 1
+      return true
+    } catch (error) {
+      if (temporaryRuntime) temporaryRuntime.material.dispose()
+      if (createdRuntimeKind) {
+        this.programRuntimes.get(createdRuntimeKind)?.material.dispose()
+        this.programRuntimes.delete(createdRuntimeKind)
+      }
+      this.programFailures += 1
+      if (generation === this.effectGeneration) this.disableEffect()
+      throw error
     }
-    this.mesh.geometry.instanceCount = Math.min(this.itemCount, activeCount)
   }
 
   disableEffect(): void {
-    if (this.material) this.material.uniforms.effectMode.value = 0
-    if (this.mesh) this.mesh.geometry.instanceCount = this.itemCount
+    this.effectGeneration += 1
+    this.activeProgram = null
+    if (this.mesh && this.baseMaterial) {
+      this.material = this.baseMaterial
+      this.mesh.material = this.baseMaterial
+      this.mesh.geometry.instanceCount = this.itemCount
+    }
   }
 
   setEffectTime(elapsedSeconds: number): void {
-    if (this.material) this.material.uniforms.effectTime.value = elapsedSeconds
+    const runtime = this.activeProgram
+    if (!runtime) return
+    const time = runtime.program.uniforms?.find(({ name }) => name.endsWith('_time'))
+    if (time) runtime.material.uniforms[time.name]!.value = elapsedSeconds
   }
 
   setVisibleRatio(ratio: number): void {
-    if (this.material) this.material.uniforms.visibleRatio.value = Math.min(1, Math.max(0.05, ratio))
+    const value = Math.min(1, Math.max(0.05, ratio))
+    this.forEachMaterial(({ uniforms }) => {
+      uniforms.visibleRatio!.value = value
+    })
   }
 
   setHoverIndex(index: number | null): void {
-    if (this.material) this.material.uniforms.hoverIndex.value = index ?? -1
+    this.forEachMaterial(({ uniforms }) => {
+      uniforms.hoverIndex!.value = index ?? -1
+    })
   }
 
   resize(_viewport: MotionRendererViewport): void {}
@@ -623,8 +494,9 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     if (this.atlas) {
       this.atlas.initialized = false
       this.prepareAtlasUploads(this.atlas)
-      if (this.material) this.material.uniforms.uLayers.value =
-        this.atlas.mode === 'array' ? this.nextLayer : 1_000_000
+      this.forEachMaterial(({ uniforms }) => {
+        uniforms.uLayers!.value = this.atlas!.mode === 'array' ? this.nextLayer : 1_000_000
+      })
       this.atlas.texture.needsUpdate = true
       this.estimatedTextureUploadBytes += this.atlas.data.byteLength
       this.prewarmAtlas(this.atlas)
@@ -673,6 +545,12 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
         capacity: this.mesh ? this.instanceCapacity : 0,
         geometryBuilds: this.geometryBuilds,
         attributeReuses: this.attributeReuses,
+        programLoads: this.programLoadCount,
+        programLoadMs: this.programLoadMs,
+        programPrepareMs: this.programPrepareMs,
+        programSwitches: this.programSwitches,
+        programFailures: this.programFailures,
+        cachedPrograms: this.programRuntimes.size,
         atlasUploadRanges: this.atlasUploadRanges,
         atlasResolution: this.atlas?.cellSize ?? 0,
         atlasMipmaps: this.atlas?.mipmaps ? 1 : 0,
@@ -682,10 +560,13 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   }
 
   dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
     this.generation += 1
+    this.effectGeneration += 1
     this.atlasAbortController?.abort()
     this.atlasAbortController = null
-    this.imageCache.clear()
+    this.imageCache?.clear()
     this.disposeCurrent()
   }
 
@@ -693,11 +574,13 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     if (!this.mesh || !this.material) return
     this.atlas?.texture.dispose()
     this.atlas = atlas
-    this.material.uniforms.atlas.value = atlas.texture
+    this.forEachMaterial(({ uniforms }) => {
+      uniforms.atlas!.value = atlas.texture
+    })
     this.prepareAtlasUploads(atlas)
-    this.material.uniforms.uLayers.value = atlas.mode === 'array'
-      ? this.nextLayer
-      : 1_000_000
+    this.forEachMaterial(({ uniforms }) => {
+      uniforms.uLayers!.value = atlas.mode === 'array' ? this.nextLayer : 1_000_000
+    })
     copyAttribute(
       this.mesh.geometry.getAttribute('atlasRect') as InstancedBufferAttribute,
       atlas.rects,
@@ -751,7 +634,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private prepareAtlasUploads(atlas: TextureAtlasResult): void {
     this.nextLayer = 0
     this.skipUploadFrames = 0
-    clearTextureAtlasPatchQueue(atlas)
+    this.atlasApi?.clearTextureAtlasPatchQueue(atlas)
     if (atlas.mode !== 'array' || !('layerUpdates' in atlas.texture)) return
     atlas.texture.layerUpdates.clear()
     const initialLayers = Math.min(
@@ -777,13 +660,15 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       this.skipUploadFrames -= 1
       return
     }
-    const [end, uploaded] = advanceTextureAtlasUploads(
+    const [end, uploaded] = this.atlasApi!.advanceTextureAtlasUploads(
       atlas,
       this.nextLayer,
       this.layersPerUpload(atlas, FRAME_ARRAY_UPLOAD_BYTES),
     )
     this.nextLayer = end
-    this.material.uniforms.uLayers.value = end
+    this.forEachMaterial(({ uniforms }) => {
+      uniforms.uLayers!.value = end
+    })
     if (uploaded) this.layerUploadFrames += 1
   }
 
@@ -791,12 +676,15 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     return Math.max(1, Math.floor(byteBudget / (atlas.width * atlas.height * 4)))
   }
 
-  private beginAtlasOperation(): {
+  private beginAtlasOperation(atlasApi: typeof import('./textureAtlas.js')): {
     controller: AbortController
     generation: number
     options: TextureAtlasOptions<TMeta>
   } {
     this.atlasAbortController?.abort()
+    this.imageCache ??= new atlasApi.TextureAtlasImageCache(
+      normalizeImageCacheSize(this.atlasOptions.imageCacheSize),
+    )
     const controller = new AbortController()
     this.atlasAbortController = controller
     return {
@@ -810,20 +698,144 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     }
   }
 
+  private async loadAtlasApi(): Promise<typeof import('./textureAtlas.js')> {
+    if (this.atlasApi) return this.atlasApi
+    this.atlasApiPromise ??= import('./textureAtlas.js')
+    this.atlasApi = await this.atlasApiPromise
+    return this.atlasApi
+  }
+
   private disposeCurrent(): void {
     if (!this.mesh) return
+    this.effectGeneration += 1
     this.root.remove(this.mesh)
     this.mesh.geometry.dispose()
     const texture = this.material?.uniforms.atlas?.value as { dispose?: () => void } | undefined
     texture?.dispose?.()
-    this.material?.dispose()
+    this.baseMaterial?.dispose()
+    this.programRuntimes.forEach(({ material }) => material.dispose())
+    this.programRuntimes.clear()
     this.mesh = null
     this.instanceCapacity = 0
     this.itemCount = 0
     this.material = null
+    this.baseMaterial = null
+    this.activeProgram = null
     this.itemFingerprints = []
     this.textureBytes = 0
     this.atlas = null
+  }
+
+  private async loadEffectProgram(kind: string): Promise<CardEffectProgram | null> {
+    const cached = this.programLoads.get(kind)
+    if (cached) return cached
+    const configured = this.atlasOptions.effectPrograms?.[kind]
+    const builtin = isBuiltinEffect(kind)
+    if (!configured && !builtin) return null
+    this.programLoadCount += 1
+    const startedAt = performance.now()
+    const loading = Promise.resolve().then(async () => {
+      const program = configured
+        ? typeof configured === 'function' ? await configured() : configured
+        : (await import('./cards/builtinEffectPrograms.js')).builtinEffectPrograms[kind]
+      if (!program) return null
+      if (program.kind !== kind) {
+        throw new TypeError(`Cards effect program "${kind}" loaded mismatched kind "${program.kind}"`)
+      }
+      return program
+    }).finally(() => {
+      this.programLoadMs += performance.now() - startedAt
+    })
+    this.programLoads.set(kind, loading)
+    return loading
+  }
+
+  private createUploadContext(
+    program: CardEffectProgram | CardMotionProgram<TMeta>,
+    material: ShaderMaterial,
+  ): CardProgramUploadContext {
+    const geometry = this.mesh!.geometry
+    const attributes = new Map((program.attributes ?? []).map((field) => [field.name, field]))
+    const uniforms = new Set((program.uniforms ?? []).map(({ name }) => name))
+    return {
+      capacity: this.instanceCapacity,
+      itemCount: this.itemCount,
+      setAttribute: (name, values) => {
+        const field = attributes.get(name)
+        if (!field) throw new TypeError(`Effect program cannot upload undeclared attribute "${name}"`)
+        let attribute = geometry.getAttribute(name) as InstancedBufferAttribute | undefined
+        if (!attribute) {
+          const array = new Float32Array(this.instanceCapacity * field.itemSize)
+          array.fill(field.initialValue ?? 0)
+          attribute = dynamicAttribute(array, field.itemSize)
+          geometry.setAttribute(name, attribute)
+        }
+        const target = attribute.array as Float32Array
+        target.fill(field.initialValue ?? 0)
+        target.set(values.subarray(0, target.length))
+        markAttribute(attribute, Math.min(target.length, values.length))
+        this.attributeReuses += 1
+      },
+      setUniform: (name, value) => {
+        if (!uniforms.has(name)) {
+          throw new TypeError(`Effect program cannot upload undeclared uniform "${name}"`)
+        }
+        const target = material.uniforms[name]?.value as
+          | number
+          | { fromArray(values: ArrayLike<number>): void }
+          | undefined
+        if (typeof target === 'number') {
+          if (typeof value !== 'number') throw new TypeError(`Uniform "${name}" requires a number`)
+          material.uniforms[name]!.value = value
+        } else if (target && typeof target.fromArray === 'function' && typeof value !== 'number') {
+          target.fromArray(value)
+        } else {
+          throw new TypeError(`Invalid uniform upload for "${name}"`)
+        }
+      },
+    }
+  }
+
+  private ensureProgramAttributes(
+    geometry: InstancedBufferGeometry,
+    program: CardEffectProgram | CardMotionProgram<TMeta> | undefined,
+  ): void {
+    for (const field of program?.attributes ?? []) {
+      if (geometry.getAttribute(field.name)) continue
+      const values = new Float32Array(this.instanceCapacity * field.itemSize)
+      values.fill(field.initialValue ?? 0)
+      geometry.setAttribute(field.name, dynamicAttribute(values, field.itemSize))
+    }
+  }
+
+  private uploadMotionProgram(items: readonly MotionItem<TMeta>[]): void {
+    const program = this.atlasOptions.motionProgram
+    if (!program?.upload || !this.mesh || !this.baseMaterial) return
+    program.upload(this.createUploadContext(program, this.baseMaterial), items)
+  }
+
+  private syncCommonUniforms(target: ShaderMaterial): void {
+    if (!this.baseMaterial) return
+    for (const name of [
+      'atlas',
+      'progress',
+      'fromBillboard',
+      'toBillboard',
+      'fromHideBackHemisphere',
+      'toHideBackHemisphere',
+      'fromHemisphereEdgeFade',
+      'toHemisphereEdgeFade',
+      'visibleRatio',
+      'hoverIndex',
+      'uLayers',
+    ]) {
+      target.uniforms[name]!.value = this.baseMaterial.uniforms[name]!.value
+    }
+  }
+
+  private forEachMaterial(callback: (material: ShaderMaterial) => void): void {
+    if (this.baseMaterial) callback(this.baseMaterial)
+    this.programRuntimes.forEach(({ material }) => callback(material))
   }
 
   private writeTransform(
@@ -871,17 +883,11 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError'
 }
 
-function effectMode(kind: StreamingEffectKind): number {
-  switch (kind) {
-    case 'tunnel': return 1
-    case 'linear-shooter': return 2
-    case 'vortex': return 3
-    case 'radial-burst': return 4
-  }
-}
-
-function setVector4(target: Vector4, values: Float32Array, offset: number): void {
-  target.set(values[offset], values[offset + 1], values[offset + 2], values[offset + 3])
+function isBuiltinEffect(kind: string): boolean {
+  return kind === 'tunnel'
+    || kind === 'linear-shooter'
+    || kind === 'vortex'
+    || kind === 'radial-burst'
 }
 
 function createItemFingerprints<TMeta>(

@@ -53,6 +53,17 @@
 
 ## 当前优化阶段
 
+- [x] **v2 架构基础**：质量状态抽离为可注入控制器，Layout 上下文携带业务数据，
+  Stage 提供类型化多订阅事件，Renderer 通过 capability 协商开放式特效 key。
+- [x] **特效编排拆分**：EffectController 独立拥有准备、激活、暂停时钟、质量重配、
+  Renderer 状态恢复和低动态结算。
+- [x] **Stage Render Host**：抽离 WebGLRenderer、Scene、Camera、Context 恢复和
+  环境指标，MotionStage 只保留公共门面与跨控制器用例编排。
+- [x] **实例驻留模型**：显式区分 resident、submitted、visible，质量下降不触发热路径
+  资源抖动，稳定窗口后再压缩显存。
+- [x] **Cards Program**：布局运动与 GPU 特效使用受约束的可注册 Program；内置
+  特效和 Atlas 引擎按需加载，自定义 Program 与外部 Extension 保持明确边界。
+
 - [x] 建立可比较的 steady、cold-start、atlas-update 与 transition-stress 基准。
 - [x] 暴露 P50/P95/P99、长帧、CPU/提交、图集和图片加载指标。
 - [x] **v1.3 GPU 与纹理优化**：降低休眠实例工作量，合并更新，并减少局部更新导致的整图上传成本。

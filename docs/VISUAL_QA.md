@@ -154,3 +154,9 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 2026-07-26 已完成 Array Worker 分页批次复验：2000/high/auto、48px、250 层完成全部渐进上传，球面卡片方向和层顺序保持稳定。三轮 cold-start Atlas build 中位数 55.0ms、readback 中位数 31.8ms，P95 18.55–18.60ms、0 个 24/33/50ms 长帧、主体 1 Draw Call，首次提交 4.2–6.5ms；默认 Cards 消费体积不变。
 
 2026-07-27 已完成 Single Atlas 局部上传低分配复验：2000/high/48px 的连续更新三轮均完成 17 次 patch，保持约 60 FPS、P95 18.30–18.60ms、0 个 24/33/50ms 长帧和主体 1 Draw Call。相邻与分离单元的上传范围、单卡快速路径和像素内容由自动化回归覆盖；patch 墙钟中位数与优化前基本持平，后续继续把 Canvas readback 视为主要成本。
+
+2026-07-27 已完成 Cards Program / Render Host 重构复验：自定义 business-wave
+Program 成功动态准备并保持 1 Canvas、1 Mesh、1 Draw Call，状态面板报告 300
+submitted 和 1 cached Program；返回球体、hover 和公共 Atlas 管线正常。2000/high
+的 steady、transition-stress、interaction-stress P95 分别为 18.23/18.35/18.35ms，
+均约 60 FPS、0 个 24/33/50ms 长帧和主体 1 Draw Call；浏览器无 warning/error。

@@ -1,16 +1,9 @@
-import {
-  Group,
-  PerspectiveCamera,
-  Scene,
-  WebGLRenderer,
-  type Material,
-  type Object3D,
-  type Texture,
-} from 'three'
 import type {
   Layout,
   MotionItem,
   QualityLevel,
+  QualityMode,
+  QualityProfile,
   Transform,
   TransitionOptions,
 } from './types.js'
@@ -21,10 +14,9 @@ import {
   type MotionRendererStats,
   type MotionRendererVisualState,
 } from '../renderers/MotionRenderer.js'
-import { detectQuality, qualityProfiles } from '../performance/quality.js'
-import {
-  AdaptivePerformanceManager,
-  type PerformanceStats,
+import type {
+  AdaptivePerformanceOptions,
+  PerformanceStats,
 } from '../performance/AdaptivePerformanceManager.js'
 import { Timeline } from './Timeline.js'
 import type {
@@ -33,7 +25,7 @@ import type {
   StageExtensionStats,
   StageViewport,
 } from './extensions.js'
-import type { StreamingEffect, StreamingEffectGpuData } from '../effects/types.js'
+import type { StreamingEffect } from '../effects/types.js'
 import {
   InteractionController,
   visibilityRank,
@@ -42,30 +34,33 @@ import { ItemCoordinator } from './ItemCoordinator.js'
 import { MotionController } from './MotionController.js'
 import { ExtensionHost } from './ExtensionHost.js'
 import { StageRuntime } from './StageRuntime.js'
+import { QualityController } from './QualityController.js'
+import { StageEventHub, type StageEventListener } from './StageEventHub.js'
+import { EffectController } from './EffectController.js'
+import { StageRenderHost } from './StageRenderHost.js'
+import { RendererStateCoordinator } from './RendererStateCoordinator.js'
 
 export interface MotionStageOptions<TMeta = unknown> {
   container: HTMLElement
   items?: readonly MotionItem<TMeta>[]
   renderer: MotionRendererFactory<TMeta>
   quality?: QualityLevel | 'auto'
+  qualityProfiles?: Partial<Record<QualityLevel, QualityProfile>>
+  adaptivePerformanceOptions?: AdaptivePerformanceOptions
   cameraZ?: number
   adaptivePerformance?: boolean
-  onQualityChange?: (quality: QualityLevel, stats: PerformanceStats) => void
-  onItemClick?: (item: MotionItem<TMeta>, index: number) => void
   motionPreference?: MotionPreference
-  onItemHover?: (item: MotionItem<TMeta> | null, index: number | null) => void
-  onItemFocus?: (item: MotionItem<TMeta> | null, index: number | null) => void
+  /** Enables pointermove picking and itemhover events. */
+  hover?: boolean
   hoverEffect?: 'none' | 'highlight'
   keyboardNavigation?: boolean
   ariaLabel?: string
   /** Defaults used when an individual transition omits duration or easing. */
   transition?: TransitionOptions
-  onContextChange?: (state: 'lost' | 'restored') => void
-  onExtensionError?: (error: unknown, extension: StageExtension) => void
 }
 
-export interface UpdateItemsOptions extends TransitionOptions {
-  layout?: Layout
+export interface UpdateItemsOptions<TMeta = unknown> extends TransitionOptions {
+  layout?: Layout<TMeta>
 }
 
 export type MotionItemPatch<TMeta = unknown> = Partial<Omit<MotionItem<TMeta>, 'id'>>
@@ -96,7 +91,6 @@ export interface PickOptions {
   includeOccluded?: boolean
 }
 
-export type QualityMode = QualityLevel | 'auto'
 export type MotionPreference = 'auto' | 'full' | 'reduced'
 export type StageTransitionStatus = 'running' | 'completed' | 'interrupted' | 'aborted' | 'destroyed'
 
@@ -121,6 +115,8 @@ export interface StageTransitionState {
 export interface StagePerformanceStats extends PerformanceStats {
   qualityMode: QualityMode
   inputItems: number
+  residentItems: number
+  submittedItems: number
   visibleItems: number
   render: Readonly<{
     drawCalls: number
@@ -162,26 +158,35 @@ export interface StagePerformanceEnvironment {
   gpuRenderer: string | null
 }
 
-interface ActiveEffect {
-  effect: StreamingEffect
-  gpuData: StreamingEffectGpuData
-  elapsedSeconds: number
-  lastUpdatedAt: number
+export interface MotionStageEventMap<TMeta = unknown> {
+  qualitychange: { quality: QualityLevel; stats: PerformanceStats }
+  itemclick: { item: MotionItem<TMeta>; index: number }
+  itemhover: { item: MotionItem<TMeta> | null; index: number | null }
+  itemfocus: { item: MotionItem<TMeta> | null; index: number | null }
+  contextchange: { state: 'lost' | 'restored' }
+  extensionerror: { error: unknown; extension: StageExtension }
+  effecterror: {
+    error: unknown
+    effect: string
+    phase: 'activate' | 'reconfigure' | 'restore'
+  }
+  transitionstart: { layout: string }
+  transitionend: { layout: string; result: StageTransitionResult }
 }
 
 export class MotionStage<TMeta = unknown> {
   readonly ready: Promise<void>
-  private readonly scene = new Scene()
-  private readonly camera: PerspectiveCamera
-  private readonly renderer: WebGLRenderer
-  private readonly contentRoot: Group
+  private readonly host: StageRenderHost
   private readonly contentRenderer: MotionRenderer<TMeta>
   private readonly interaction: InteractionController<TMeta>
   private readonly itemCoordinator: ItemCoordinator<TMeta>
   private readonly motionController = new MotionController()
   private readonly extensionHost: ExtensionHost
   private readonly runtime: StageRuntime
-  private readonly contentAbortController = new AbortController()
+  private readonly qualityController: QualityController
+  private readonly effectController: EffectController
+  private readonly rendererState: RendererStateCoordinator<TMeta>
+  private readonly events = new StageEventHub<MotionStageEventMap<TMeta>>()
   private readonly itemWidth: number
   private readonly itemHeight: number
   private readonly resizeObserver: ResizeObserver
@@ -192,11 +197,7 @@ export class MotionStage<TMeta = unknown> {
   private rotateY = 0
   private rotateSpeedX = 0
   private rotateSpeedY = 0
-  private activeEffect: ActiveEffect | null = null
-  private quality: QualityLevel
-  private performanceManager: AdaptivePerformanceManager
-  private qualityMode: QualityMode
-  private lastLayout: Layout | null = null
+  private lastLayout: Layout<TMeta> | null = null
   private visibleRatio = 1
   private currentOrientation: 'surface' | 'camera' = 'surface'
   private hideBackHemisphere = false
@@ -230,52 +231,35 @@ export class MotionStage<TMeta = unknown> {
       : null
     this.reducedMotion = this.motionPreference === 'reduced'
       || (this.motionPreference === 'auto' && Boolean(this.motionQuery?.matches))
-    const hoverEnabled = Boolean(options.onItemHover) || options.hoverEffect === 'highlight'
+    const hoverEnabled = options.hover === true || options.hoverEffect === 'highlight'
     const keyboardNavigation = options.keyboardNavigation !== false
     const baseAriaLabel = options.ariaLabel ?? 'Spatial Motion'
-    this.qualityMode = options.quality ?? 'auto'
-    this.quality = this.qualityMode === 'auto' ? detectQuality() : this.qualityMode
-    this.performanceManager = new AdaptivePerformanceManager(this.quality)
-    const profile = qualityProfiles[this.quality]
-    this.camera = new PerspectiveCamera(45, 1, 0.1, 100)
-    this.camera.position.z = options.cameraZ ?? 18
-    this.renderer = new WebGLRenderer({ alpha: true, antialias: profile.antialias, powerPreference: 'high-performance' })
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
-    const canvas = this.renderer.domElement
-    canvas.style.width = canvas.style.height = '100%'
-    this.options.container.appendChild(canvas)
+    this.qualityController = new QualityController({
+      mode: options.quality,
+      profiles: options.qualityProfiles,
+      adaptive: options.adaptivePerformanceOptions,
+    })
+    const profile = this.qualityController.getProfile()
+    this.host = new StageRenderHost(options.container, profile, options.cameraZ)
+    const canvas = this.host.canvas
     if (this.motionPreference === 'auto') {
       this.motionQuery?.addEventListener('change', this.handleMotionPreferenceChange)
     }
-    this.contentRoot = new Group()
-    this.contentRoot.name = 'SpatialMotionContent'
-    this.scene.add(this.contentRoot)
     let contentRenderer: MotionRenderer<TMeta> | null = null
     try {
-      contentRenderer = options.renderer({
-        root: this.contentRoot,
-        maxTextureSize: this.renderer.capabilities.maxTextureSize,
-        maxTextureLayers: resolveMaxTextureLayers(this.renderer.getContext()),
-        maxAnisotropy: this.renderer.capabilities.getMaxAnisotropy(),
-        signal: this.contentAbortController.signal,
-        prepareTexture: (texture) => {
-          const startedAt = performance.now()
-          this.renderer.initTexture(texture)
-          return performance.now() - startedAt
-        },
-      })
+      contentRenderer = options.renderer(this.host.createRendererFactoryContext())
       assertMotionRenderer(contentRenderer)
     } catch (error) {
       contentRenderer?.dispose?.()
-      this.contentAbortController.abort()
-      disposeObjectResources(this.contentRoot)
-      this.scene.remove(this.contentRoot)
       this.cleanupCanvasAndListeners()
-      this.renderer.dispose()
-      this.renderer.domElement.remove()
+      this.host.dispose()
       throw error
     }
     this.contentRenderer = contentRenderer
+    this.effectController = new EffectController(
+      contentRenderer.capabilities.streamingEffects,
+      (event) => this.events.emit('effecterror', event),
+    )
     const itemBounds = contentRenderer.descriptor.itemBounds
     this.itemWidth = itemBounds
       ? itemBounds.kind === 'disc' ? itemBounds.diameter : itemBounds.width
@@ -284,14 +268,15 @@ export class MotionStage<TMeta = unknown> {
       ? itemBounds.kind === 'disc' ? itemBounds.diameter : itemBounds.height
       : 1
     this.extensionHost = new ExtensionHost({
-      parent: this.scene,
-      camera: this.camera,
+      parent: this.host.scene,
+      camera: this.host.camera,
       getViewport: () => this.extensionViewport(),
-      getQuality: () => this.quality,
+      getQuality: () => this.qualityController.getLevel(),
       getReducedMotion: () => this.reducedMotion,
       isPaused: () => this.runtime.isPaused(),
       isDestroyed: () => this.destroyed,
-      onError: options.onExtensionError,
+      onError: (error, extension) =>
+        this.events.emit('extensionerror', { error, extension }),
     })
     this.runtime = new StageRuntime({
       element: canvas,
@@ -299,16 +284,19 @@ export class MotionStage<TMeta = unknown> {
       onPauseChange: (paused) => this.extensionHost.setPaused(paused),
       onResume: (now) => {
         this.motionController.rebaseClock(now)
-        if (this.activeEffect) this.activeEffect.lastUpdatedAt = now
+        this.effectController.rebaseClock(now)
       },
       onContextLost: () => {},
-      onContextRestored: () =>
-        this.contentRenderer.capabilities.resourceRecovery?.refreshResources(),
-      onContextChange: options.onContextChange,
+      onContextRestored: () => {
+        this.host.restoreBaseState()
+        this.contentRenderer.capabilities.resourceRecovery?.refreshResources()
+        void this.effectController.restoreRendererState()
+      },
+      onContextChange: (state) => this.events.emit('contextchange', { state }),
     })
     this.interaction = new InteractionController({
       element: canvas,
-      camera: this.camera,
+      camera: this.host.camera,
       itemBounds,
       hoverEnabled,
       hoverEffect: options.hoverEffect ?? 'none',
@@ -321,17 +309,23 @@ export class MotionStage<TMeta = unknown> {
         rotationY: this.rotateY,
         orientation: this.currentOrientation,
         hideBackHemisphere: this.hideBackHemisphere,
-        effectActive: Boolean(this.activeEffect),
+        effectActive: this.effectController.hasActive(),
       }),
       resolveTransforms: (now) => this.resolveCurrentTransforms(now),
       hasScheduledFrame: () => this.runtime.hasScheduledFrame(),
       isDestroyed: () => this.destroyed,
       setHighlightIndex: (index) =>
         this.contentRenderer.capabilities.highlight?.setHighlightIndex(index),
-      onItemClick: options.onItemClick,
-      onItemHover: options.onItemHover,
-      onItemFocus: options.onItemFocus,
+      onItemClick: (item, index) => this.events.emit('itemclick', { item, index }),
+      onItemHover: (item, index) => this.events.emit('itemhover', { item, index }),
+      onItemFocus: (item, index) => this.events.emit('itemfocus', { item, index }),
     })
+    this.rendererState = new RendererStateCoordinator(
+      this.contentRenderer,
+      this.motionController,
+      this.effectController,
+      this.interaction,
+    )
     this.resizeObserver = new ResizeObserver(() => {
       if (!this.destroyed) this.resizeInternal()
     })
@@ -347,6 +341,14 @@ export class MotionStage<TMeta = unknown> {
     return this.setItemsAfterPendingUpdates(items)
   }
 
+  on<TKey extends keyof MotionStageEventMap<TMeta>>(
+    type: TKey,
+    listener: StageEventListener<MotionStageEventMap<TMeta>[TKey]>,
+  ): () => void {
+    this.assertActive()
+    return this.events.on(type, listener)
+  }
+
   private async setItemsAfterPendingUpdates(items: readonly MotionItem<TMeta>[]): Promise<void> {
     await this.itemCoordinator.flushPatches()
     return this.setItemsInternal(items)
@@ -355,9 +357,8 @@ export class MotionStage<TMeta = unknown> {
   private async setItemsInternal(items: readonly MotionItem<TMeta>[]): Promise<void> {
     const revision = this.itemCoordinator.beginOperation()
     this.motionController.cancel('interrupted')
-    this.activeEffect = null
-    this.contentRenderer.capabilities.streamingEffects?.disable()
-    const maxItems = qualityProfiles[this.quality].maxVisibleItems
+    this.effectController.deactivate()
+    const maxItems = this.qualityController.getProfile().maxVisibleItems
     const prepared = this.itemCoordinator.prepareItems(items, maxItems)
     const nextItems = prepared.visibleItems
     const nextTransforms = nextItems.map(identityTransform)
@@ -374,12 +375,12 @@ export class MotionStage<TMeta = unknown> {
     this.interaction.syncItems()
   }
 
-  to(layout: Layout, options: TransitionOptions = {}): Promise<boolean> {
+  to(layout: Layout<TMeta>, options: TransitionOptions = {}): Promise<boolean> {
     this.assertActive()
     return this.toInternal(layout, options)
   }
 
-  startTransition(layout: Layout, options: TransitionOptions = {}): StageTransitionHandle {
+  startTransition(layout: Layout<TMeta>, options: TransitionOptions = {}): StageTransitionHandle {
     this.assertActive()
     const controller = new AbortController()
     const forwardAbort = () => controller.abort()
@@ -405,30 +406,28 @@ export class MotionStage<TMeta = unknown> {
     return this.motionController.getState(performance.now(), this.runtime.isPaused())
   }
 
-  private async toInternal(layout: Layout, options: TransitionOptions): Promise<boolean> {
+  private async toInternal(layout: Layout<TMeta>, options: TransitionOptions): Promise<boolean> {
     const completed = await this.transitionTo(layout, options)
     if (completed) this.lastLayout = layout
     return completed
   }
 
-  private async transitionTo(layout: Layout, options: TransitionOptions = {}): Promise<boolean> {
+  private async transitionTo(layout: Layout<TMeta>, options: TransitionOptions = {}): Promise<boolean> {
     return (await this.transitionToResult(layout, options)).completed
   }
 
   private transitionToResult(
-    layout: Layout,
+    layout: Layout<TMeta>,
     options: TransitionOptions = {},
   ): Promise<StageTransitionResult> {
     if (options.signal?.aborted) {
       return Promise.resolve(this.motionController.settle(layout.name, 'aborted'))
     }
+    this.events.emit('transitionstart', { layout: layout.name })
     const now = performance.now()
     const visualState = this.resolveCurrentVisualState(now)
     this.transforms = this.resolveCurrentTransforms(now)
-    if (this.activeEffect) {
-      this.activeEffect = null
-      this.contentRenderer.capabilities.streamingEffects?.disable()
-    }
+    this.effectController.deactivate()
     this.motionController.cancel('interrupted')
     const from = this.transforms
     const calculationStartedAt = performance.now()
@@ -455,7 +454,9 @@ export class MotionStage<TMeta = unknown> {
         hemisphereEdgeFade: targetHemisphereEdgeFade,
       })
       this.contentRenderer.setTransforms(target)
-      return Promise.resolve(this.motionController.settle(layout.name, 'completed'))
+      const result = this.motionController.settle(layout.name, 'completed')
+      this.events.emit('transitionend', { layout: layout.name, result })
+      return Promise.resolve(result)
     }
     this.contentRenderer.prepareTransition(from, target)
     this.contentRenderer.capabilities.visual?.prepareVisualTransition(visualState, {
@@ -477,6 +478,9 @@ export class MotionStage<TMeta = unknown> {
       easing: ease,
       now,
       signal: options.signal,
+    }).then((result) => {
+      this.events.emit('transitionend', { layout: layout.name, result })
+      return result
     })
   }
 
@@ -489,8 +493,11 @@ export class MotionStage<TMeta = unknown> {
     effect: StreamingEffect,
     options: TransitionOptions,
   ): Promise<boolean> {
-    effect.prepare(this.items.length, qualityProfiles[this.quality].maxActiveEffectItems)
-    const target = effect.calculateTransforms(this.items.length, 0)
+    const target = this.effectController.prepare(
+      effect,
+      this.items.length,
+      this.qualityController.getProfile().maxActiveEffectItems,
+    )
     const entered = await this.transitionTo(
       {
         name: `${effect.name}-entry`,
@@ -507,21 +514,17 @@ export class MotionStage<TMeta = unknown> {
       this.contentRenderer.setTransforms(target)
       return true
     }
-    const streamingEffects = this.contentRenderer.capabilities.streamingEffects
-    if (!streamingEffects) {
+    if (!await this.effectController.activate(effect, performance.now())) {
       this.transforms = target
       this.contentRenderer.setTransforms(target)
       return true
     }
-    const gpuData = effect.getGpuData()
-    streamingEffects.enable(gpuData)
-    this.activeEffect = { effect, gpuData, elapsedSeconds: 0, lastUpdatedAt: performance.now() }
     return true
   }
 
   updateItems(
     items: readonly MotionItem<TMeta>[],
-    options: UpdateItemsOptions = {},
+    options: UpdateItemsOptions<TMeta> = {},
   ): Promise<boolean> {
     this.assertActive()
     this.itemCoordinator.validateItems(items)
@@ -530,7 +533,7 @@ export class MotionStage<TMeta = unknown> {
 
   private async updateItemsAfterPendingUpdates(
     items: readonly MotionItem<TMeta>[],
-    options: UpdateItemsOptions,
+    options: UpdateItemsOptions<TMeta>,
   ): Promise<boolean> {
     await this.itemCoordinator.flushPatches()
     return this.updateItemsInternal(items, options)
@@ -539,14 +542,14 @@ export class MotionStage<TMeta = unknown> {
   updateItem(
     id: string,
     patch: MotionItemPatch<TMeta>,
-    options: UpdateItemsOptions = {},
+    options: UpdateItemsOptions<TMeta> = {},
   ): Promise<boolean> {
     return this.updateItemsById([{ id, patch }], options)
   }
 
   updateItemsById(
     updates: MotionItemUpdate<TMeta>[],
-    options: UpdateItemsOptions = {},
+    options: UpdateItemsOptions<TMeta> = {},
   ): Promise<boolean> {
     this.assertActive()
     this.itemCoordinator.validateUpdates(updates)
@@ -559,7 +562,7 @@ export class MotionStage<TMeta = unknown> {
 
   private async updateItemsByIdAfterPendingUpdates(
     updates: MotionItemUpdate<TMeta>[],
-    options: UpdateItemsOptions,
+    options: UpdateItemsOptions<TMeta>,
   ): Promise<boolean> {
     await this.itemCoordinator.flushPatches()
     return this.updateItemsByIdInternal(updates, options)
@@ -567,10 +570,13 @@ export class MotionStage<TMeta = unknown> {
 
   private async updateItemsByIdInternal(
     updates: MotionItemUpdate<TMeta>[],
-    options: UpdateItemsOptions,
+    options: UpdateItemsOptions<TMeta>,
   ): Promise<boolean> {
     if (!updates.length) return true
-    const maxItems = qualityProfiles[this.quality].maxVisibleItems
+    const maxItems = Math.max(
+      this.items.length,
+      this.qualityController.getProfile().maxVisibleItems,
+    )
     const prepared = this.itemCoordinator.preparePatch(this.sourceItems, updates, maxItems)
     const nextItems = prepared.visibleItems
     const revision = this.itemCoordinator.beginOperation()
@@ -582,7 +588,9 @@ export class MotionStage<TMeta = unknown> {
     this.sourceItems = prepared.sourceItems
     this.items = nextItems
     this.inputItemCount = prepared.sourceItems.length
-    this.visibleRatio = 1
+    this.visibleRatio = nextItems.length
+      ? Math.min(1, this.qualityController.getProfile().maxVisibleItems / nextItems.length)
+      : 1
     if (!patch) this.restoreRendererStateAfterItems()
     this.contentRenderer.setVisibleRatio(this.visibleRatio)
     this.interaction.syncItems()
@@ -598,23 +606,22 @@ export class MotionStage<TMeta = unknown> {
 
   private async updateItemsInternal(
     items: readonly MotionItem<TMeta>[],
-    options: UpdateItemsOptions,
+    options: UpdateItemsOptions<TMeta>,
     preserveEffect = false,
   ): Promise<boolean> {
     const now = performance.now()
     const current = this.resolveCurrentTransforms(now)
     const previousById = new Map(this.items.map((item, index) => [item.id, current[index]]))
-    const currentEffect = preserveEffect ? this.activeEffect : null
+    const currentEffect = preserveEffect ? this.effectController.getToken() : null
     const revision = this.itemCoordinator.beginOperation()
     this.motionController.cancel('interrupted')
     if (!preserveEffect) {
-      this.activeEffect = null
-      this.contentRenderer.capabilities.streamingEffects?.disable()
+      this.effectController.deactivate()
     }
     this.transforms = current
     this.contentRenderer.setTransforms(current)
 
-    const maxItems = qualityProfiles[this.quality].maxVisibleItems
+    const maxItems = this.qualityController.getProfile().maxVisibleItems
     const prepared = this.itemCoordinator.prepareItems(items, maxItems)
     const nextItems = prepared.visibleItems
     const nextTransforms = nextItems.map((item) => {
@@ -634,17 +641,19 @@ export class MotionStage<TMeta = unknown> {
     this.interaction.syncItems()
 
     const targetLayout = options.layout ?? this.lastLayout
-    if (currentEffect && this.activeEffect === currentEffect) {
+    if (this.effectController.isTokenActive(currentEffect)) {
       if (targetLayout) {
         this.transforms = [...targetLayout.calculate(this.items.length, this.context())]
         this.contentRenderer.setTransforms(this.transforms)
         if (options.layout) this.lastLayout = options.layout
       }
-      const profile = qualityProfiles[this.quality]
-      currentEffect.effect.prepare(this.items.length, profile.maxActiveEffectItems)
-      currentEffect.gpuData = currentEffect.effect.getGpuData()
-      this.contentRenderer.capabilities.streamingEffects?.enable(currentEffect.gpuData)
-      this.contentRenderer.capabilities.streamingEffects?.setTime(currentEffect.elapsedSeconds)
+      const profile = this.qualityController.getProfile()
+      await this.effectController.reconfigure(
+        this.items.length,
+        profile.maxActiveEffectItems,
+        performance.now(),
+        this.runtime.isPaused(),
+      )
       return true
     }
     if (!targetLayout) return true
@@ -740,15 +749,13 @@ export class MotionStage<TMeta = unknown> {
 
   setQuality(mode: QualityMode): void {
     this.assertActive()
-    this.qualityMode = mode
-    const quality = mode === 'auto' ? detectQuality() : mode
-    this.performanceManager = new AdaptivePerformanceManager(quality)
-    if (quality !== this.quality) this.applyQuality(quality)
+    const quality = this.qualityController.setMode(mode)
+    if (quality) this.applyQuality(quality)
   }
 
   getQualityMode(): QualityMode {
     this.assertActive()
-    return this.qualityMode
+    return this.qualityController.getMode()
   }
 
   pause(): void {
@@ -771,7 +778,7 @@ export class MotionStage<TMeta = unknown> {
     this.assertActive()
     this.rotateX = x
     this.rotateY = y
-    this.contentRoot.rotation.set(x, y, 0)
+    this.host.contentRoot.rotation.set(x, y, 0)
   }
 
   timeline(): Timeline {
@@ -792,14 +799,12 @@ export class MotionStage<TMeta = unknown> {
   private resizeInternal(): void {
     const { clientWidth: width, clientHeight: height } = this.options.container
     if (!width || !height) return
-    this.camera.aspect = width / height
-    this.camera.updateProjectionMatrix()
-    this.renderer.setSize(width, height, false)
+    this.host.resize(width, height)
     if (
       this.lastLayout
       && this.items.length
       && !this.motionController.hasActiveTransition()
-      && !this.activeEffect
+      && !this.effectController.hasActive()
     ) {
       this.transforms = [...this.lastLayout.calculate(this.items.length, this.context())]
       this.contentRenderer.setTransforms(this.transforms)
@@ -820,11 +825,10 @@ export class MotionStage<TMeta = unknown> {
     for (const wait of this.stageWaits) wait.complete(false)
     this.stageWaits.clear()
     this.extensionHost.dispose()
-    this.contentAbortController.abort()
+    this.effectController.dispose()
     this.contentRenderer.dispose()
-    this.scene.remove(this.contentRoot)
-    this.renderer.dispose()
-    this.renderer.domElement.remove()
+    this.host.dispose()
+    this.events.clear()
   }
 
   private cleanupCanvasAndListeners(): void {
@@ -835,32 +839,30 @@ export class MotionStage<TMeta = unknown> {
 
   getQuality(): QualityLevel {
     this.assertActive()
-    return this.quality
+    return this.qualityController.getLevel()
   }
 
   getPerformanceStats(): StagePerformanceStats {
     this.assertActive()
-    const performanceStats = this.performanceManager.getStats()
+    const performanceStats = this.qualityController.getStats()
     const rendererStats = normalizeRendererStats(this.contentRenderer.getStats())
     const interactionStats = this.interaction.getStats()
+    const activeEffectItems = this.effectController.getActiveCount()
     return {
       ...performanceStats,
-      qualityMode: this.qualityMode,
+      qualityMode: this.qualityController.getMode(),
       inputItems: this.inputItemCount,
-      visibleItems: this.activeEffect
-        ? countVisibleEffectItems(this.activeEffect.gpuData.speedFactors, this.visibleRatio)
+      residentItems: rendererStats.instanceCount,
+      submittedItems: rendererStats.submittedInstanceCount,
+      visibleItems: activeEffectItems
+        ? countVisibleItems(activeEffectItems, this.visibleRatio)
         : countVisibleItems(rendererStats.instanceCount, this.visibleRatio),
-      render: Object.freeze({
-        drawCalls: this.renderer.info.render.calls,
-        triangles: this.renderer.info.render.triangles,
-      }),
+      render: Object.freeze(this.host.getRenderStats()),
       renderer: Object.freeze(rendererStats),
-      pixelRatio: this.renderer.getPixelRatio(),
+      pixelRatio: this.host.getViewport().pixelRatio,
       paused: this.runtime.isPaused(),
-      effect: this.activeEffect?.effect.name ?? null,
-      activeEffectItems: this.activeEffect
-        ? countActiveEffectItems(this.activeEffect.gpuData.speedFactors)
-        : 0,
+      effect: this.effectController.getName(),
+      activeEffectItems,
       contextLost: this.runtime.isContextLost(),
       frameCpuMs: this.frameCpuMs,
       renderSubmitMs: this.renderSubmitMs,
@@ -880,61 +882,39 @@ export class MotionStage<TMeta = unknown> {
 
   getPerformanceEnvironment(): StagePerformanceEnvironment {
     this.assertActive()
-    const context = this.renderer.getContext()
-    const debugInfo = context.getExtension('WEBGL_debug_renderer_info') as {
-      UNMASKED_VENDOR_WEBGL: number
-      UNMASKED_RENDERER_WEBGL: number
-    } | null
-    const browserNavigator = typeof navigator === 'undefined'
-      ? null
-      : navigator as Navigator & { deviceMemory?: number }
-    return {
-      userAgent: browserNavigator?.userAgent ?? '',
-      platform: browserNavigator?.platform ?? '',
-      logicalCores: Number.isFinite(browserNavigator?.hardwareConcurrency)
-        ? browserNavigator?.hardwareConcurrency ?? null
-        : null,
-      deviceMemoryGb: Number.isFinite(browserNavigator?.deviceMemory)
-        ? browserNavigator?.deviceMemory ?? null
-        : null,
-      viewportWidth: this.options.container.clientWidth,
-      viewportHeight: this.options.container.clientHeight,
-      devicePixelRatio: typeof devicePixelRatio === 'number' ? devicePixelRatio : 1,
-      pixelRatio: this.renderer.getPixelRatio(),
-      maxTextureSize: this.renderer.capabilities.maxTextureSize,
-      webglVersion: String(context.getParameter(context.VERSION) ?? ''),
-      gpuVendor: debugInfo ? String(context.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) ?? '') : null,
-      gpuRenderer: debugInfo ? String(context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) ?? '') : null,
-    }
+    return this.host.getEnvironment()
   }
 
   private context() {
     const width = this.options.container.clientWidth
     const height = this.options.container.clientHeight
-    const distance = Math.abs(this.camera.position.z)
-    const viewportHeight = 2 * Math.tan(this.camera.fov * Math.PI / 360) * distance
+    const visibleWorld = this.host.getVisibleWorldSize()
     return {
       width,
       height,
-      viewportWidth: viewportHeight * (width / Math.max(1, height)),
-      viewportHeight,
+      viewportWidth: visibleWorld.width,
+      viewportHeight: visibleWorld.height,
       itemWidth: this.itemWidth,
       itemHeight: this.itemHeight,
+      items: this.items,
+      quality: this.qualityController.getLevel(),
     }
   }
 
   private resolveCurrentTransforms(now: number): Transform[] {
-    if (this.activeEffect) {
-      return this.activeEffect.effect.calculateTransforms(
-        this.items.length,
-        this.effectElapsedSeconds(this.activeEffect, now),
-      )
-    }
+    const effectTransforms = this.effectController.resolveTransforms(
+      this.items.length,
+      now,
+      this.runtime.isPaused(),
+    )
+    if (effectTransforms) return effectTransforms
     return this.motionController.resolveTransforms(this.transforms, now, this.runtime.isPaused())
   }
 
   private resolveCurrentVisualState(now: number): MotionRendererVisualState {
-    if (this.activeEffect) return { billboard: 1, hideBackHemisphere: 0, hemisphereEdgeFade: 0 }
+    if (this.effectController.hasActive()) {
+      return { billboard: 1, hideBackHemisphere: 0, hemisphereEdgeFade: 0 }
+    }
     return this.motionController.resolveVisualState(
       this.currentRendererVisualState(),
       now,
@@ -951,33 +931,13 @@ export class MotionStage<TMeta = unknown> {
   }
 
   private restoreRendererStateAfterItems(): void {
-    const visual = this.contentRenderer.capabilities.visual
-    const transition = this.motionController.getSnapshot(
-      performance.now(),
-      this.runtime.isPaused(),
-    )
-    if (transition) {
-      this.contentRenderer.prepareTransition(transition.from, transition.to)
-      visual?.prepareVisualTransition(transition.fromVisual, transition.toVisual)
-      this.contentRenderer.setProgress(transition.progress)
-    } else {
-      visual?.setVisualState(this.currentRendererVisualState())
-      this.contentRenderer.setTransforms(this.transforms)
-    }
-    this.contentRenderer.setVisibleRatio(this.visibleRatio)
-    this.interaction.refreshHighlight()
-    if (this.activeEffect) {
-      const streaming = this.contentRenderer.capabilities.streamingEffects
-      streaming?.enable(this.activeEffect.gpuData)
-      streaming?.setTime(this.activeEffect.elapsedSeconds)
-    }
-  }
-
-  private effectElapsedSeconds(effect: ActiveEffect, now: number): number {
-    const pendingSeconds = this.runtime.isPaused()
-      ? 0
-      : Math.max(0, now - effect.lastUpdatedAt) / 1000
-    return effect.elapsedSeconds + pendingSeconds
+    this.rendererState.restoreAfterItems({
+      transforms: this.transforms,
+      visual: this.currentRendererVisualState(),
+      visibleRatio: this.visibleRatio,
+      now: performance.now(),
+      paused: this.runtime.isPaused(),
+    })
   }
 
   private renderFrame(now: number, rawFrameMs: number, delta: number): void {
@@ -988,53 +948,46 @@ export class MotionStage<TMeta = unknown> {
       (progress) => this.contentRenderer.setProgress(progress),
     )
     if (completedTransforms) this.transforms = completedTransforms
-    const nextQuality = this.performanceManager.recordFrame(
+    const nextQuality = this.qualityController.recordFrame(
       rawFrameMs,
       now,
-      this.qualityMode === 'auto' && this.options.adaptivePerformance !== false,
+      this.options.adaptivePerformance !== false,
     )
     if (nextQuality) this.applyQuality(nextQuality)
     this.rotateX += this.rotateSpeedX * delta
     this.rotateY += this.rotateSpeedY * delta
-    this.contentRoot.rotation.set(this.rotateX, this.rotateY, 0)
-    if (this.activeEffect) {
-      this.activeEffect.elapsedSeconds += Math.max(0, now - this.activeEffect.lastUpdatedAt) / 1000
-      this.activeEffect.lastUpdatedAt = now
-      this.contentRenderer.capabilities.streamingEffects?.setTime(this.activeEffect.elapsedSeconds)
-    }
+    this.host.contentRoot.rotation.set(this.rotateX, this.rotateY, 0)
+    this.effectController.advance(now)
     this.contentRenderer.capabilities.frame?.update(delta)
     this.interaction.flushPendingPointerMove()
     this.extensionHost.update(delta)
     this.frameCpuMs = performance.now() - frameCpuStartedAt
     const renderStartedAt = performance.now()
-    this.renderer.render(this.scene, this.camera)
+    this.host.render()
     this.renderSubmitMs = performance.now() - renderStartedAt
   }
 
   private applyQuality(quality: QualityLevel): void {
     const targetLayout = this.motionController.getTargetLayout() ?? this.lastLayout
-    this.quality = quality
-    const profile = qualityProfiles[quality]
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, profile.maxPixelRatio))
+    const profile = this.qualityController.getProfile(quality)
+    this.host.setPixelRatio(profile.maxPixelRatio)
     const targetCount = Math.min(this.sourceItems.length, profile.maxVisibleItems)
     this.visibleRatio = this.items.length
       ? Math.min(1, targetCount / this.items.length)
       : 1
     this.contentRenderer.setVisibleRatio(this.visibleRatio)
     this.interaction.syncItems()
-    if (this.activeEffect) {
-      const now = performance.now()
-      this.activeEffect.elapsedSeconds = this.effectElapsedSeconds(this.activeEffect, now)
-      this.activeEffect.lastUpdatedAt = now
-      this.activeEffect.effect.prepare(this.items.length, profile.maxActiveEffectItems)
-      this.activeEffect.gpuData = this.activeEffect.effect.getGpuData()
-      this.contentRenderer.capabilities.streamingEffects?.enable(this.activeEffect.gpuData)
-      this.contentRenderer.capabilities.streamingEffects?.setTime(this.activeEffect.elapsedSeconds)
-    }
+    void this.effectController.reconfigure(
+      this.items.length,
+      profile.maxActiveEffectItems,
+      performance.now(),
+      this.runtime.isPaused(),
+    )
     this.extensionHost.qualityChange(quality)
     this.resizeInternal()
-    this.options.onQualityChange?.(quality, this.performanceManager.getStats())
-    if (this.sourceItems.length) {
+    const stats = this.qualityController.getStats()
+    this.events.emit('qualitychange', { quality, stats })
+    if (this.sourceItems.length && targetCount > this.items.length) {
       void this.updateItemsInternal(this.sourceItems, {
         layout: targetLayout ?? undefined,
         duration: 0,
@@ -1076,7 +1029,7 @@ export class MotionStage<TMeta = unknown> {
     return {
       width: this.options.container.clientWidth,
       height: this.options.container.clientHeight,
-      pixelRatio: this.renderer.getPixelRatio(),
+      pixelRatio: this.host.getViewport().pixelRatio,
     }
   }
 
@@ -1086,10 +1039,9 @@ export class MotionStage<TMeta = unknown> {
     this.extensionHost.reducedMotionChange(this.reducedMotion)
     if (!this.reducedMotion) return
     this.stopRotation()
-    if (!this.activeEffect) return
-    this.transforms = this.activeEffect.effect.calculateTransforms(this.items.length, 0)
-    this.activeEffect = null
-    this.contentRenderer.capabilities.streamingEffects?.disable()
+    const transforms = this.effectController.settleReducedMotion(this.items.length)
+    if (!transforms) return
+    this.transforms = transforms
     this.contentRenderer.setTransforms(this.transforms)
   }
 
@@ -1196,65 +1148,11 @@ function finiteStat(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
-function resolveMaxTextureLayers(
-  context: WebGLRenderingContext | WebGL2RenderingContext,
-): number {
-  const parameter = (context as WebGL2RenderingContext).MAX_ARRAY_TEXTURE_LAYERS
-  if (!Number.isFinite(parameter)) return 256
-  const value = context.getParameter(parameter)
-  return Number.isFinite(value) ? Math.max(1, Math.floor(value as number)) : 256
-}
-
-function disposeObjectResources(root: Object3D): void {
-  const geometries = new Set<{ dispose(): void }>()
-  const materials = new Set<Material>()
-  const textures = new Set<Texture>()
-  root.traverse((object) => {
-    const renderable = object as Object3D & {
-      geometry?: { dispose(): void }
-      material?: Material | Material[]
-    }
-    if (renderable.geometry?.dispose) geometries.add(renderable.geometry)
-    const objectMaterials = Array.isArray(renderable.material)
-      ? renderable.material
-      : renderable.material
-        ? [renderable.material]
-        : []
-    objectMaterials.forEach((material) => {
-      materials.add(material)
-      Object.values(material).forEach((value) => {
-        if (value && typeof value === 'object' && (value as Texture).isTexture) {
-          textures.add(value as Texture)
-        }
-      })
-    })
-  })
-  textures.forEach((texture) => texture.dispose())
-  materials.forEach((material) => material.dispose())
-  geometries.forEach((geometry) => geometry.dispose())
-}
-
 function countVisibleItems(count: number, ratio: number): number {
   let visible = 0
   for (let index = 0; index < count; index += 1) {
     if (visibilityRank(index) <= ratio) visible += 1
   }
-  return visible
-}
-
-function countActiveEffectItems(speedFactors: Float32Array): number {
-  let active = 0
-  speedFactors.forEach((speed) => {
-    if (speed >= 0) active += 1
-  })
-  return active
-}
-
-function countVisibleEffectItems(speedFactors: Float32Array, ratio: number): number {
-  let visible = 0
-  speedFactors.forEach((speed, index) => {
-    if (speed >= 0 && visibilityRank(index) <= ratio) visible += 1
-  })
   return visible
 }
 

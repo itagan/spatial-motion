@@ -18,15 +18,24 @@ export interface ResolvedEmissionOptions {
   waveStrength: number
 }
 
-export type StreamingEffectKind = 'tunnel' | 'linear-shooter' | 'vortex' | 'radial-burst'
+/** Renderer-defined program key. Built-in Cards supports the four bundled effect kinds. */
+export type StreamingEffectKind = string
 
-export interface StreamingEffectGpuData {
+export interface StreamingEffectGpuData<TPayload = unknown> {
   kind: StreamingEffectKind
-  /** Four floats per instance. Their meaning is owned by the built-in effect kind. */
+  /** Number of pool entries submitted while this program is active. */
+  activeCount: number
+  /** Opaque renderer/program-owned data. Core never inspects this value. */
+  payload: TPayload
+}
+
+/** Payload used by the built-in Cards effect programs. */
+export interface BuiltinStreamingEffectPayload {
+  /** Four floats per instance. Their meaning is owned by the effect program. */
   paths: Float32Array
   /** Negative values mark dormant pool entries. */
   speedFactors: Float32Array
-  /** Three vec4 uniforms shared by every built-in effect. */
+  /** Three vec4 uniforms shared by the built-in effect programs. */
   parameters: Float32Array
 }
 

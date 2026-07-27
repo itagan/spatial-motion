@@ -57,10 +57,10 @@ describe('shared effect motion curves', () => {
     radialBurst({ seed: 12, maxActiveItems: 100 }),
   ])('$name preserves active trajectories when the quality cap changes', (effect) => {
     effect.prepare(100, 30)
-    const paths = Array.from(effect.getGpuData().paths.slice(0, 30 * 4))
-    const speeds = Array.from(effect.getGpuData().speedFactors.slice(0, 30))
+    const paths = Array.from(effect.getGpuData().payload.paths.slice(0, 30 * 4))
+    const speeds = Array.from(effect.getGpuData().payload.speedFactors.slice(0, 30))
     effect.prepare(100, 60)
-    expect(Array.from(effect.getGpuData().paths.slice(0, 30 * 4))).toEqual(paths)
-    expect(Array.from(effect.getGpuData().speedFactors.slice(0, 30))).toEqual(speeds)
+    expect(Array.from(effect.getGpuData().payload.paths.slice(0, 30 * 4))).toEqual(paths)
+    expect(Array.from(effect.getGpuData().payload.speedFactors.slice(0, 30))).toEqual(speeds)
   })
 })
