@@ -184,6 +184,14 @@ Atlas patch 会按纹理行合并相邻卡片范围，模板实例保留最多 2
 
 2026-07-26 Chromium 150 / Apple M4 / 1265×633 的 2000 Cards/high/interaction-stress 3 秒结果：合成输入触发 707 次 `pointermove`，Stage 实际执行 180 次拾取，合并 74.5%；平均 59.99 FPS、P95/P99 17.70/17.70ms、0 个 33ms 长帧、1 Draw Call。拾取累计 584.8ms，平均每次 3.249ms。Points 2000 浏览器复验继续保持 1 Draw Call，控制台无 error。
 
+## 拾取热路径低分配化
+
+InteractionController 保留原有屏幕四边形、disc、padding、遮挡深度和稳定顺序语义，但把中心、相机方向、世界角点与屏幕坐标改为实例级固定缓冲。每次拾取只计算一次相机方向、Group 旋转和投影尺度；Quad 先用包含实际四角的投影包围圆做保守排除，剩余候选才执行四角精确测试。命中结果在扫描过程中按原 comparator 在线更新，不再建立候选数组或排序。
+
+高频 `pointermove` 同时改为标量坐标槽，不再为每个输入事件创建 pending 对象。焦点查询维护随 items 同步重建的稳定 id 索引，数据重排后仍正确更新 GPU highlight。自动化覆盖倾斜 surface 的粗筛边界、遮挡/距离排序、矩形/圆形边界、数据重排和 settled pick 期间零 `Vector3.clone()`。
+
+2026-07-26 Chromium 150 / Apple M4 / 2000 Cards/high/interaction-stress 三轮结果：180 次拾取累计 192.1/192.7/205.0ms，中位数 192.7ms，平均每次约 1.071ms；相对改造前 3.249ms 降低约 67.0%。三轮 P95 为 17.55–18.60ms，均为 0 个 24/33/50ms 长帧、主体 1 Draw Call；每轮约 750 次合成 pointermove 仍只执行 180 次拾取。完整包检查为 root/Core 37,572/13,509 bytes gzip，Cards-only 保持 12,227 bytes，均低于既有预算。
+
 ## 真实消费者体积与 Atlas 冷启动
 
 包体积门禁不再把所有 ESM 输出文件分别 gzip 后相加当作用户下载量。`pack:check` 会从真实 `.tgz` 创建 root、Core-only 和 Cards-only Vite/Terser 消费者，并把 Three.js 保持为 external；分模块 gzip 聚合值仍输出，专门用于观察内部模块增长。当前 root/Core-only/Cards-only 分别为 33,362 / 11,875 / 9,972 bytes gzip，均低于 40,960 / 16,384 / 12,288 bytes 预算；分模块聚合诊断为 41,500 bytes，但不对应任何单个消费者产物。
@@ -217,3 +225,9 @@ Array 首帧上传预算约 3 MiB，后续每个 Stage RAF 约 768 KiB。新的 
 Array 默认卡片 Worker 随后移除“完整 2D Atlas readback 后再逐单元重排”的中间路径，改为最多约 8 MiB 的平衡分页批次直接绘制、批量 readback 并写入最终 layer 缓冲。2000 项 48px/250 层只需约 3 次 readback；估算瞬时像素缓冲由完整 2D Canvas、完整 ImageData 和最终数组同时驻留的约 62 MiB，降低到最终数组加单批 Canvas/ImageData 的约 41 MiB。
 
 同环境三轮 2000/high/cold-start 的 Atlas build 为 51.7/74.6/55.0ms，中位数 55.0ms；readback 为 30.7/39.5/31.8ms，中位数 31.8ms。P95 为 18.55–18.60ms，均为 0 个 24/33/50ms 长帧、主体 1 Draw Call，首次提交 4.2–6.5ms。默认 root/Core/Cards 消费体积保持 37,093/13,048/12,227 bytes gzip，新增实现只进入按需 Worker/Array chunk；tarball 约 99.1 KiB，仍低于既有预算。
+
+## Atlas 局部上传低分配化
+
+Single Atlas patch 不再为每个像素行建立 Map 项、范围数组和 `{ start, end }` 对象。变化单元按稳定 index 扫描，同一卡片行内相邻单元合并为连续 run，再直接生成 Three.js update range；分离单元保持独立范围。最常见的单卡 patch 直接复用输入列表，不再执行 `slice().sort()`。像素 readback 与逐行写入语义保持不变。
+
+2026-07-27 Chromium 150 / Apple M4 / 2000 Cards/high/single/48px 的 3 秒连续更新三轮均完成 17 次 patch、保持约 60 FPS、1 Draw Call 和 0 个 24/33/50ms 长帧。P95 为 18.30–18.60ms；patch 累计耗时中位数 73.3ms，与优化前 73.0ms 基本持平，说明当前墙钟成本主要仍在 Canvas readback，但逐行临时对象已经移除。完整验证为 25 个测试文件、312 项测试；root/Core/Cards-only 为 37,628/13,509/12,276 bytes gzip，均未提高预算。

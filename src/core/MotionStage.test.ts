@@ -14,6 +14,7 @@ import {
   PlaneGeometry,
   ShaderMaterial,
   Texture,
+  Vector3,
 } from 'three'
 import type { Layout, LayoutContext, MotionItem, Transform } from './types'
 import type { StageExtensionContext } from './extensions'
@@ -1501,6 +1502,20 @@ describe('MotionStage', () => {
     stage.destroy()
   })
 
+  it('keeps focused ids indexed across item reordering', async () => {
+    const stage = createStage()
+    const cards = currentCards()
+    await stage.setItems([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
+    expect(stage.focusItem('b')).toBe(true)
+    expect(cards.setHoverIndex).toHaveBeenLastCalledWith(1)
+
+    await stage.setItems([{ id: 'b' }, { id: 'c' }, { id: 'a' }])
+
+    expect(stage.getFocusedItem()?.id).toBe('b')
+    expect(cards.setHoverIndex).toHaveBeenLastCalledWith(0)
+    stage.destroy()
+  })
+
   it('makes transitions immediate and freezes streaming effects in reduced motion mode', async () => {
     const stage = createStage({ motionPreference: 'reduced' })
     const cards = currentCards()
@@ -1812,6 +1827,36 @@ describe('MotionStage', () => {
     expect(stage.pick(58, 50)).toBeNull()
     expect(stage.pick(58, 50, { padding: 5 })?.item.id).toBe('card')
     expect(stage.pick(58, 50, 10)?.item.id).toBe('card')
+    stage.destroy()
+  })
+
+  it('keeps the projected broad phase conservative for tilted surface cards', async () => {
+    const stage = createStage()
+    await stage.setItems([{ id: 'tilted' }])
+    await stage.to({
+      name: 'tilted-surface',
+      orientation: 'surface',
+      calculate: () => [transform({ scale: 4, rotationY: 1.2 })],
+    }, { duration: 0 })
+
+    expect(stage.pick(50, 50)?.item.id).toBe('tilted')
+    expect(stage.pick(58, 50, { padding: 4 })?.item.id).toBe('tilted')
+    stage.destroy()
+  })
+
+  it('does not clone per-item vectors while picking settled transforms', async () => {
+    const stage = createStage()
+    await stage.setItems(Array.from({ length: 100 }, (_, index) => ({
+      id: `item-${index}`,
+    })))
+    await stage.to(layout((count) => Array.from(
+      { length: count },
+      (_value, index) => transform({ x: index ? 100 : 0 }),
+    )), { duration: 0 })
+    const clone = vi.spyOn(Vector3.prototype, 'clone')
+
+    expect(stage.pick(50, 50)?.item.id).toBe('item-0')
+    expect(clone).not.toHaveBeenCalled()
     stage.destroy()
   })
 

@@ -139,6 +139,8 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 
 2026-07-26 已完成高频交互合帧复验：Cards 2000/high 在约 240Hz 合成指针输入下，3 秒 707 次事件合并为 180 次拾取，减少 74.5%，保持 59.99 FPS、P95 17.70ms、0 个 33ms 长帧和 1 Draw Call。Points 2000 保持主体 1 Draw Call，控制台无 error。
 
+2026-07-26 已完成拾取低分配复验：Cards 2000/high/interaction-stress 三轮均执行 180 次拾取，累计 192.1/192.7/205.0ms，中位单次约 1.071ms，较原 3.249ms 降低约 67.0%；P95 17.55–18.60ms、0 个 24/33/50ms 长帧、主体 1 Draw Call。矩形 padding、surface 正反面、遮挡排序、Points disc 和数据重排后的焦点索引由自动化回归覆盖。
+
 2026-07-26 已完成 Atlas 默认绘制冷启动复验：Cards 2000/high/cold-start 三轮 Atlas build 由 299.9ms 中位数降至 51.7ms，cell render/readback 中位数为 7.3/44.0ms；默认路径只创建 1 张整图 Canvas，产品模板隔离绘制路径保持正常。三轮均提交 2000 项、保持 1 Draw Call，P95 17.60–17.65ms；两轮存在一次 50ms 以上冷启动峰值，后续对照继续区分 CPU readback 与纹理首传。默认与产品模板画面无异常，控制台无 warning/error。
 
 2026-07-26 已完成 Atlas 自动分辨率对照：2000/high 的自动 48px 三轮 build 中位数 40.1ms、readback 中位数 33.1ms、纹理约 33.9MB，相比固定 64px 的 51.7/44.0ms 和约 53.4MB 明显下降；保持 2000 submitted、1 Draw Call，球面头像清晰度可接受且控制台无 warning/error。40px 与 64px/无 mipmap 对照证明继续降清晰度或默认关闭 mipmap都不能消除冷启动长帧，因此保留 48px+mipmap，并把离主线程绘制/readback列为后续独立课题。
@@ -150,3 +152,5 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 2026-07-26 已完成 Texture2DArray 对照：2000/high 的显式 array 与 `auto + mipmaps:false` 均使用 250 层自适应页面，渐进上传期间画面稳定，完成后 2000 项全部显示；首次 WebGL 提交约 4.3ms，P95 18.4–18.6ms、0 个 33ms 长帧和主体 1 Draw Call。`auto + mipmaps:true` 与 500 项无 mipmap小图集均保持 single。17 次 array patch 估算上传约 1.71 MiB，无资源或 Draw Call 增长，控制台无 warning/error。
 
 2026-07-26 已完成 Array Worker 分页批次复验：2000/high/auto、48px、250 层完成全部渐进上传，球面卡片方向和层顺序保持稳定。三轮 cold-start Atlas build 中位数 55.0ms、readback 中位数 31.8ms，P95 18.55–18.60ms、0 个 24/33/50ms 长帧、主体 1 Draw Call，首次提交 4.2–6.5ms；默认 Cards 消费体积不变。
+
+2026-07-27 已完成 Single Atlas 局部上传低分配复验：2000/high/48px 的连续更新三轮均完成 17 次 patch，保持约 60 FPS、P95 18.30–18.60ms、0 个 24/33/50ms 长帧和主体 1 Draw Call。相邻与分离单元的上传范围、单卡快速路径和像素内容由自动化回归覆盖；patch 墙钟中位数与优化前基本持平，后续继续把 Canvas readback 视为主要成本。

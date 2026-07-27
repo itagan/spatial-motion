@@ -16,12 +16,16 @@ const atlasMock = vi.hoisted(() => ({
   create: vi.fn(),
   createPatch: vi.fn(),
   applyPatch: vi.fn(),
+  advanceUploads: vi.fn(),
+  clearPatchQueue: vi.fn(),
 }))
 
 vi.mock('./textureAtlas', () => ({
   createTextureAtlas: atlasMock.create,
   createTextureAtlasPatch: atlasMock.createPatch,
   applyTextureAtlasPatch: atlasMock.applyPatch,
+  advanceTextureAtlasUploads: atlasMock.advanceUploads,
+  clearTextureAtlasPatchQueue: atlasMock.clearPatchQueue,
   TextureAtlasImageCache: class {
     clear = vi.fn()
   },
@@ -90,6 +94,21 @@ describe('InstancedCardRenderer item loading', () => {
     atlasMock.createPatch.mockReset()
     atlasMock.applyPatch.mockReset()
     atlasMock.applyPatch.mockReturnValue(1)
+    atlasMock.advanceUploads.mockReset()
+    atlasMock.advanceUploads.mockImplementation((
+      atlas: TextureAtlasResult,
+      nextLayer: number,
+      layerBudget: number,
+    ) => {
+      const end = Math.min(atlas.depth, nextLayer + layerBudget)
+      if ('addLayerUpdate' in atlas.texture) {
+        for (let layer = nextLayer; layer < end; layer += 1) {
+          atlas.texture.addLayerUpdate(layer)
+        }
+      }
+      return [end, end > nextLayer]
+    })
+    atlasMock.clearPatchQueue.mockReset()
   })
 
   it('keeps only the newest asynchronous atlas result', async () => {
@@ -436,6 +455,97 @@ describe('InstancedCardRenderer item loading', () => {
       Array.from({ length: 12 }, (_value, index) => index),
     ))
     expect(mesh.material.uniforms.uLayers.value).toBe(12)
+    renderer.dispose()
+  })
+
+  it('coordinates array patches through the bounded layer uploader', async () => {
+    const currentAtlas = atlas(32)
+    const arrayResult = currentAtlas.result as TextureAtlasResult
+    const texture = new DataArrayTexture(
+      new Uint8Array(256 * 256 * 20 * 4),
+      256,
+      256,
+      20,
+    )
+    arrayResult.texture = texture
+    arrayResult.mode = 'array'
+    arrayResult.width = 256
+    arrayResult.height = 256
+    arrayResult.depth = 20
+    arrayResult.data = texture.image.data as Uint8Array<ArrayBuffer>
+    arrayResult.columns = 4
+    arrayResult.rows = 4
+    arrayResult.mipmaps = false
+    const patch = {
+      cells: [
+        { index: 16, canvas: {} as HTMLCanvasElement },
+        { index: 16, canvas: {} as HTMLCanvasElement },
+        { index: 240, canvas: {} as HTMLCanvasElement },
+      ],
+      metrics: {
+        cells: 1,
+        renderMs: 1,
+        prepareMs: 0,
+        imageLoadWallMs: 0,
+        cellRenderMs: 1,
+        applyMs: 0,
+        readbackMs: 0,
+        imageLoadMs: 0,
+        imageRequests: 0,
+        imageFailures: 0,
+        uploadBytes: 0,
+      },
+    } satisfies TextureAtlasPatch
+    atlasMock.create.mockResolvedValueOnce(arrayResult)
+    atlasMock.createPatch.mockResolvedValue(patch)
+    let patchApplications = 0
+    atlasMock.applyPatch.mockImplementation((
+      _atlas: TextureAtlasResult,
+      appliedPatch: TextureAtlasPatch,
+      visibleLayers: number,
+    ) => {
+      expect(visibleLayers).toBe(12)
+      appliedPatch.metrics.uploadRanges = patchApplications === 0 ? 1 : 0
+      appliedPatch.metrics.uploadBytes = patchApplications === 0 ? 256 * 256 * 4 : 0
+      patchApplications += 1
+      return 1
+    })
+    const renderer = new InstancedCardRenderer(new Scene(), { atlasMode: 'array' })
+    const items = Array.from({ length: 32 }, (_value, index) => ({
+      id: String(index),
+    }))
+    await renderer.setItems(items)
+    renderer.capabilities.frame?.update(1 / 60)
+    texture.layerUpdates.clear()
+
+    await renderer.updateItems(
+      items.map((item, index) => index === 0 ? { ...item, title: 'first' } : item),
+      [0],
+    )
+    await renderer.updateItems(
+      items.map((item, index) => index === 0 ? { ...item, title: 'second' } : item),
+      [0],
+    )
+    atlasMock.advanceUploads.mockImplementationOnce((
+      atlas: TextureAtlasResult,
+    ) => {
+      if ('addLayerUpdate' in atlas.texture) {
+        const texture = atlas.texture
+        ;[1, 12, 13].forEach((layer) => texture.addLayerUpdate(layer))
+      }
+      return [14, true]
+    })
+    renderer.capabilities.frame?.update(1 / 60)
+
+    expect(texture.layerUpdates).toEqual(new Set([1, 12, 13]))
+    expect(renderer.getStats().metrics).toMatchObject({
+      uploadedLayers: 14,
+      atlasUploadRanges: 1,
+      estimatedTextureUploadBytes: (
+        arrayResult.metrics.uploadBytes
+        + 256 * 256 * 4
+      ),
+    })
     renderer.dispose()
   })
 
