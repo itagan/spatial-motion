@@ -711,6 +711,41 @@ describe('texture atlas card rendering', () => {
     expect(patch.metrics.uploadBytes).toBe(36 * 16 * 4)
   })
 
+  it('keeps separated cells as distinct row upload runs without per-row range maps', async () => {
+    const patch = await createTextureAtlasPatch(
+      [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+      [2, 0],
+      16,
+    )
+    const texture = {
+      needsUpdate: false,
+      addUpdateRange: vi.fn(),
+      clearUpdateRanges: vi.fn(),
+    }
+    const atlas = {
+      data: new Uint8Array(60 * 20 * 4),
+      width: 60,
+      height: 20,
+      columns: 3,
+      rows: 1,
+      cellSize: 16,
+      cellWidth: 16,
+      cellHeight: 16,
+      padding: 2,
+      stride: 20,
+      strideX: 20,
+      strideY: 20,
+      texture,
+      initialized: true,
+    } as unknown as TextureAtlasResult
+
+    applyTextureAtlasPatch(atlas, patch)
+
+    expect(texture.addUpdateRange).toHaveBeenCalledTimes(32)
+    expect(patch.metrics.uploadRanges).toBe(32)
+    expect(patch.metrics.uploadBytes).toBe(2 * 16 * 16 * 4)
+  })
+
   it('falls back to the built-in card when custom drawing fails', async () => {
     const patch = await createTextureAtlasPatch(
       [{ id: 'fallback', title: 'Fallback' }],
