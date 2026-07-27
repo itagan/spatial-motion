@@ -5,6 +5,7 @@ import {
   effectTravel,
   stableEffectPhase,
   type StreamingEffect,
+  type BuiltinStreamingEffectPayload,
   type StreamingEffectGpuData,
 } from './types.js'
 
@@ -21,7 +22,7 @@ export interface RadialBurstOptions {
   seed?: number
 }
 
-export type RadialBurstGpuData = StreamingEffectGpuData
+export type RadialBurstGpuData = StreamingEffectGpuData<BuiltinStreamingEffectPayload>
 
 export class RadialBurstEffect implements StreamingEffect {
   readonly name = 'radial-burst'
@@ -102,18 +103,21 @@ export class RadialBurstEffect implements StreamingEffect {
     if (this.preparedCount < 0) throw new Error('RadialBurstEffect must be prepared before reading GPU data')
     return {
       kind: this.kind,
-      paths: this.paths,
-      speedFactors: this.speedFactors,
-      parameters: createEffectParameters(
-        this.options.sourceRadius,
-        this.options.outerRadius,
-        this.options.speed,
-        this.options.z,
-        this.options.startScale,
-        this.options.endScale,
-        this.options.direction === 'out' ? 1 : 0,
-        this.options.depthScale,
-      ),
+      activeCount: this.preparedActiveCount,
+      payload: {
+        paths: this.paths,
+        speedFactors: this.speedFactors,
+        parameters: createEffectParameters(
+          this.options.sourceRadius,
+          this.options.outerRadius,
+          this.options.speed,
+          this.options.z,
+          this.options.startScale,
+          this.options.endScale,
+          this.options.direction === 'out' ? 1 : 0,
+          this.options.depthScale,
+        ),
+      },
     }
   }
 }

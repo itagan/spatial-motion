@@ -2,6 +2,17 @@
 
 本文件记录优化阶段的可复现证据和下一项优先工作，不承担发布清单职责。所有数字必须同时保存实例数、质量、场景、视口、DPR、GPU 和提交 SHA。
 
+## v2 resident / submitted / visible 模型
+
+运行中从高档降到中、低档时，Stage 保留已经创建的 Renderer resident pool，并立即
+降低 Shader visible ratio 和实际特效提交量。降级不再在性能已经承压的时间点重建
+Atlas、Geometry 或 Attribute。局部 item patch 继续更新 resident pool，不会把质量
+裁剪误写成数据裁剪。
+
+从低档启动后升级到更高档位时，Stage 才异步扩展 resident pool；revision 继续保证
+旧结果不能覆盖新质量或数据状态。后续基准需要分别记录 resident instance、
+submitted instance 和 visible instance，不能再用单个 item count 解释性能。
+
 ## v1.2 可观测性基线
 
 2026-07-15 本地 Chromium 150 / Apple M4 / 1265×633 / DPR 2（Stage pixel ratio 1.5），500 items / auto-high / 3 秒：
@@ -231,3 +242,20 @@ Array 默认卡片 Worker 随后移除“完整 2D Atlas readback 后再逐单�
 Single Atlas patch 不再为每个像素行建立 Map 项、范围数组和 `{ start, end }` 对象。变化单元按稳定 index 扫描，同一卡片行内相邻单元合并为连续 run，再直接生成 Three.js update range；分离单元保持独立范围。最常见的单卡 patch 直接复用输入列表，不再执行 `slice().sort()`。像素 readback 与逐行写入语义保持不变。
 
 2026-07-27 Chromium 150 / Apple M4 / 2000 Cards/high/single/48px 的 3 秒连续更新三轮均完成 17 次 patch、保持约 60 FPS、1 Draw Call 和 0 个 24/33/50ms 长帧。P95 为 18.30–18.60ms；patch 累计耗时中位数 73.3ms，与优化前 73.0ms 基本持平，说明当前墙钟成本主要仍在 Canvas readback，但逐行临时对象已经移除。完整验证为 25 个测试文件、312 项测试；root/Core/Cards-only 为 37,628/13,509/12,276 bytes gzip，均未提高预算。
+
+## Cards Program 与 Render Host 重构
+
+Cards 的公共 Shader 只保留 Atlas、布局过渡、Highlight、质量裁剪和投影；四个内置
+Effect Program、Array Shader 与 Atlas 引擎改为动态模块。Program Material、私有
+Attribute 和 TypedArray 按容量复用，EffectController 与 Renderer 使用双层 generation
+阻止慢加载结果覆盖新特效、质量变化、布局切换或销毁。Stage 的 Scene、Camera、
+WebGLRenderer、Canvas、能力查询和基础 context 恢复由 `StageRenderHost` 唯一拥有。
+
+2026-07-27 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2000 Cards/high 三组
+3 秒回归：steady 为 60.03 FPS、P95/P99 18.23/18.70ms、平均 CPU/submit
+0.025/0.088ms；transition-stress 为 60.00 FPS、P95/P99 18.35/18.60ms、完成 4 次
+操作；interaction-stress 为 60.02 FPS、P95/P99 18.35/18.60ms，751 次输入合并为
+180 次拾取，累计 picking 132.1ms。三组均为 1 Draw Call、0 个 24/33/50ms 长帧，
+浏览器无 warning/error。自定义 GPU 示例激活后报告 300 submitted、1 cached Program
+和 1 Draw Call。真实 root/Core/Cards-only 消费体积为 35,433/15,075/8,407 bytes
+gzip，tarball 112,543 bytes。

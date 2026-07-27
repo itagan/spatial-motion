@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spatial Motion · Custom GPU effect</title>
+  </head>
+  <body>
+    <main class="example">
+      <header>
+        <div><h1>Custom GPU effect</h1><p>受约束的 Cards Program 接入业务 Shader，仍为单 Mesh / 单 Draw Call。</p></div>
+        <span id="status" class="status">loading</span>
+      </header>
+      <section id="stage" class="stage" aria-label="Custom GPU effect stage"></section>
+      <footer>
+        <div class="controls">
+          <button id="effect">进入 Wave Program</button>
+          <button id="layout">返回球体</button>
+        </div>
+        <p>Program 只上传私有 Attribute / Uniform；Atlas、裁剪、Highlight 与投影由 Cards 公共管线负责。</p>
+      </footer>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

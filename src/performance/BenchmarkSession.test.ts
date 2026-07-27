@@ -23,6 +23,8 @@ function stats(overrides: Partial<StagePerformanceStats> = {}): StagePerformance
     sampleCount: 120,
     qualityMode: 'high',
     inputItems: 600,
+    residentItems: 600,
+    submittedItems: 600,
     visibleItems: 600,
     render: { drawCalls: 1, triangles: 1200 },
     renderer: {

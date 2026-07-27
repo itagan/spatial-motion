@@ -8,9 +8,9 @@ describe('LinearShooterEffect', () => {
     const data = effect.getGpuData()
 
     expect(data.kind).toBe('linear-shooter')
-    expect(data.paths).toHaveLength(2000)
-    expect(data.speedFactors).toHaveLength(500)
-    expect(Array.from(data.speedFactors).filter((speed) => speed >= 0)).toHaveLength(90)
+    expect(data.payload.paths).toHaveLength(2000)
+    expect(data.payload.speedFactors).toHaveLength(500)
+    expect(Array.from(data.payload.speedFactors).filter((speed) => speed >= 0)).toHaveLength(90)
   })
 
   it('moves active items outward on a camera-facing plane', () => {
@@ -30,7 +30,7 @@ describe('LinearShooterEffect', () => {
     })
     expect(effect.calculateTransforms(100, 0.1).some(({ opacity }) => opacity > 0)).toBe(true)
     expect(effect.calculateTransforms(100, 0.8).every(({ opacity }) => opacity === 0)).toBe(true)
-    const parameters = Array.from(effect.getGpuData().parameters.slice(7))
+    const parameters = Array.from(effect.getGpuData().payload.parameters.slice(7))
     ;[1, 1.5, 0.3, 0.35, 0.75].forEach((value, index) => {
       expect(parameters[index]).toBeCloseTo(value)
     })

@@ -1,4 +1,4 @@
-import type { Group, Texture } from 'three'
+import type { BufferGeometry, Group, Material, Texture } from 'three'
 import type { StreamingEffectGpuData } from '../effects/types.js'
 import type { MotionItem, Transform } from '../core/types.js'
 
@@ -59,7 +59,8 @@ export interface MotionRendererResourceRecoveryCapability {
 }
 
 export interface MotionRendererStreamingEffectsCapability {
-  enable(data: StreamingEffectGpuData): void
+  /** Return false to reject an effect key and make Stage use its static CPU frame. */
+  enable(data: StreamingEffectGpuData): boolean | void | Promise<boolean | void>
   disable(): void
   setTime(elapsedSeconds: number): void
 }
@@ -104,6 +105,10 @@ export interface MotionRendererFactoryContext {
   readonly maxAnisotropy: number
   readonly signal: AbortSignal
   readonly prepareTexture: (texture: Texture) => number
+  readonly prepareProgram?: (
+    material: Material,
+    geometry: BufferGeometry,
+  ) => Promise<number>
 }
 
 export type MotionRendererFactory<TMeta = unknown> = (

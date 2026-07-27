@@ -5,6 +5,7 @@ import {
   effectTravel,
   stableEffectPhase,
   type StreamingEffect,
+  type BuiltinStreamingEffectPayload,
   type StreamingEffectGpuData,
 } from './types.js'
 
@@ -22,7 +23,7 @@ export interface VortexOptions {
   seed?: number
 }
 
-export type VortexGpuData = StreamingEffectGpuData
+export type VortexGpuData = StreamingEffectGpuData<BuiltinStreamingEffectPayload>
 
 export class VortexEffect implements StreamingEffect {
   readonly name = 'vortex'
@@ -103,19 +104,22 @@ export class VortexEffect implements StreamingEffect {
     if (this.preparedCount < 0) throw new Error('VortexEffect must be prepared before reading GPU data')
     return {
       kind: this.kind,
-      paths: this.paths,
-      speedFactors: this.speedFactors,
-      parameters: createEffectParameters(
-        this.options.innerRadius,
-        this.options.outerRadius,
-        this.options.farZ,
-        this.options.nearZ,
-        this.options.speed,
-        this.options.turns,
-        this.options.startScale,
-        this.options.endScale,
-        this.options.direction === 'out' ? 1 : 0,
-      ),
+      activeCount: this.preparedActiveCount,
+      payload: {
+        paths: this.paths,
+        speedFactors: this.speedFactors,
+        parameters: createEffectParameters(
+          this.options.innerRadius,
+          this.options.outerRadius,
+          this.options.farZ,
+          this.options.nearZ,
+          this.options.speed,
+          this.options.turns,
+          this.options.startScale,
+          this.options.endScale,
+          this.options.direction === 'out' ? 1 : 0,
+        ),
+      },
     }
   }
 }

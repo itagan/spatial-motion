@@ -109,9 +109,9 @@ onMounted(async () => {
     }),
     ariaLabel: '抽奖参与者空间舞台',
     keyboardNavigation: false,
-    onQualityChange(level) {
-      quality.value = level.toUpperCase()
-    },
+  })
+  stage.on('qualitychange', ({ quality: level }) => {
+    quality.value = level.toUpperCase()
   })
 
   await stage.setItems(motionItems())

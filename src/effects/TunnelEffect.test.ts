@@ -9,10 +9,10 @@ describe('TunnelEffect', () => {
     effect.prepare(600)
     const second = effect.getGpuData()
 
-    expect(first.paths).toBe(second.paths)
+    expect(first.payload.paths).toBe(second.payload.paths)
     expect(first.kind).toBe('tunnel')
-    expect(first.paths).toHaveLength(2400)
-    expect(first.speedFactors).toHaveLength(600)
+    expect(first.payload.paths).toHaveLength(2400)
+    expect(first.payload.speedFactors).toHaveLength(600)
   })
 
   it('cycles finite transforms between the far and near planes', () => {
@@ -32,14 +32,14 @@ describe('TunnelEffect', () => {
     const gpuData = effect.getGpuData()
 
     expect(transforms.filter(({ opacity }) => opacity > 0).length).toBeLessThanOrEqual(120)
-    expect(Array.from(gpuData.speedFactors).filter((speed) => speed >= 0)).toHaveLength(120)
+    expect(Array.from(gpuData.payload.speedFactors).filter((speed) => speed >= 0)).toHaveLength(120)
   })
 
   it('honors the runtime quality cap below its configured pool limit', () => {
     const effect = tunnel({ maxActiveItems: 300 })
     effect.prepare(600, 140)
 
-    expect(Array.from(effect.getGpuData().speedFactors).filter((speed) => speed >= 0)).toHaveLength(140)
+    expect(Array.from(effect.getGpuData().payload.speedFactors).filter((speed) => speed >= 0)).toHaveLength(140)
   })
 
   it('supports deterministic square cross sections', () => {
@@ -48,7 +48,7 @@ describe('TunnelEffect', () => {
     transforms.forEach(({ x, y }) => {
       expect(Math.max(Math.abs(x), Math.abs(y))).toBeGreaterThan(0)
     })
-    expect(new Set(effect.getGpuData().paths.filter((_, index) => index % 4 === 3))).toEqual(new Set([1]))
+    expect(new Set(effect.getGpuData().payload.paths.filter((_, index) => index % 4 === 3))).toEqual(new Set([1]))
   })
 
   it('applies burst and wave emission envelopes to CPU transforms and GPU parameters', () => {
@@ -57,7 +57,7 @@ describe('TunnelEffect', () => {
     const dormant = burst.calculateTransforms(80, 1)
     expect(active.some(({ opacity }) => opacity > 0)).toBe(true)
     expect(dormant.every(({ opacity }) => opacity === 0)).toBe(true)
-    const parameters = Array.from(burst.getGpuData().parameters.slice(7))
+    const parameters = Array.from(burst.getGpuData().payload.parameters.slice(7))
     ;[1, 2, 0.4, 0.35, 0.75].forEach((value, index) => {
       expect(parameters[index]).toBeCloseTo(value)
     })

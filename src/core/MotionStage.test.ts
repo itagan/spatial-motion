@@ -514,7 +514,7 @@ describe('MotionStage', () => {
     stage.destroy()
   })
 
-  it('reconciles the item pool across quality levels without double reduction', async () => {
+  it('retains the resident item pool while quality reduces submitted visibility', async () => {
     const stage = createStage({ quality: 'high' })
     const cards = currentCards()
     const items = Array.from({ length: 3000 }, (_, index) => ({ id: `item-${index}` }))
@@ -525,58 +525,46 @@ describe('MotionStage', () => {
     expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
 
     stage.setQuality('medium')
-    await vi.waitFor(() => {
-      expect((cards.setItems.mock.calls.at(-1)?.[0] as MotionItem[])).toHaveLength(1000)
-    })
-    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
+    expect(cards.setItems).toHaveBeenCalledTimes(1)
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(0.5)
 
     stage.setQuality('low')
-    await vi.waitFor(() => {
-      expect((cards.setItems.mock.calls.at(-1)?.[0] as MotionItem[])).toHaveLength(500)
-    })
-    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
+    expect(cards.setItems).toHaveBeenCalledTimes(1)
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(0.25)
 
     stage.setQuality('high')
-    await vi.waitFor(() => {
-      expect((cards.setItems.mock.calls.at(-1)?.[0] as MotionItem[])).toHaveLength(2000)
-    })
+    expect(cards.setItems).toHaveBeenCalledTimes(1)
     expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
     stage.destroy()
   })
 
-  it('lets only the newest asynchronous quality reconciliation update transforms', async () => {
-    const stage = createStage({ quality: 'high' })
+  it('grows an initially constrained resident pool when quality increases', async () => {
+    const stage = createStage({ quality: 'low' })
     const cards = currentCards()
     const items = Array.from({ length: 3000 }, (_, index) => ({ id: `item-${index}` }))
     await stage.setItems(items)
     await stage.to(layout((count) =>
       Array.from({ length: count }, (_, index) => transform({ x: index }))), { duration: 0 })
-    const low = deferred<boolean>()
     const high = deferred<boolean>()
-    cards.setItems.mockReturnValueOnce(low.promise).mockReturnValueOnce(high.promise)
-    stage.setQuality('low')
+    cards.setItems.mockReturnValueOnce(high.promise)
     stage.setQuality('high')
     const transformsBeforeReconcile = cards.setTransforms.mock.calls.length
-    expect((cards.setItems.mock.calls.at(-2)?.[0] as MotionItem[])).toHaveLength(500)
     expect((cards.setItems.mock.calls.at(-1)?.[0] as MotionItem[])).toHaveLength(2000)
 
     high.resolve(true)
     await vi.waitFor(() =>
       expect(cards.setTransforms.mock.calls.length).toBe(transformsBeforeReconcile + 2))
-    low.resolve(true)
-    await Promise.resolve()
-    expect(cards.setTransforms.mock.calls.length).toBe(transformsBeforeReconcile + 2)
     expect((cards.setTransforms.mock.calls.at(-1)?.[0] as Transform[])).toHaveLength(2000)
     stage.destroy()
   })
 
   it('ignores a pending quality reconciliation after destroy', async () => {
-    const stage = createStage({ quality: 'high' })
+    const stage = createStage({ quality: 'low' })
     const cards = currentCards()
     await stage.setItems(Array.from({ length: 3000 }, (_, index) => ({ id: `item-${index}` })))
     const pending = deferred<boolean>()
     cards.setItems.mockReturnValueOnce(pending.promise)
-    stage.setQuality('low')
+    stage.setQuality('high')
     const transformsBefore = cards.setTransforms.mock.calls.length
     stage.destroy()
     pending.resolve(true)
@@ -585,25 +573,21 @@ describe('MotionStage', () => {
     expect(cards.setTransforms.mock.calls.length).toBe(transformsBefore)
   })
 
-  it('lets a data patch supersede a pending quality reconciliation without double reduction', async () => {
+  it('patches the resident pool without undoing a lower visible ratio', async () => {
     const stage = createStage({ quality: 'high' })
     const cards = currentCards()
     await stage.setItems(Array.from({ length: 3000 }, (_, index) => ({
       id: `item-${index}`,
       title: `Item ${index}`,
     })))
-    const pending = deferred<boolean>()
-    cards.setItems.mockReturnValueOnce(pending.promise)
-
     stage.setQuality('low')
     expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(0.25)
     await expect(stage.updateItem('item-0', { title: 'Updated' })).resolves.toBe(true)
-    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
-
-    const transformsBefore = cards.setTransforms.mock.calls.length
-    pending.resolve(true)
-    await Promise.resolve()
-    expect(cards.setTransforms.mock.calls.length).toBe(transformsBefore)
+    expect(cards.updateItems).toHaveBeenLastCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'item-0', title: 'Updated' })]),
+      [0],
+    )
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(0.25)
     stage.destroy()
   })
 
@@ -1088,7 +1072,9 @@ describe('MotionStage', () => {
     const dispose = vi.fn()
     const onExtensionError = vi.fn()
     const extension = { mount: vi.fn(), update: vi.fn(() => { throw failure }), dispose }
-    const stage = createStage({ onExtensionError })
+    const stage = createStage()
+    stage.on('extensionerror', ({ error, extension: failedExtension }) =>
+      onExtensionError(error, failedExtension))
     const renderer = currentRenderer()
     const handle = await stage.addExtension(extension)
 
@@ -1107,7 +1093,8 @@ describe('MotionStage', () => {
 
   it('isolates resize, pause, resume, and dispose callback errors', async () => {
     const onExtensionError = vi.fn()
-    const stage = createStage({ onExtensionError })
+    const stage = createStage()
+    stage.on('extensionerror', ({ error, extension }) => onExtensionError(error, extension))
     const failures = {
       resize: new Error('resize failed'),
       pause: new Error('pause failed'),
@@ -1179,7 +1166,9 @@ describe('MotionStage', () => {
     const dispose = vi.fn()
     const onExtensionError = vi.fn()
     const extension = { mount: vi.fn(async () => { throw failure }), dispose }
-    const stage = createStage({ onExtensionError })
+    const stage = createStage()
+    stage.on('extensionerror', ({ error, extension: failedExtension }) =>
+      onExtensionError(error, failedExtension))
 
     await expect(stage.addExtension(extension)).rejects.toThrow('mount failed')
     expect(onExtensionError).toHaveBeenCalledWith(failure, extension)
@@ -1190,7 +1179,8 @@ describe('MotionStage', () => {
 
   it('pauses on WebGL context loss and refreshes the atlas after restoration', async () => {
     const contextChanges = vi.fn()
-    const stage = createStage({ onContextChange: contextChanges })
+    const stage = createStage()
+    stage.on('contextchange', ({ state }) => contextChanges(state))
     const extensionPause = vi.fn()
     const extensionResume = vi.fn()
     await stage.addExtension({ mount: vi.fn(), pause: extensionPause, resume: extensionResume })
@@ -1402,9 +1392,28 @@ describe('MotionStage', () => {
     stage.destroy()
   })
 
+  it('emits effecterror and keeps the CPU entry frame when Program activation fails', async () => {
+    const stage = createStage()
+    const cards = currentCards()
+    const errors = vi.fn()
+    stage.on('effecterror', errors)
+    await stage.setItems([{ id: 'fallback' }])
+    cards.enableEffect.mockRejectedValueOnce(new Error('shader compile failed'))
+
+    await expect(stage.enterEffect(new TunnelEffect(), { duration: 0 })).resolves.toBe(true)
+    expect(stage.getPerformanceStats().effect).toBeNull()
+    expect(errors).toHaveBeenCalledWith(expect.objectContaining({
+      effect: 'tunnel',
+      phase: 'activate',
+    }))
+    expect(cards.setTransforms).toHaveBeenCalled()
+    stage.destroy()
+  })
+
   it('picks visible items and forwards pointer clicks', async () => {
     const onItemClick = vi.fn()
-    const stage = createStage({ onItemClick })
+    const stage = createStage()
+    stage.on('itemclick', ({ item, index }) => onItemClick(item, index))
     await stage.setItems([{ id: 'center' }])
     await stage.to(layout(() => [transform()]), { duration: 0 })
 
@@ -1442,7 +1451,8 @@ describe('MotionStage', () => {
       return 1
     }))
     const onItemHover = vi.fn()
-    const stage = createStage({ onItemHover, hoverEffect: 'highlight' })
+    const stage = createStage({ hover: true, hoverEffect: 'highlight' })
+    stage.on('itemhover', ({ item, index }) => onItemHover(item, index))
     const cards = currentCards()
     await stage.setItems([{ id: 'center' }])
     await stage.to(layout(() => [transform()]), { duration: 0 })
@@ -1476,7 +1486,9 @@ describe('MotionStage', () => {
   it('supports keyboard focus, navigation, activation, and accessible labeling', async () => {
     const onItemFocus = vi.fn()
     const onItemClick = vi.fn()
-    const stage = createStage({ onItemFocus, onItemClick, ariaLabel: 'Guests' })
+    const stage = createStage({ ariaLabel: 'Guests' })
+    stage.on('itemfocus', ({ item, index }) => onItemFocus(item, index))
+    stage.on('itemclick', ({ item, index }) => onItemClick(item, index))
     const cards = currentCards()
     await stage.setItems([
       { id: 'a', title: 'Alice' },
@@ -1551,6 +1563,8 @@ describe('MotionStage', () => {
     expect(received.viewportWidth).toBeCloseTo(received.viewportHeight ?? 0)
     expect(received.itemWidth).toBe(0.75)
     expect(received.itemHeight).toBe(1)
+    expect(received.items).toEqual([{ id: 'a' }])
+    expect(received.quality).toBe('high')
     expect(stageMocks.cardOptions.at(-1)).toMatchObject({
       aspectRatio: 0.75,
       resolveCardStyle,
@@ -1911,9 +1925,12 @@ describe('MotionStage', () => {
       calculateTransforms: () => [transform({ z: 3, scale: 2 })],
       getGpuData: () => ({
         kind: 'radial-burst',
-        paths: new Float32Array(4),
-        speedFactors: new Float32Array([1]),
-        parameters: new Float32Array(12),
+        activeCount: 1,
+        payload: {
+          paths: new Float32Array(4),
+          speedFactors: new Float32Array([1]),
+          parameters: new Float32Array(12),
+        },
       }),
     }
     expect(await stage.enterEffect(fixedEffect, { duration: 0 })).toBe(true)
@@ -1949,6 +1966,34 @@ describe('MotionStage', () => {
     expect(() => stage.setItems([])).toThrow('MotionStage has been destroyed')
     expect(() => stage.to(layout(() => []))).toThrow('MotionStage has been destroyed')
     expect(() => stage.enterEffect(radialBurst())).toThrow('MotionStage has been destroyed')
+  })
+
+  it('supports multiple typed event subscribers and transition lifecycle events', async () => {
+    const stage = createStage()
+    await stage.setItems([{ id: 'event-item' }])
+    const first = vi.fn()
+    const second = vi.fn()
+    const started = vi.fn()
+    const ended = vi.fn()
+    const unsubscribe = stage.on('itemclick', first)
+    stage.on('itemclick', second)
+    stage.on('transitionstart', started)
+    stage.on('transitionend', ended)
+
+    const canvas = Array.from(document.querySelectorAll('canvas')).at(-1)
+    canvas?.dispatchEvent(new PointerEvent('pointerup', { clientX: 50, clientY: 50 }))
+    unsubscribe()
+    canvas?.dispatchEvent(new PointerEvent('pointerup', { clientX: 50, clientY: 50 }))
+    await stage.to(layout(() => [transform()]), { duration: 0 })
+
+    expect(first).toHaveBeenCalledOnce()
+    expect(second).toHaveBeenCalledTimes(2)
+    expect(started).toHaveBeenCalledWith({ layout: 'test' })
+    expect(ended).toHaveBeenCalledWith({
+      layout: 'test',
+      result: { completed: true, status: 'completed' },
+    })
+    stage.destroy()
   })
 
   it('ignores an item load that finishes after destroy', async () => {

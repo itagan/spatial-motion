@@ -7,7 +7,6 @@ export type {
   MotionPreference,
   PickOptions,
   PickResult,
-  QualityMode,
   StagePerformanceStats,
   StagePerformanceEnvironment,
   StageTransitionHandle,
@@ -15,7 +14,11 @@ export type {
   StageTransitionState,
   StageTransitionStatus,
   UpdateItemsOptions,
+  MotionStageEventMap,
 } from './MotionStage.js'
+export { QualityController } from './QualityController.js'
+export type { QualityControllerOptions } from './QualityController.js'
+export type { StageEventListener } from './StageEventHub.js'
 export { Timeline } from './Timeline.js'
 export type { TimelineStep, TimelineWaitHandle, TimelineWaiter } from './Timeline.js'
 export type {
@@ -34,7 +37,9 @@ export type {
   LayoutDefinition,
   MotionItem,
   QualityLevel,
+  QualityMode,
   QualityProfile,
+  QualityProfiles,
   Transform,
   TransitionOptions,
 } from './types.js'

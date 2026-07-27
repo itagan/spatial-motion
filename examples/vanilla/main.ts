@@ -247,9 +247,6 @@ const baseStageOptions: Omit<MotionStageOptions<DemoMeta>, 'renderer'> = {
   container,
   quality: 'high',
   adaptivePerformance: false,
-  onItemClick(item) {
-    lastPicked = ` · PICK ${item.title ?? item.id}`
-  },
   transition: { duration: 900 },
 }
 const cardRenderer = cardsRenderer<DemoMeta>({
@@ -296,6 +293,9 @@ const stage = new MotionStage({
       },
     })
     : cardRenderer,
+})
+stage.on('itemclick', ({ item }) => {
+  lastPicked = ` · PICK ${item.title ?? item.id}`
 })
 
 await stage.setItems(items)

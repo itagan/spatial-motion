@@ -1,8 +1,8 @@
 import type {
-  QualityMode,
   StagePerformanceEnvironment,
   StagePerformanceStats,
 } from '../core/MotionStage.js'
+import type { QualityMode } from '../core/types.js'
 import type { StageExtensionStats } from '../core/extensions.js'
 
 export interface BenchmarkConfiguration {

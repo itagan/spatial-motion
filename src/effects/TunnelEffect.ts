@@ -10,6 +10,7 @@ import {
   type EmissionOptions,
   type ResolvedEmissionOptions,
   type StreamingEffect,
+  type BuiltinStreamingEffectPayload,
   type StreamingEffectGpuData,
 } from './types.js'
 
@@ -29,7 +30,7 @@ export interface TunnelOptions {
   crossSection?: 'circle' | 'square'
 }
 
-export type TunnelGpuData = StreamingEffectGpuData
+export type TunnelGpuData = StreamingEffectGpuData<BuiltinStreamingEffectPayload>
 
 export class TunnelEffect implements StreamingEffect {
   readonly name = 'tunnel'
@@ -113,22 +114,25 @@ export class TunnelEffect implements StreamingEffect {
     if (this.preparedCount < 0) throw new Error('TunnelEffect must be prepared before reading GPU data')
     return {
       kind: this.kind,
-      paths: this.paths,
-      speedFactors: this.speedFactors,
-      parameters: createEffectParameters(
-        this.options.farZ,
-        this.options.nearZ,
-        this.options.innerRadius,
-        this.options.speed,
-        this.options.twist,
-        this.options.farScale,
-        this.options.nearScale,
-        emissionModeCode(this.options.emission.mode),
-        this.options.emission.burstInterval,
-        this.options.emission.burstDuration,
-        this.options.emission.waveFrequency,
-        this.options.emission.waveStrength,
-      ),
+      activeCount: this.preparedActiveCount,
+      payload: {
+        paths: this.paths,
+        speedFactors: this.speedFactors,
+        parameters: createEffectParameters(
+          this.options.farZ,
+          this.options.nearZ,
+          this.options.innerRadius,
+          this.options.speed,
+          this.options.twist,
+          this.options.farScale,
+          this.options.nearScale,
+          emissionModeCode(this.options.emission.mode),
+          this.options.emission.burstInterval,
+          this.options.emission.burstDuration,
+          this.options.emission.waveFrequency,
+          this.options.emission.waveStrength,
+        ),
+      },
     }
   }
 }

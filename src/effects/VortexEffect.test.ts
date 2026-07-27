@@ -10,9 +10,9 @@ describe('VortexEffect', () => {
     const second = effect.getGpuData()
 
     expect(first.kind).toBe('vortex')
-    expect(first.paths).toBe(second.paths)
-    expect(first.paths).toHaveLength(2400)
-    expect(Array.from(first.speedFactors).filter((speed) => speed >= 0)).toHaveLength(140)
+    expect(first.payload.paths).toBe(second.payload.paths)
+    expect(first.payload.paths).toHaveLength(2400)
+    expect(Array.from(first.payload.speedFactors).filter((speed) => speed >= 0)).toHaveLength(140)
   })
 
   it('spirals finite transforms between the configured inner and outer bounds', () => {

@@ -1,6 +1,7 @@
 import { Group } from 'three'
 import { describe, expect, it } from 'vitest'
 import { cardsRenderer } from './index'
+import { defineCardEffectProgram } from './programs'
 
 describe('cardsRenderer', () => {
   it('rejects ambiguous content renderers before allocating resources', () => {
@@ -26,5 +27,17 @@ describe('cardsRenderer', () => {
       height: 0.25,
     })
     renderer.dispose()
+  })
+
+  it('rejects a synchronously registered Program under a different kind', () => {
+    const program = defineCardEffectProgram({
+      kind: 'actual',
+      prefix: 'program_actual_',
+      vertexBody: 'center.x += 0.0;',
+      upload() {},
+    })
+    expect(() => cardsRenderer({
+      effectPrograms: { alias: program },
+    })).toThrow(/mismatched kind/)
   })
 })

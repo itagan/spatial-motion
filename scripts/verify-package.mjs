@@ -10,12 +10,15 @@ const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'
 const packageName = packageJson.name
 const rootConsumerGzipBudget = 40 * 1024
 const coreConsumerGzipBudget = 16 * 1024
-const cardsRendererGzipBudget = 12 * 1024
+const cardsRendererGzipBudget = 10 * 1024
 const cardTemplateGzipBudget = 12 * 1024
 const pointsRendererGzipBudget = 12 * 1024
 const devGzipBudget = 12 * 1024
 const tarballBudget = 150 * 1024
 const treeShakenBudget = 8 * 1024
+// Coarse anti-bundling sentinel across every preserved ESM module. Consumer
+// gzip budgets below remain the product-facing size gates.
+const preservedModuleSentinel = 170 * 1024
 const keepConsumer = process.env.KEEP_PACKAGE_CONSUMER === '1'
 
 assert(packageName === '@itagan/spatial-motion', `Unexpected package name: ${packageName}`)
@@ -78,7 +81,10 @@ const pointsRendererJsGzipBytes = pointsRendererJsContents
   .reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
 const devJsGzipBytes = devJsContents
   .reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
-assert(jsBytes < 150 * 1024, `Core library JS suggests Three.js was bundled: ${jsBytes} bytes`)
+assert(
+  jsBytes < preservedModuleSentinel,
+  `Library JS suggests Three.js was bundled: ${jsBytes} bytes`,
+)
 assert(
   cardTemplateJsGzipBytes <= cardTemplateGzipBudget,
   `Card template JS gzip budget exceeded: ${cardTemplateJsGzipBytes} > ${cardTemplateGzipBudget}`,
@@ -144,9 +150,13 @@ try {
     const points = await import('${packageName}/renderers/points')
     const dev = await import('${packageName}/dev')
     assert.equal(typeof main.MotionStage, 'function')
+    assert.equal(typeof main.QualityController, 'function')
     assert.equal(typeof core.MotionStage, 'function')
+    assert.equal(typeof core.QualityController, 'function')
     assert.equal(typeof core.defineMotionRenderer, 'function')
     assert.equal(typeof cards.cardsRenderer, 'function')
+    assert.equal(typeof cards.defineCardMotionProgram, 'function')
+    assert.equal(typeof cards.defineCardEffectProgram, 'function')
     assert.equal(typeof points.pointsRenderer, 'function')
     assert.equal(typeof dev.validateLayout, 'function')
     assert.equal(typeof dev.validateMotionRenderer, 'function')
@@ -268,7 +278,9 @@ try {
       type MotionItemUpdate,
       type MotionPreference,
       type MotionStage,
+      type MotionStageEventMap,
       type MotionStageOptions,
+      type QualityProfiles,
       type ResolveCardStyle,
       type StagePerformanceEnvironment,
       type StageTransitionHandle,
@@ -288,12 +300,13 @@ try {
     import { BenchmarkSession, compareBenchmarkResults, evaluateBenchmarkRegression, parseBenchmarkResult, type BenchmarkRegressionThresholds, type BenchmarkResult } from '${packageName}/performance'
     import { defineCardTemplate, html, type CardTemplateStyle } from '${packageName}/card-template'
     import { defineMotionRenderer, type MotionRenderer, type MotionRendererCapabilities, type MotionRendererDescriptor, type MotionRendererFactory, type MotionRendererFactoryContext, type MotionRendererFrameCapability, type MotionRendererHighlightCapability, type MotionRendererPatchCapability, type MotionRendererPickShape, type MotionRendererResourceRecoveryCapability, type MotionRendererStats, type MotionRendererStreamingEffectsCapability, type MotionRendererViewport, type MotionRendererViewportCapability, type MotionRendererVisualCapability, type MotionRendererVisualState } from '${packageName}/core'
-    import { cardsRenderer as cardsRendererFromSubpath } from '${packageName}/renderers/cards'
+    import { cardsRenderer as cardsRendererFromSubpath, defineCardEffectProgram } from '${packageName}/renderers/cards'
     import {
       pointsRenderer,
     } from '${packageName}/renderers/points'
     import { createLayoutDebugVisualization, validateLayout, validateMotionRenderer, type DevelopmentValidationReport, type LayoutValidationSamples, type MotionRendererValidationSamples } from '${packageName}/dev'
     type Meta = { color?: string; winner?: boolean }
+    type Events = MotionStageEventMap<Meta>
     const items: MotionItem<Meta>[] = [{ id: 'one', meta: { winner: true } }]
     declare const stage: MotionStage<Meta> | undefined
     const emission: EmissionOptions = { mode: 'wave' }
@@ -315,6 +328,17 @@ try {
         <span style="font-size:12px;line-clamp:1">\${item.title}</span>
       </div>
     \`)
+    const customEffect = defineCardEffectProgram<Float32Array>({
+      kind: 'consumer-wave',
+      prefix: 'program_consumer_',
+      attributes: [{ name: 'program_consumer_phase', itemSize: 1 }],
+      uniforms: [{ name: 'program_consumer_time', type: 'float' }],
+      vertexBody: 'center.y += sin(program_consumer_phase + program_consumer_time);',
+      upload(context, payload) {
+        context.setAttribute('program_consumer_phase', payload)
+        context.setUniform('program_consumer_time', 0)
+      },
+    })
     const stageOptions: Omit<MotionStageOptions<Meta>, 'container'> = {
       renderer: cardsRendererFromSubpath<Meta>({
         aspectRatio: 0.75,
@@ -325,12 +349,16 @@ try {
         imageTimeout: 5000,
         imageConcurrency: 4,
         imageCacheSize: 64,
+        effectPrograms: { 'consumer-wave': customEffect },
       }),
       transition: { duration: 900 },
-      onContextChange: (state) => void state,
       keyboardNavigation: true,
       ariaLabel: 'Participants',
     }
+    const profiles: QualityProfiles | undefined = stageOptions.qualityProfiles as QualityProfiles | undefined
+    const qualityListener = (event: Events['qualitychange']) => void event.stats.frameTimeP95
+    const unsubscribe = stage?.on('qualitychange', qualityListener)
+    void [profiles, unsubscribe]
     const rendererVisualState: MotionRendererVisualState = {
       billboard: 1,
       hideBackHemisphere: 0,

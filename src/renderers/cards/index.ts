@@ -5,6 +5,10 @@ import type {
   ResolveCardStyle,
 } from '../../core/types.js'
 import type { MotionRendererFactory } from '../MotionRenderer.js'
+import type {
+  CardEffectProgramLoader,
+  CardMotionProgram,
+} from './programs.js'
 import {
   InstancedCardRenderer,
   type CardRendererOptions as InternalCardRendererOptions,
@@ -23,6 +27,8 @@ export interface CardsRendererOptions<TMeta = unknown> {
   imageCacheSize?: number
   texturePrewarm?: boolean
   atlasMode?: 'single' | 'array' | 'auto'
+  motionProgram?: CardMotionProgram<TMeta>
+  effectPrograms?: Readonly<Record<string, CardEffectProgramLoader>>
 }
 
 export function cardsRenderer<TMeta = unknown>(
@@ -31,6 +37,7 @@ export function cardsRenderer<TMeta = unknown>(
   if (options.content && options.draw) {
     throw new TypeError('Cards renderer content and draw cannot be used together')
   }
+  validateEffectPrograms(options.effectPrograms)
   const atlasOptions: InternalCardRendererOptions<TMeta> = {
     cardStyle: options.style,
     resolveCardStyle: options.resolveStyle,
@@ -44,6 +51,8 @@ export function cardsRenderer<TMeta = unknown>(
     imageCacheSize: options.imageCacheSize,
     texturePrewarm: options.texturePrewarm,
     atlasMode: options.atlasMode,
+    motionProgram: options.motionProgram,
+    effectPrograms: options.effectPrograms,
   }
   return ({
     root,
@@ -51,13 +60,28 @@ export function cardsRenderer<TMeta = unknown>(
     maxTextureLayers,
     maxAnisotropy,
     prepareTexture,
+    prepareProgram,
   }) => new InstancedCardRenderer(root, {
     ...atlasOptions,
     maxTextureSize,
     maxTextureLayers: Math.min(256, maxTextureLayers),
     anisotropy: Math.min(4, maxAnisotropy),
     prepareTexture,
+    prepareProgram,
   })
+}
+
+function validateEffectPrograms(
+  programs: Readonly<Record<string, CardEffectProgramLoader>> | undefined,
+): void {
+  const kinds = new Set<string>()
+  for (const [kind, loader] of Object.entries(programs ?? {})) {
+    if (kinds.has(kind)) throw new TypeError(`Duplicate Cards effect program kind "${kind}"`)
+    kinds.add(kind)
+    if (typeof loader !== 'function' && loader.kind !== kind) {
+      throw new TypeError(`Cards effect program "${kind}" has mismatched kind "${loader.kind}"`)
+    }
+  }
 }
 
 function resolveAspectRatio(value: number | undefined): number {
@@ -74,3 +98,16 @@ export type {
   PreparedCardContent,
   ResolveCardStyle,
 } from '../../core/types.js'
+export {
+  defineCardEffectProgram,
+  defineCardMotionProgram,
+} from './programs.js'
+export type {
+  CardEffectProgram,
+  CardEffectProgramLoader,
+  CardMotionProgram,
+  CardProgramAttribute,
+  CardProgramUniform,
+  CardProgramUniformType,
+  CardProgramUploadContext,
+} from './programs.js'

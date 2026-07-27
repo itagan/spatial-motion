@@ -10,6 +10,7 @@ import {
   type EmissionOptions,
   type ResolvedEmissionOptions,
   type StreamingEffect,
+  type BuiltinStreamingEffectPayload,
   type StreamingEffectGpuData,
 } from './types.js'
 
@@ -27,7 +28,7 @@ export interface LinearShooterOptions {
   emission?: EmissionOptions
 }
 
-export type LinearShooterGpuData = StreamingEffectGpuData
+export type LinearShooterGpuData = StreamingEffectGpuData<BuiltinStreamingEffectPayload>
 
 export class LinearShooterEffect implements StreamingEffect {
   readonly name = 'linear-shooter'
@@ -108,22 +109,25 @@ export class LinearShooterEffect implements StreamingEffect {
     if (this.preparedCount < 0) throw new Error('LinearShooterEffect must be prepared before reading GPU data')
     return {
       kind: this.kind,
-      paths: this.paths,
-      speedFactors: this.speedFactors,
-      parameters: createEffectParameters(
-        this.options.sourceRadius,
-        this.options.speed,
-        this.options.startScale,
-        this.options.endScale,
-        this.options.z,
-        0,
-        0,
-        emissionModeCode(this.options.emission.mode),
-        this.options.emission.burstInterval,
-        this.options.emission.burstDuration,
-        this.options.emission.waveFrequency,
-        this.options.emission.waveStrength,
-      ),
+      activeCount: this.preparedActiveCount,
+      payload: {
+        paths: this.paths,
+        speedFactors: this.speedFactors,
+        parameters: createEffectParameters(
+          this.options.sourceRadius,
+          this.options.speed,
+          this.options.startScale,
+          this.options.endScale,
+          this.options.z,
+          0,
+          0,
+          emissionModeCode(this.options.emission.mode),
+          this.options.emission.burstInterval,
+          this.options.emission.burstDuration,
+          this.options.emission.waveFrequency,
+          this.options.emission.waveStrength,
+        ),
+      },
     }
   }
 }

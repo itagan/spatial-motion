@@ -17,7 +17,7 @@ npm run dev
 - `/benchmark.html`：不同实例数量和质量档位的性能基准。
 - `/benchmark.html` 的压力模式：持续中断布局/特效并局部更新图集，可选择最长 30 分钟。
 
-`npm run dev:examples` 独立启动集成示例站点，提供 `/vanilla/`、`/three-extension/`、`/gsap-extension/` 和 `/lottery-screen/`。Lottery Screen 使用 Vue 3 验证真实应用编排，但抽奖状态与随机选择保持在 examples，不进入核心库。
+`npm run dev:examples` 独立启动集成示例站点，提供 `/vanilla/`、`/three-extension/`、`/gsap-extension/`、`/custom-card-effect/` 和 `/lottery-screen/`。Lottery Screen 使用 Vue 3 验证真实应用编排，但抽奖状态与随机选择保持在 examples，不进入核心库。
 
 ## 常用命令
 
@@ -30,7 +30,7 @@ npm run dev
 | `npm run benchmark:compare -- baseline.json current.json` | 严格解析并按阈值判定性能回归 |
 | `npm run build:lib` | 构建 ESM 库与类型声明到 `dist/` |
 | `npm run build:demo` | 构建演示站点到 `dist-demo/` |
-| `npm run build:examples` | 构建四个独立示例到 `dist-examples/` |
+| `npm run build:examples` | 构建五个独立示例到 `dist-examples/` |
 | `npm run build` | 依次构建库、演示站点和独立示例 |
 | `npm run pack:check` | 验证发布文件、体积、导出、类型、运行时消费和 Tree Shaking |
 | `npm run verify` | 串行执行类型、全部测试、库/demo 构建和包消费者验证 |
@@ -104,7 +104,7 @@ npm run pack:check
 5. 扩展 `scripts/verify-package.mjs` 的运行时和类型消费者检查。
 6. 运行 `npm run pack:check`，确认深层内部路径仍不可导入。
 
-当前自动化硬预算按真实消费者产物执行：根入口 gzip 不超过 40 KB、Core-only 不超过 16 KB、Cards-only 不超过 12 KB；按需模板、Points Renderer 与 Dev 诊断入口各不超过 12 KB，npm tarball 不超过 150 KB，仅消费布局的 Tree Shaking 产物不超过 8 KB。Three.js 在这些消费者中保持 external。各 ESM 输出模块分别 gzip 后相加的数值只用于诊断模块增长，不代表网络下载量，也不单独阻断构建。预算变化属于需要明确讨论的工程决策。
+当前自动化硬预算按真实消费者产物执行：根入口 gzip 不超过 40 KB、Core-only 不超过 16 KB、Cards-only 不超过 10 KB；按需模板、Points Renderer 与 Dev 诊断入口各不超过 12 KB，npm tarball 不超过 150 KB，仅消费布局的 Tree Shaking 产物不超过 8 KB。Three.js 在这些消费者中保持 external。各 ESM 输出模块分别 gzip 后相加的数值只用于诊断模块增长，不代表网络下载量，也不单独阻断构建。预算变化属于需要明确讨论的工程决策。
 
 npm tarball 只携带运行时 `dist`、README、CHANGELOG、LICENSE、PUBLIC_API 和 COMPATIBILITY。ROADMAP、DEVELOPMENT、OPTIMIZATION、RELEASE、VISUAL_QA 与 examples 保留在源码仓库，不增加安装包体积。
 

@@ -40,12 +40,17 @@
 - 八种布局的版本化 JSON 配置、严格解析与可折叠参数实验室
 - Sphere 等面积/球带、Cylinder 圆弧、Ring 分配、Box 选面和 Cone 圆台等高级布局参数
 - 受控 Stage extension 生命周期，可安全挂载原生 Three.js 内容并接入 GSAP 等外部动画库
+- 数据感知的自定义 Layout 上下文，可按 item meta 和质量档位生成布局
+- 可覆盖的质量 Profile 与自适应采样策略
+- 类型化多订阅 Stage 事件，支持框架适配器、调试面板和业务同时监听
+- Renderer 特效能力协商，自定义 Renderer 可定义自己的 GPU 特效 key
 
 源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.15.0 交互与动画控制完善阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
 
 ## 项目文档
 
 - [开发指南](./docs/DEVELOPMENT.md)：环境、命令、架构职责、测试与发布检查。
+- [架构说明](./docs/ARCHITECTURE.md)：调度内核、能力协议、扩展边界和性能约束。
 - [路线图](./ROADMAP.md)：已完成阶段、当前目标和后续候选方向。
 - [公共 API 与兼容策略](./docs/PUBLIC_API.md)：稳定入口、SemVer 承诺和迁移边界。
 - [浏览器支持与限制](./docs/COMPATIBILITY.md)：运行环境、图片 CORS 和已知限制。
@@ -90,7 +95,7 @@ npm run build:examples
 npm run pack:check
 ```
 
-`build:lib` 输出可发布 ESM 和类型声明到 `dist/`；`build:demo` 输出综合演示站点到 `dist-demo/`；`build:examples` 输出四个集成示例到 `dist-examples/`。
+`build:lib` 输出可发布 ESM 和类型声明到 `dist/`；`build:demo` 输出综合演示站点到 `dist-demo/`；`build:examples` 输出五个集成示例到 `dist-examples/`。
 
 ## 独立集成示例
 
@@ -99,13 +104,14 @@ npm run pack:check
 - [`vanilla`](./examples/vanilla/)：最小 Stage、数据、布局和暂停/恢复。
 - [`three-extension`](./examples/three-extension/)：原生 Three.js Object3D 挂载、逐帧更新与资源释放。
 - [`gsap-extension`](./examples/gsap-extension/)：使用 Stage elapsed 推进 paused GSAP timeline。
+- [`custom-card-effect`](./examples/custom-card-effect/)：注册业务 Cards GPU Program，并保持单 Mesh / 单 Draw Call。
 - [`lottery-screen`](./examples/lottery-screen/)：Vue 3 抽奖大屏，把奖项、轮次、名单、中奖历史、本地恢复和 CSV 导出保留在应用层，使用 Stage 编排滚动与揭晓。
 
 ```bash
 npm run dev:examples
 ```
 
-开发服务器分别提供 `/vanilla/`、`/three-extension/`、`/gsap-extension/` 和 `/lottery-screen/`。示例从正式包名导入并参与严格类型检查和 CI 构建，但不会进入 npm tarball；发布包消费边界仍由 `pack:check` 验证。
+开发服务器分别提供 `/vanilla/`、`/three-extension/`、`/gsap-extension/`、`/custom-card-effect/` 和 `/lottery-screen/`。示例从正式包名导入并参与严格类型检查和 CI 构建，但不会进入 npm tarball；发布包消费边界仍由 `pack:check` 验证。
 
 ## 基础使用
 
@@ -123,14 +129,23 @@ const stage = new MotionStage({
     atlasMode: 'single', // 'single' | 'array' | 'auto'；默认保持单图集
   }),
   quality: 'auto',
+  qualityProfiles: {
+    high: {
+      maxPixelRatio: 2,
+      maxVisibleItems: 5000,
+      maxActiveEffectItems: 800,
+      antialias: true,
+      targetFps: 60,
+    },
+  },
   adaptivePerformance: true,
   transition: { duration: 1200, easing: easing.sineInOut },
-  onContextChange(state) {
-    console.log('WebGL context:', state)
-  },
-  onQualityChange(quality, stats) {
-    console.log(quality, stats.fps)
-  },
+})
+const unsubscribe = stage.on('qualitychange', ({ quality, stats }) => {
+  console.log(quality, stats.frameTimeP95)
+})
+stage.on('contextchange', ({ state }) => {
+  console.log('WebGL context:', state)
 })
 await stage.ready // 仅在构造参数提供 items 时需要等待初始 Renderer 数据准备
 
@@ -247,7 +262,7 @@ handle.enable()  // 从已有 elapsed 继续
 handle.remove() // 幂等；同时 abort signal、移除隔离 Group 并 dispose
 ```
 
-每个扩展只获得独立 `Group`、只读相机引用和取消信号。Stage 继续独占场景渲染循环；扩展不能访问内部卡片 Mesh 或 WebGLRenderer。`onExtensionError` 会收到生命周期错误，故障扩展会被隔离移除，其他扩展与卡片渲染继续运行。GSAP 等库应仅驱动扩展自己的对象，并通过 `update({ elapsed })` 对齐 Stage 时钟；核心包不依赖任何动画库。
+每个扩展只获得独立 `Group`、只读相机引用和取消信号。Stage 继续独占场景渲染循环；扩展不能访问内部卡片 Mesh 或 WebGLRenderer。`extensionerror` 事件会收到生命周期错误，故障扩展会被隔离移除，其他扩展与卡片渲染继续运行。GSAP 等库应仅驱动扩展自己的对象，并通过 `update({ elapsed })` 对齐 Stage 时钟；核心包不依赖任何动画库。
 
 `stage.getExtensionStats()` 按 `order` 和挂载顺序返回活动扩展，并附带最近 20 个已释放扩展的纯数据快照。重复名称通过稳定 `id` 区分；诊断包括 enabled、update 次数、平均/P95/P99/最大耗时、超过 2ms 的慢帧、错误次数和最近错误文本。
 
@@ -258,10 +273,11 @@ const stage = new MotionStage({
   container,
   renderer: cardsRenderer(),
   motionPreference: 'auto', // 跟随 prefers-reduced-motion
+  hover: true,
   hoverEffect: 'highlight',
-  onItemHover(item, index) {
-    console.log(item?.id ?? null, index)
-  },
+})
+stage.on('itemhover', ({ item, index }) => {
+  console.log(item?.id ?? null, index)
 })
 
 await stage.to(grid({ fit: 'contain' })) // 完整放入相机可视范围
@@ -270,7 +286,7 @@ await stage.to(grid({ fit: 'cover' }))   // 铺满相机可视范围
 
 低动态模式会立即完成布局切换、停止自动旋转，并把流式特效固定为确定性的静态首帧。`full` 可强制保留动画，`reduced` 可强制使用低动态行为。
 
-默认 Canvas 可通过 Tab 聚焦，方向键在当前质量档位可见卡片之间循环，Home/End 跳到首尾，Enter/Space 复用 `onItemClick`。`onItemFocus` 接收键盘焦点变化，`focusItem(id)` 和 `getFocusedItem()` 提供稳定 id 控制；可用 `ariaLabel` 自定义区域名称，或以 `keyboardNavigation: false` 关闭内建键盘行为。
+默认 Canvas 可通过 Tab 聚焦，方向键在当前质量档位可见卡片之间循环，Home/End 跳到首尾，Enter/Space 触发 `itemclick`。`itemfocus` 接收键盘焦点变化，`focusItem(id)` 和 `getFocusedItem()` 提供稳定 id 控制；可用 `ariaLabel` 自定义区域名称，或以 `keyboardNavigation: false` 关闭内建键盘行为。
 
 页面隐藏时 Stage 会自动停止唯一的 `requestAnimationFrame`，布局过渡、流式特效和扩展时钟同时冻结；恢复可见时从当前画面继续，后台停留时间不会造成动画跳跃或污染性能样本。手动 `pause()` 和 WebGL context loss 使用相同的时钟语义。
 
@@ -449,9 +465,9 @@ debug.dispose()
 const stage = new MotionStage({
   container,
   renderer: cardsRenderer(),
-  onItemClick(item, index) {
-    void stage.focusItems([item.id])
-  },
+})
+stage.on('itemclick', ({ item }) => {
+  void stage.focusItems([item.id])
 })
 
 const hit = stage.pick(pointerEvent.clientX, pointerEvent.clientY)
@@ -542,13 +558,13 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| 根入口真实消费者 gzip | ≤ 40 KB | 36.7 KB（37,572 bytes） |
-| Core-only 真实消费者 gzip | ≤ 16 KB | 13.2 KB（13,509 bytes） |
-| Cards-only 真实消费者 gzip | ≤ 12 KB | 11.9 KB（12,227 bytes） |
+| 根入口真实消费者 gzip | ≤ 40 KB | 34.6 KB（35,433 bytes） |
+| Core-only 真实消费者 gzip | ≤ 16 KB | 14.7 KB（15,075 bytes） |
+| Cards-only 真实消费者 gzip | ≤ 10 KB | 8.2 KB（8,407 bytes） |
 | 按需 card-template gzip | ≤ 12 KB | 6.0 KB（6,194 bytes） |
 | 按需 Points Renderer gzip | ≤ 12 KB | 2.8 KB（2,918 bytes） |
 | 按需开发诊断 gzip | ≤ 12 KB | 3.8 KB（3,923 bytes） |
-| npm tarball | ≤ 150 KB | 约 99.8 KiB |
+| npm tarball | ≤ 150 KB | 109.9 KiB（112,543 bytes） |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 5.5 KB（5,598 bytes） |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。根入口、Core-only 与 Cards-only 的预算按真实 Vite/Terser 消费产物计算，并保持 Three.js external；各输出模块 gzip 相加只保留为诊断值，不作为用户下载体积门禁。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。
@@ -629,7 +645,11 @@ await stage.enterEffect(radialBurst({
 }), { duration: 1100 })
 ```
 
-所有内置流式特效统一通过 `enterEffect()` 进入，并使用同一套四分量路径缓冲和三组参数 uniform；切换效果不会创建新的 Mesh 或增加 Draw Call。
+所有内置流式特效统一通过 `enterEffect()` 进入。对应 Cards Effect Program 首次使用时
+动态加载并缓存，不进入基础 Cards bundle；切换效果不会创建新的 Mesh 或增加 Draw Call。
+业务 GPU 动画可以通过 `defineCardEffectProgram()` 声明私有 Attribute、Uniform、
+运动 GLSL 和 payload 上传函数，完整示例见 `examples/custom-card-effect`。需要控制
+完整 Material 或渲染管线时继续实现自定义 `MotionRenderer`。
 
 球体头像朝向：
 
