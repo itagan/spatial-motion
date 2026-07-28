@@ -47,6 +47,7 @@ export interface CardRendererOptions<TMeta = unknown> extends TextureAtlasOption
 interface CardProgramRuntime {
   program: CardEffectProgram
   material: ShaderMaterial
+  timeUniform: { value: unknown } | null
 }
 
 const INITIAL_ARRAY_UPLOAD_BYTES = 3 * 1024 * 1024
@@ -370,31 +371,25 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     from: MotionRendererVisualState,
     to: MotionRendererVisualState,
   ): void {
-    this.forEachMaterial(({ uniforms }) => {
-      uniforms.fromBillboard!.value = from.billboard
-      uniforms.toBillboard!.value = to.billboard
-      uniforms.fromHideBackHemisphere!.value = from.hideBackHemisphere
-      uniforms.toHideBackHemisphere!.value = to.hideBackHemisphere
-      uniforms.fromHemisphereEdgeFade!.value = from.hemisphereEdgeFade
-      uniforms.toHemisphereEdgeFade!.value = to.hemisphereEdgeFade
-    })
+    this.setCommonUniform('fromBillboard', from.billboard)
+    this.setCommonUniform('toBillboard', to.billboard)
+    this.setCommonUniform('fromHideBackHemisphere', from.hideBackHemisphere)
+    this.setCommonUniform('toHideBackHemisphere', to.hideBackHemisphere)
+    this.setCommonUniform('fromHemisphereEdgeFade', from.hemisphereEdgeFade)
+    this.setCommonUniform('toHemisphereEdgeFade', to.hemisphereEdgeFade)
   }
 
   setProgress(progress: number): void {
-    this.forEachMaterial(({ uniforms }) => {
-      uniforms.progress!.value = progress
-    })
+    this.setCommonUniform('progress', progress)
   }
 
   setVisualState(state: MotionRendererVisualState): void {
-    this.forEachMaterial(({ uniforms }) => {
-      uniforms.fromBillboard!.value = state.billboard
-      uniforms.toBillboard!.value = state.billboard
-      uniforms.fromHideBackHemisphere!.value = state.hideBackHemisphere
-      uniforms.toHideBackHemisphere!.value = state.hideBackHemisphere
-      uniforms.fromHemisphereEdgeFade!.value = state.hemisphereEdgeFade
-      uniforms.toHemisphereEdgeFade!.value = state.hemisphereEdgeFade
-    })
+    this.setCommonUniform('fromBillboard', state.billboard)
+    this.setCommonUniform('toBillboard', state.billboard)
+    this.setCommonUniform('fromHideBackHemisphere', state.hideBackHemisphere)
+    this.setCommonUniform('toHideBackHemisphere', state.hideBackHemisphere)
+    this.setCommonUniform('fromHemisphereEdgeFade', state.hemisphereEdgeFade)
+    this.setCommonUniform('toHemisphereEdgeFade', state.hemisphereEdgeFade)
   }
 
   async enableEffect(data: StreamingEffectGpuData): Promise<boolean> {
@@ -415,7 +410,11 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
           program,
         )
         this.configureArrayMaterial?.(material)
-        temporaryRuntime = { program, material }
+        temporaryRuntime = {
+          program,
+          material,
+          timeUniform: resolveProgramTimeUniform(program, material),
+        }
         try {
           if (this.atlasOptions.prepareProgram) {
             await this.atlasOptions.prepareProgram(material, this.mesh.geometry)
@@ -469,23 +468,17 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   }
 
   setEffectTime(elapsedSeconds: number): void {
-    const runtime = this.activeProgram
-    if (!runtime) return
-    const time = runtime.program.uniforms?.find(({ name }) => name.endsWith('_time'))
-    if (time) runtime.material.uniforms[time.name]!.value = elapsedSeconds
+    const timeUniform = this.activeProgram?.timeUniform
+    if (timeUniform) timeUniform.value = elapsedSeconds
   }
 
   setVisibleRatio(ratio: number): void {
     const value = Math.min(1, Math.max(0.05, ratio))
-    this.forEachMaterial(({ uniforms }) => {
-      uniforms.visibleRatio!.value = value
-    })
+    this.setCommonUniform('visibleRatio', value)
   }
 
   setHoverIndex(index: number | null): void {
-    this.forEachMaterial(({ uniforms }) => {
-      uniforms.hoverIndex!.value = index ?? -1
-    })
+    this.setCommonUniform('hoverIndex', index ?? -1)
   }
 
   resize(_viewport: MotionRendererViewport): void {}
@@ -494,9 +487,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     if (this.atlas) {
       this.atlas.initialized = false
       this.prepareAtlasUploads(this.atlas)
-      this.forEachMaterial(({ uniforms }) => {
-        uniforms.uLayers!.value = this.atlas!.mode === 'array' ? this.nextLayer : 1_000_000
-      })
+      this.setCommonUniform(
+        'uLayers',
+        this.atlas.mode === 'array' ? this.nextLayer : 1_000_000,
+      )
       this.atlas.texture.needsUpdate = true
       this.estimatedTextureUploadBytes += this.atlas.data.byteLength
       this.prewarmAtlas(this.atlas)
@@ -574,13 +568,12 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     if (!this.mesh || !this.material) return
     this.atlas?.texture.dispose()
     this.atlas = atlas
-    this.forEachMaterial(({ uniforms }) => {
-      uniforms.atlas!.value = atlas.texture
-    })
+    this.setCommonUniform('atlas', atlas.texture)
     this.prepareAtlasUploads(atlas)
-    this.forEachMaterial(({ uniforms }) => {
-      uniforms.uLayers!.value = atlas.mode === 'array' ? this.nextLayer : 1_000_000
-    })
+    this.setCommonUniform(
+      'uLayers',
+      atlas.mode === 'array' ? this.nextLayer : 1_000_000,
+    )
     copyAttribute(
       this.mesh.geometry.getAttribute('atlasRect') as InstancedBufferAttribute,
       atlas.rects,
@@ -666,9 +659,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       this.layersPerUpload(atlas, FRAME_ARRAY_UPLOAD_BYTES),
     )
     this.nextLayer = end
-    this.forEachMaterial(({ uniforms }) => {
-      uniforms.uLayers!.value = end
-    })
+    this.setCommonUniform('uLayers', end)
     if (uploaded) this.layerUploadFrames += 1
   }
 
@@ -737,7 +728,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     const loading = Promise.resolve().then(async () => {
       const program = configured
         ? typeof configured === 'function' ? await configured() : configured
-        : (await import('./cards/builtinEffectPrograms.js')).builtinEffectPrograms[kind]
+        : await loadBuiltinEffectProgram(kind)
       if (!program) return null
       if (program.kind !== kind) {
         throw new TypeError(`Cards effect program "${kind}" loaded mismatched kind "${program.kind}"`)
@@ -833,9 +824,14 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     }
   }
 
-  private forEachMaterial(callback: (material: ShaderMaterial) => void): void {
-    if (this.baseMaterial) callback(this.baseMaterial)
-    this.programRuntimes.forEach(({ material }) => callback(material))
+  private setCommonUniform(name: string, value: unknown): void {
+    const baseMaterial = this.baseMaterial
+    if (!baseMaterial) return
+    baseMaterial.uniforms[name]!.value = value
+    const activeMaterial = this.activeProgram?.material
+    if (activeMaterial && activeMaterial !== baseMaterial) {
+      activeMaterial.uniforms[name]!.value = value
+    }
   }
 
   private writeTransform(
@@ -888,6 +884,31 @@ function isBuiltinEffect(kind: string): boolean {
     || kind === 'linear-shooter'
     || kind === 'vortex'
     || kind === 'radial-burst'
+}
+
+async function loadBuiltinEffectProgram(kind: string): Promise<CardEffectProgram | null> {
+  switch (kind) {
+    case 'tunnel':
+      return (await import('./cards/tunnelProgram.js')).tunnelProgram
+    case 'linear-shooter':
+      return (await import('./cards/linearShooterProgram.js')).linearShooterProgram
+    case 'vortex':
+      return (await import('./cards/vortexProgram.js')).vortexProgram
+    case 'radial-burst':
+      return (await import('./cards/radialBurstProgram.js')).radialBurstProgram
+    default:
+      return null
+  }
+}
+
+function resolveProgramTimeUniform(
+  program: CardEffectProgram,
+  material: ShaderMaterial,
+): { value: unknown } | null {
+  for (const uniform of program.uniforms ?? []) {
+    if (uniform.name.endsWith('_time')) return material.uniforms[uniform.name] ?? null
+  }
+  return null
 }
 
 function createItemFingerprints<TMeta>(

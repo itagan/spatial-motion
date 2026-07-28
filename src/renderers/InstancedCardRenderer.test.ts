@@ -579,35 +579,69 @@ describe('InstancedCardRenderer item loading', () => {
     renderer.dispose()
   })
 
-  it('uploads every built-in effect through the shared vec4 path buffer', async () => {
+  it('loads and caches every built-in effect through independent Program modules', async () => {
     const currentAtlas = atlas(2)
     atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
     const scene = new Scene()
     const renderer = new InstancedCardRenderer(scene)
     await renderer.setItems([{ id: 'a' }, { id: 'b' }])
     const parameters = Float32Array.from({ length: 12 }, (_, index) => index + 1)
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+    const effects = [
+      ['tunnel', 'program_tunnel_'],
+      ['linear-shooter', 'program_shooter_'],
+      ['vortex', 'program_vortex_'],
+      ['radial-burst', 'program_radial_'],
+    ] as const
+    for (const [kind, prefix] of effects) {
+      await expect(renderer.enableEffect({
+        kind,
+        activeCount: 1,
+        payload: {
+          paths: new Float32Array(8),
+          speedFactors: new Float32Array([1, -1]),
+          parameters,
+        },
+      })).resolves.toBe(true)
+      expect(mesh.geometry.getAttribute(`${prefix}path`).itemSize).toBe(4)
+      expect(mesh.geometry.getAttribute(`${prefix}speed`).count).toBe(2)
+      expect(mesh.material.uniforms[`${prefix}a`].value.toArray()).toEqual([1, 2, 3, 4])
+      expect(mesh.material.uniforms[`${prefix}c`].value.toArray()).toEqual([9, 10, 11, 12])
+      renderer.setEffectTime(1.25)
+      expect(mesh.material.uniforms[`${prefix}time`].value).toBe(1.25)
+    }
 
+    expect(Array.from(mesh.geometry.getAttribute('itemIndex').array)).toEqual([0, 1])
+    expect(mesh.geometry.instanceCount).toBe(1)
+    expect(renderer.getStats()).toMatchObject({ instanceCount: 2, submittedInstanceCount: 1 })
+    expect(renderer.getStats().metrics).toMatchObject({
+      programLoads: 4,
+      programSwitches: 4,
+      cachedPrograms: 4,
+    })
+
+    renderer.setHoverIndex(1)
+    renderer.setProgress(0.6)
+    renderer.setVisibleRatio(0.4)
     await renderer.enableEffect({
       kind: 'vortex',
-      activeCount: 1,
+      activeCount: 2,
       payload: {
         paths: new Float32Array(8),
-        speedFactors: new Float32Array([1, -1]),
+        speedFactors: new Float32Array([1, 1]),
         parameters,
       },
     })
-
-    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
-    expect(mesh.geometry.getAttribute('program_vortex_path').itemSize).toBe(4)
-    expect(mesh.geometry.getAttribute('program_vortex_speed').count).toBe(2)
-    expect(Array.from(mesh.geometry.getAttribute('itemIndex').array)).toEqual([0, 1])
-    expect(mesh.material.uniforms.program_vortex_a.value.toArray()).toEqual([1, 2, 3, 4])
-    expect(mesh.material.uniforms.program_vortex_c.value.toArray()).toEqual([9, 10, 11, 12])
-    expect(mesh.geometry.instanceCount).toBe(1)
-    expect(renderer.getStats()).toMatchObject({ instanceCount: 2, submittedInstanceCount: 1 })
+    expect(renderer.getStats().metrics).toMatchObject({
+      programLoads: 4,
+      programSwitches: 5,
+      cachedPrograms: 4,
+    })
+    expect(mesh.material.uniforms.hoverIndex.value).toBe(1)
+    expect(mesh.material.uniforms.progress.value).toBe(0.6)
+    expect(mesh.material.uniforms.visibleRatio.value).toBe(0.4)
     renderer.disableEffect()
     expect(mesh.geometry.instanceCount).toBe(2)
-    renderer.setHoverIndex(1)
     expect(mesh.material.uniforms.hoverIndex.value).toBe(1)
     renderer.setHoverIndex(null)
     expect(mesh.material.uniforms.hoverIndex.value).toBe(-1)

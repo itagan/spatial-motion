@@ -259,3 +259,23 @@ WebGLRenderer、Canvas、能力查询和基础 context 恢复由 `StageRenderHos
 浏览器无 warning/error。自定义 GPU 示例激活后报告 300 submitted、1 cached Program
 和 1 Draw Call。真实 root/Core/Cards-only 消费体积为 35,433/15,075/8,407 bytes
 gzip，tarball 112,543 bytes。
+
+### 独立 Effect chunk 与无查找时间热路径
+
+四个内置 Cards Effect 从共享动态模块进一步拆为四个独立入口，首次进入某个 kind
+不会再下载其他特效的运动 GLSL；公共 payload 校验与上传逻辑继续复用单独的共享
+chunk。包检查会构建真实 Cards 消费者，并验证四段特效 GLSL 分别存在于不同 lazy
+chunk，防止后续合并回单一特效包。
+
+Program runtime 在 Material 创建时一次性解析时间 Uniform，逐帧更新直接写入缓存
+引用；Transition、Visual、Highlight、可见比例和 Array Atlas 上传只同步基础材质与
+当前活动材质，缓存的非活动材质在再次激活时从基础材质恢复公共状态。这样移除了
+稳态帧中的 Uniform 定义扫描、内联回调和全量 Program Material 遍历。
+
+2026-07-28 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2000 Cards/high 三组
+3 秒回归：steady 为 60.05 FPS、P95/P99 18.20/18.30ms、平均 CPU/submit
+0.013/0.125ms；transition-stress 为 60.00 FPS、P95/P99 18.05/18.50ms、完成 4 次
+操作；interaction-stress 为 60.00 FPS、P95/P99 18.40/18.60ms，751 次输入合并为
+180 次拾取，累计 picking 141.3ms。三组均保持 1 Draw Call、0 个 24/33/50ms
+长帧且无浏览器 warning/error。完整验证为 29 个测试文件、333 项测试；真实
+root/Core/Cards-only 为 35,743/15,075/8,635 bytes gzip，tarball 113,285 bytes。
