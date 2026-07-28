@@ -512,6 +512,23 @@ try {
     !cardsOnlyConsumer.contents.includes('sampler2DArray'),
     'Cards-only entry eagerly contains the optional array Atlas shader',
   )
+  const effectChunkMarkers = [
+    'program_tunnel_',
+    'program_shooter_',
+    'program_vortex_',
+    'program_radial_',
+  ]
+  for (const marker of effectChunkMarkers) {
+    assert(
+      cardsOnlyConsumer.lazyChunks.some((contents) => contents.includes(marker)),
+      `Cards consumer is missing the lazy Effect Program chunk: ${marker}`,
+    )
+  }
+  assert(
+    cardsOnlyConsumer.lazyChunks.every((contents) =>
+      effectChunkMarkers.filter((marker) => contents.includes(marker)).length <= 1),
+    'Multiple built-in Effect Programs were bundled into the same lazy chunk',
+  )
 
   await writeFile(join(consumer, 'index.html'), '<div id="result"></div><script type="module" src="/tree.ts"></script>')
   await writeFile(join(consumer, 'tree.ts'), `
@@ -666,11 +683,19 @@ async function buildConsumerBundle(consumer, name, source) {
     '--config',
     `vite.size-${name}.config.mjs`,
   ], consumer)
+  const outputFiles = (await listFiles(join(consumer, outDir)))
+    .filter((path) => path.endsWith('.js'))
   const contents = await readFile(join(consumer, outDir, 'bundle.js'))
+  const lazyChunks = await Promise.all(
+    outputFiles
+      .filter((path) => path !== join(consumer, outDir, 'bundle.js'))
+      .map((path) => readFile(path, 'utf8')),
+  )
   return {
     bytes: contents.byteLength,
     gzipBytes: gzipSync(contents).byteLength,
     contents: contents.toString(),
+    lazyChunks,
   }
 }
 

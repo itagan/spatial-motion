@@ -54,7 +54,8 @@ Renderer 通过可异步的 `streamingEffects.enable()` 协商特效 program key
 
 Effect 提供确定性的 CPU 首帧/拾取 Transform 和
 `{ kind, activeCount, payload }`。Cards 通过受约束的 Effect Program 处理 payload；
-四个内置 Program 首次进入时动态加载并缓存。其他 Renderer 可以定义自己的 key。
+四个内置 Program 使用彼此独立的动态 chunk，首次进入对应 kind 时才加载并缓存。
+其他 Renderer 可以定义自己的 key。
 能力不匹配或 Program 准备失败时 Stage 固定降级为静态首帧并发出 `effecterror`。
 
 ### Cards Program
