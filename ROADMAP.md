@@ -67,6 +67,8 @@
   可直接写入 SoA TransformBuffer，内置高频布局复用容量。
 - [x] **资源与渲染扩展边界**：Atlas/Program 使用可取消 latest-wins 调度，Cards
   支持替换 Atlas backend；Extension 提供单次提交两侧钩子和 update 预算节流。
+- [x] **Cards 上传与分包余量**：Transition 直接标量写入 TypedArray；默认 Atlas
+  backend 首次请求时加载，自定义 backend 不下载默认实现。
 
 - [x] 建立可比较的 steady、cold-start、atlas-update 与 transition-stress 基准。
 - [x] 暴露 P50/P95/P99、长帧、CPU/提交、图集和图片加载指标。

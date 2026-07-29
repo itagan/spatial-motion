@@ -28,13 +28,14 @@ import { CardAtlasMetrics } from './cards/CardAtlasMetrics.js'
 import { CardMaterialRuntime } from './cards/CardMaterialRuntime.js'
 import {
   type CardAtlasBackend,
-  DefaultCardAtlasBackend,
+  type PreparedCardAtlas,
 } from './cards/CardAtlasBackend.js'
 import {
   ResourceScheduler,
 } from '../runtime/ResourceScheduler.js'
 import type {
   TextureAtlasOptions,
+  TextureAtlasPatch,
   TextureAtlasResult,
 } from './textureAtlas.js'
 import type {
@@ -91,7 +92,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   ) {
     this.resourceScheduler = new ResourceScheduler()
     this.atlasBackend = atlasOptions.atlasBackend
-      ?? new DefaultCardAtlasBackend(atlasOptions)
+      ?? new LazyDefaultCardAtlasBackend(atlasOptions)
     this.materialRuntime = new CardMaterialRuntime({
       scheduler: this.resourceScheduler,
       motionProgram: atlasOptions.motionProgram,
@@ -295,10 +296,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       )
     }
 
-    ;[fromPosition, toPosition].forEach((attribute) => markAttribute(attribute, count * 3))
-    ;[fromQuaternion, toQuaternion].forEach((attribute) => markAttribute(attribute, count * 4))
-    ;[fromScale, toScale, fromOpacity, toOpacity]
-      .forEach((attribute) => markAttribute(attribute, count))
+    markAttributePair(fromPosition, toPosition, count * 3)
+    markAttributePair(fromQuaternion, toQuaternion, count * 4)
+    markAttributePair(fromScale, toScale, count)
+    markAttributePair(fromOpacity, toOpacity, count)
     this.attributeReuses += 8
     geometry.instanceCount = count
     this.setProgress(0)
@@ -583,15 +584,92 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     scales: Float32Array,
     opacities: Float32Array,
   ): void {
-    positions.set([transform.x, transform.y, transform.z], index * 3)
+    const positionOffset = index * 3
+    positions[positionOffset] = transform.x
+    positions[positionOffset + 1] = transform.y
+    positions[positionOffset + 2] = transform.z
     this.euler.set(transform.rotationX, transform.rotationY, transform.rotationZ, 'XYZ')
     this.quaternion.setFromEuler(this.euler)
-    quaternions.set(
-      [this.quaternion.x, this.quaternion.y, this.quaternion.z, this.quaternion.w],
-      index * 4,
-    )
+    const quaternionOffset = index * 4
+    quaternions[quaternionOffset] = this.quaternion.x
+    quaternions[quaternionOffset + 1] = this.quaternion.y
+    quaternions[quaternionOffset + 2] = this.quaternion.z
+    quaternions[quaternionOffset + 3] = this.quaternion.w
     scales[index] = transform.scale
     opacities[index] = transform.opacity
+  }
+}
+
+class LazyDefaultCardAtlasBackend<TMeta> implements CardAtlasBackend<TMeta> {
+  private backend: CardAtlasBackend<TMeta> | null = null
+  private pending: Promise<CardAtlasBackend<TMeta>> | null = null
+  private disposed = false
+
+  constructor(private readonly options: TextureAtlasOptions<TMeta>) {}
+
+  async prepare(): Promise<void> {
+    const backend = await this.load()
+    await backend.prepare()
+  }
+
+  async build(
+    items: readonly MotionItem<TMeta>[],
+    resolution: number,
+    signal: AbortSignal,
+  ): Promise<PreparedCardAtlas> {
+    const backend = this.backend ?? await this.load()
+    return backend.build(items, resolution, signal)
+  }
+
+  async patch(
+    items: readonly MotionItem<TMeta>[],
+    changedIndices: readonly number[],
+    atlas: TextureAtlasResult,
+    signal: AbortSignal,
+  ): Promise<TextureAtlasPatch> {
+    const backend = this.backend ?? await this.load()
+    return backend.patch(items, changedIndices, atlas, signal)
+  }
+
+  applyPatch(
+    atlas: TextureAtlasResult,
+    patch: TextureAtlasPatch,
+    visibleLayers?: number,
+  ): number {
+    return this.backend!.applyPatch(atlas, patch, visibleLayers)
+  }
+
+  advanceUploads(
+    atlas: TextureAtlasResult,
+    nextLayer: number,
+    layerBudget: number,
+  ): readonly [nextLayer: number, uploaded: boolean] {
+    return this.backend?.advanceUploads(atlas, nextLayer, layerBudget)
+      ?? [nextLayer, false]
+  }
+
+  clearPatchQueue(atlas: TextureAtlasResult): void {
+    this.backend?.clearPatchQueue(atlas)
+  }
+
+  dispose(): void {
+    this.disposed = true
+    this.backend?.dispose()
+  }
+
+  private async load(): Promise<CardAtlasBackend<TMeta>> {
+    if (this.backend) return this.backend
+    this.pending ??= import('./cards/DefaultCardAtlasBackend.js')
+      .then(({ DefaultCardAtlasBackend }) =>
+        new DefaultCardAtlasBackend(this.options))
+      .catch((error) => {
+        this.pending = null
+        throw error
+      })
+    const backend = await this.pending
+    if (this.disposed) backend.dispose()
+    else this.backend = backend
+    return backend
   }
 }
 
@@ -603,6 +681,15 @@ function resolveAtlasResolution(
   if (typeof value === 'number') return Number.isFinite(value) ? value : 64
   if (value === undefined && customContent) return 64
   return itemCount > 1024 ? 48 : 64
+}
+
+function markAttributePair(
+  from: InstancedBufferAttribute,
+  to: InstancedBufferAttribute,
+  count: number,
+): void {
+  markAttribute(from, count)
+  markAttribute(to, count)
 }
 
 function createItemFingerprints<TMeta>(

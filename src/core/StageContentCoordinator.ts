@@ -186,7 +186,7 @@ export class StageContentCoordinator<TMeta = unknown> {
     state.visibleRatio = state.items.length
       ? Math.min(1, this.options.quality.getProfile().maxVisibleItems / state.items.length)
       : 1
-    if (!this.options.renderer.features.patch) {
+    if (!this.options.renderer.supportsPatch) {
       this.options.rendererState.restoreAfterItems({
         transforms: state.transforms,
         visual: state.getVisualState(),

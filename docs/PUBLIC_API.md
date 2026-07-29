@@ -46,7 +46,8 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
   `AbortSignal`，不得在失效后发布资源。
 - `cardsRenderer({ atlasBackend })` 是高级 Atlas 后端入口。实现必须遵守
   prepare/build/patch/apply/advance/clear/dispose 契约；Renderer 继续负责 latest-wins
-  调度、GPU 状态切换和幂等销毁。
+  调度、GPU 状态切换和幂等销毁。提供自定义 backend 时默认 Canvas/Worker backend
+  不会下载；未提供时默认实现会在首次图集请求时加载。
 - `atlasMode` 支持 `'single' | 'array' | 'auto'`，默认 `single`。`array` 使用无 mipmap 的 Texture2DArray 自适应分页与渐进上传；`auto` 仅在 `mipmaps: false` 且完整图集像素不小于 16 MiB 时选择 array。
 - `content` 与 `draw` 互斥；卡片比例限制为 `0.25–4`，最长边归一为一个世界单位。
 - `defineCardTemplate<TMeta>()` 返回 `CardContentRenderer<TMeta>`；模板只生成 Canvas 绘制树，不创建 DOM 或执行脚本。

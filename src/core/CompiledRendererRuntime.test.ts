@@ -39,15 +39,7 @@ describe('CompiledRendererRuntime', () => {
     const renderer = rendererFixture()
     const runtime = compileRendererRuntime(renderer)
 
-    expect(runtime.features).toEqual({
-      patch: false,
-      visual: false,
-      highlight: false,
-      viewport: false,
-      resourceRecovery: false,
-      streamingEffects: false,
-      frame: false,
-    })
+    expect(runtime.supportsPatch).toBe(false)
     expect(runtime.streamingEffects).toBeUndefined()
     expect(await runtime.updateItems([item], [0])).toBe(true)
     expect(renderer.setItems).toHaveBeenCalledWith([item])
@@ -91,7 +83,7 @@ describe('CompiledRendererRuntime', () => {
     const runtime = compileRendererRuntime(renderer)
     const visual = { billboard: 1, hideBackHemisphere: 0, hemisphereEdgeFade: 0 }
 
-    expect(Object.values(runtime.features).every(Boolean)).toBe(true)
+    expect(runtime.supportsPatch).toBe(true)
     expect(await runtime.updateItems([item], [0])).toBe(true)
     runtime.setTransforms([transform])
     runtime.setVisualState(visual)

@@ -91,7 +91,8 @@ latest-wins 提交屏障、AbortSignal 和同步 commit。异步 prepare 可以
 
 Cards 默认使用延迟加载、支持 Worker 的 `DefaultCardAtlasBackend`。高级消费者可以
 通过 `atlasBackend` 替换栅格、存储和上传策略，而公共 Renderer 仍拥有调度、纹理
-切换、恢复和销毁语义。Backend 不能增加主体 Draw Call。
+切换、恢复和销毁语义。默认 backend 类本身也在首次图集请求时加载，不进入基础
+Cards entry；传入自定义 backend 时不会下载默认实现。Backend 不能增加主体 Draw Call。
 
 ### Transform Buffer
 
@@ -124,6 +125,7 @@ Stage 统一使用类型化多订阅事件。框架适配器、调试面板和�
 - Cards 和 Points 主体分别保持一个 Draw Call。
 - 布局变换只在状态变化时计算，动画逐帧只更新进度 uniform。
 - 流式特效只更新 Program 时间，Material、实例 Attribute 和 TypedArray 按容量复用。
+- 布局切换直接标量写入复用 TypedArray，不为每项 position/quaternion 创建数组。
 - 高频 pointermove 合并到 Stage RAF。
 - Extension 顺序仅在增删时计算，frame context 和有界性能采样缓冲按实例复用。
 - Renderer capability 只在构造期编译一次；Stage 热路径使用稳定方法表。

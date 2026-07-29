@@ -518,6 +518,16 @@ try {
     !cardsOnlyConsumer.contents.includes('sampler2DArray'),
     'Cards-only entry eagerly contains the optional array Atlas shader',
   )
+  const defaultAtlasBackendMarker = 'Cards Atlas backend is not prepared'
+  assert(
+    !cardsOnlyConsumer.contents.includes(defaultAtlasBackendMarker),
+    'Cards-only entry eagerly contains the default Atlas backend',
+  )
+  assert(
+    cardsOnlyConsumer.lazyChunks.some((contents) =>
+      contents.includes(defaultAtlasBackendMarker)),
+    'Cards consumer is missing the lazy default Atlas backend chunk',
+  )
   const effectChunkMarkers = [
     'program_tunnel_',
     'program_shooter_',
