@@ -45,6 +45,7 @@ export function defineBuiltinEffectProgram(
       { name: `${prefix}b`, type: 'vec4' },
       { name: `${prefix}c`, type: 'vec4' },
     ],
+    clockUniform: `${prefix}time`,
     vertexDeclarations: helpers,
     vertexBody,
     upload(context, payload) {

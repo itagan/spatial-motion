@@ -31,11 +31,11 @@ describe('StageRuntime', () => {
     runtime.start()
     expect(requestAnimationFrame).toHaveBeenCalledOnce()
     ;(frame as unknown as FrameRequestCallback)(100)
-    expect(onFrame).toHaveBeenLastCalledWith({
-      now: 100,
-      rawFrameMs: expect.any(Number),
-      deltaSeconds: expect.any(Number),
-    })
+    expect(onFrame).toHaveBeenLastCalledWith(
+      100,
+      expect.any(Number),
+      expect.any(Number),
+    )
 
     runtime.pause()
     expect(runtime.isPaused()).toBe(true)

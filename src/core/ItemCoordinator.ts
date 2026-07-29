@@ -35,14 +35,7 @@ export class ItemCoordinator<TMeta> {
   constructor(private readonly options: ItemCoordinatorOptions<TMeta>) {}
 
   validateItems(items: readonly MotionItem<TMeta>[]): void {
-    const ids = new Set<string>()
-    items.forEach((item, index) => {
-      if (!item.id.trim()) {
-        throw new Error(`MotionItem at index ${index} must have a non-empty id`)
-      }
-      if (ids.has(item.id)) throw new Error(`Duplicate MotionItem id: ${item.id}`)
-      ids.add(item.id)
-    })
+    validateMotionItems(items)
   }
 
   validateUpdates(updates: readonly CoordinatedItemUpdate<TMeta>[]): void {
@@ -137,4 +130,15 @@ export class ItemCoordinator<TMeta> {
     )
     return operation
   }
+}
+
+export function validateMotionItems<TMeta>(items: readonly MotionItem<TMeta>[]): void {
+  const ids = new Set<string>()
+  items.forEach((item, index) => {
+    if (!item.id.trim()) {
+      throw new Error(`MotionItem at index ${index} must have a non-empty id`)
+    }
+    if (ids.has(item.id)) throw new Error(`Duplicate MotionItem id: ${item.id}`)
+    ids.add(item.id)
+  })
 }

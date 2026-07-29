@@ -37,7 +37,8 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 - `cardsRenderer()` 统一接收 `style`、`resolveStyle`、`draw`、`content`、`aspectRatio` 和 Atlas 图片资源选项；`resolution` 支持显式像素值或 `'auto'`，`mipmaps` 可关闭，`texturePrewarm` 可覆盖默认的小图集自适应预热策略。
 - `cardsRenderer()` 还接受 `motionProgram` 与按 kind 注册的 `effectPrograms`。
   `defineCardMotionProgram()` / `defineCardEffectProgram()` 验证私有字段前缀、GLSL
-  入口、itemSize、初始值和重复字段；四个内置特效默认可用但延迟加载。
+  入口、itemSize、初始值、重复字段和显式 `clockUniform`；四个内置特效默认可用
+  但延迟加载。加载失败不会永久缓存 rejected Promise。
 - `atlasMode` 支持 `'single' | 'array' | 'auto'`，默认 `single`。`array` 使用无 mipmap 的 Texture2DArray 自适应分页与渐进上传；`auto` 仅在 `mipmaps: false` 且完整图集像素不小于 16 MiB 时选择 array。
 - `content` 与 `draw` 互斥；卡片比例限制为 `0.25–4`，最长边归一为一个世界单位。
 - `defineCardTemplate<TMeta>()` 返回 `CardContentRenderer<TMeta>`；模板只生成 Canvas 绘制树，不创建 DOM 或执行脚本。
@@ -59,3 +60,5 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 - 主库 40 KB、Core 16 KB、Cards 10 KB gzip，模板/Points/Dev 各 12 KB、
   150 KB tarball 和 8 KB layout-only 是自动化硬预算。
 - Stage extension 只能挂载隔离 Group，并负责释放自身 Geometry、Material、Texture 和动画资源。
+- Extension 的 `update(frame)` 会复用同一个只读 frame 对象，扩展不得保存或修改；
+  `contextLost()` / `contextRestored()` 用于重建自定义 GPU 资源。

@@ -21,6 +21,7 @@ const waveProgram = defineCardEffectProgram<WavePayload>({
     { name: 'program_wave_time', type: 'float' },
     { name: 'program_wave_amplitude', type: 'float', initialValue: 2.4 },
   ],
+  clockUniform: 'program_wave_time',
   vertexBody: `
     float angle = program_wave_phase * 6.28318530718;
     float radius = 4.8 + sin(program_wave_time * 1.8 + angle * 3.0) * program_wave_amplitude;

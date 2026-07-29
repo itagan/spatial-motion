@@ -12,6 +12,12 @@
   context 恢复和 setItems 后的渲染状态恢复。
 - Cards-only 消费预算收紧到 10 KB gzip；Atlas 引擎、Array Shader 和内置 Effect
   Program 均在需要时加载。
+- Stage 内容更新/质量恢复、时钟、旋转和 Renderer 校验从 `MotionStage` 抽离；
+  Cards 内部拆分 Geometry、Atlas 指标和 Program Loader，保持原有公共入口。
+- Extension 稳态更新不再逐帧排序或创建 frame 对象，并新增 WebGL
+  `contextLost` / `contextRestored` 生命周期。
+- Effect Program 使用显式 `clockUniform` 绑定 Stage 时钟；瞬时 chunk 加载失败不会
+  永久污染缓存，后续激活可以重试。
 
 ### Added
 

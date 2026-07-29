@@ -11,7 +11,7 @@ export interface StageExtensionContext {
 }
 
 export interface StageFrameContext {
-  /** Active extension time in seconds; paused time is excluded. */
+  /** Active time in seconds; the same frame object is reused and must not be retained or mutated. */
   readonly elapsed: number
   /** Current frame delta in seconds, clamped to the Stage frame budget. */
   readonly delta: number
@@ -32,6 +32,10 @@ export interface StageExtension {
   resize?(viewport: StageViewport): void
   qualityChange?(quality: QualityLevel): void
   reducedMotionChange?(reducedMotion: boolean): void
+  /** Called after the Stage has paused for a lost WebGL context. */
+  contextLost?(): void
+  /** Called after the Host and primary Renderer restored their GPU resources. */
+  contextRestored?(): void
   pause?(): void
   resume?(): void
   dispose?(): void
