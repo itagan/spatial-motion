@@ -337,3 +337,26 @@ WebGL 延迟加载与 Shader 激活。
 root/Core/Cards-only 为 39,539/16,351/10,165 bytes gzip，layout-only 8,166 bytes，
 tarball 123,624 bytes；全部保持在 40/16/10 KB gzip、8 KB layout 与 150 KB
 tarball 硬预算内。
+
+## Cards Transition 零临时数组与默认 Backend 分包
+
+Cards 的 Transition 上传不再对每个 from/to Transform 分别创建 position 和
+quaternion 数组。2,000 项布局切换由原来的约 8,000 个短命数组改为直接标量写入
+既有 TypedArray；八个 Attribute update range 通过无分配 pair helper 标记，GPU
+Attribute、容量桶和上传范围保持不变。
+
+默认 `DefaultCardAtlasBackend` 实现进一步拆为独立动态 chunk。基础 Cards 只保留
+负责首次加载、失败重试和幂等销毁的轻量代理；传入自定义 `atlasBackend` 时不会
+下载默认 Canvas/Worker backend。包验证同时检查默认 backend 标记不在基础 entry，
+但必须存在于 lazy chunk。Renderer capability 编译结果也从内部 class 收敛为纯方法
+表，只保留控制器实际使用的 patch 标记。
+
+2026-07-30 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2,000 Cards/high
+3 秒回归：steady 为 60.00 FPS、P95/P99 18.20/18.60ms；transition-stress 为
+59.99 FPS、P95/P99 18.45/18.65ms并完成 4 次操作。两组均保持主体 1 Draw Call、
+0 个 24/33/50ms 长帧；默认图集与四个内置 Effect Program 延迟加载后 WebGL
+保持 READY，页面无 error。
+
+真实 root/Core/Cards-only 消费体积由上一轮的 39,539/16,351/10,165 bytes gzip
+降为 39,294/16,258/10,038 bytes，基础 Cards 获得 202 bytes 余量；layout-only
+保持 8,166 bytes，tarball 为 123,961 bytes。

@@ -25,6 +25,12 @@
   缓冲，再由状态更新边界输出公共 Transform 快照。
 - Extension 新增确定性的 `beforeRender` / `afterRender` 和 `updateBudgetMs` 节流，
   并报告 render hook、预算超限与节流指标。
+- Cards 布局切换改为直接写入复用的 TypedArray，不再为每项 position/quaternion
+  创建短命数组；Attribute 更新范围也不再创建临时集合。
+- 默认 Atlas backend 实现从基础 Cards 入口拆为首次图集请求时加载的独立 chunk；
+  自定义 backend 不下载默认 Canvas/Worker backend。
+- Renderer capability 编译结果收敛为纯方法表并只保留运行期需要的 patch 标记，
+  继续降低 Core 固定成本。
 
 ### Added
 
