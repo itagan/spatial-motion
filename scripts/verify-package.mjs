@@ -16,9 +16,10 @@ const pointsRendererGzipBudget = 12 * 1024
 const devGzipBudget = 12 * 1024
 const tarballBudget = 150 * 1024
 const treeShakenBudget = 8 * 1024
-// Coarse anti-bundling sentinel across every preserved ESM module. Consumer
-// gzip budgets below remain the product-facing size gates.
-const preservedModuleSentinel = 170 * 1024
+// A bundled Three.js copy forms a large generated module. Aggregate preserved
+// module bytes are only diagnostic because legitimate lazy/internal modules
+// grow independently of any single consumer.
+const bundledDependencyModuleSentinel = 64 * 1024
 const keepConsumer = process.env.KEEP_PACKAGE_CONSUMER === '1'
 
 assert(packageName === '@itagan/spatial-motion', `Unexpected package name: ${packageName}`)
@@ -74,6 +75,10 @@ const pointsRendererJsContents = await Promise.all(
 const devJsContents = await Promise.all(devJsFiles.map((path) => readFile(path)))
 const totalJsBytes = jsContents.reduce((total, contents) => total + contents.byteLength, 0)
 const jsBytes = coreJsContents.reduce((total, contents) => total + contents.byteLength, 0)
+const largestJsModuleBytes = jsContents.reduce(
+  (maximum, contents) => Math.max(maximum, contents.byteLength),
+  0,
+)
 const jsGzipBytes = coreJsContents.reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
 const cardTemplateJsGzipBytes = cardTemplateJsContents
   .reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
@@ -82,8 +87,8 @@ const pointsRendererJsGzipBytes = pointsRendererJsContents
 const devJsGzipBytes = devJsContents
   .reduce((total, contents) => total + gzipSync(contents).byteLength, 0)
 assert(
-  jsBytes < preservedModuleSentinel,
-  `Library JS suggests Three.js was bundled: ${jsBytes} bytes`,
+  largestJsModuleBytes < bundledDependencyModuleSentinel,
+  `A library module suggests Three.js was bundled: ${largestJsModuleBytes} bytes`,
 )
 assert(
   cardTemplateJsGzipBytes <= cardTemplateGzipBudget,

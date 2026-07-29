@@ -70,6 +70,7 @@ function stats(overrides: Partial<StagePerformanceStats> = {}): StagePerformance
     pickOperations: 0,
     extensions: 0,
     extensionUpdateMs: 0,
+    extensionRenderMs: 0,
   }
   return {
     ...base,
@@ -99,6 +100,12 @@ describe('BenchmarkSession', () => {
       updateTimeP99: 0.4,
       maximumUpdateMs: 0.5,
       slowFrames: 0,
+      updateBudgetMs: 4,
+      overBudgetFrames: 0,
+      throttledFrames: 0,
+      renderCalls: 0,
+      averageRenderHookMs: 0,
+      maximumRenderHookMs: 0,
       errorCount: 0,
       lastError: null,
     }]

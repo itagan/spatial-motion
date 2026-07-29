@@ -81,4 +81,14 @@ describe('Cards programs', () => {
       upload() {},
     })).toThrow(TypeError)
   })
+
+  it('rejects a non-function runtime factory', () => {
+    expect(() => defineCardEffectProgram({
+      kind: 'runtime',
+      prefix: 'program_runtime_',
+      vertexBody: 'center.x += 1.0;',
+      createRuntime: {} as never,
+      upload() {},
+    })).toThrow('Card effect program createRuntime must be a function')
+  })
 })

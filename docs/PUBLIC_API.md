@@ -22,6 +22,8 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 - `MotionItem<TMeta>`、`Transform`、Renderer/Layout 输入及更新索引使用只读契约；Stage、Cards/Points Resolver 和 item 回调共享同一泛型 meta。
 - Factory 只获得隔离内容 `Group`、GPU 限制（含 `maxTextureSize`、`maxTextureLayers`）、受限纹理准备函数和 destroy `AbortSignal`，不能接管 Scene、Camera、WebGLRenderer 或 RAF。
 - 核心协议负责数据、Transform、GPU 过渡进度、质量可见比例、统计和销毁；patch、visual、highlight、viewport、resource recovery、streaming effects 与逐帧 `frame.update()` 是可选能力。
+- Renderer capability 在 Stage 构造期完成验证与编译；运行中修改 Renderer 方法不受
+  支持。需要改变能力时创建新的 Renderer/Stage。
 - `descriptor.itemBounds` 支持 layout/camera quad、camera disc 或 `null`；`null` 关闭指针拾取但不影响布局与程序化 focus。
 - `StagePerformanceStats` 明确报告 input、resident、submitted、visible 与 active effect 数量；`render` 报告场景 Draw Call/三角形，`renderer` 报告 GPU 字节和有限 metrics。
 - `QualityController` 独立拥有模式、档位、Profile 和自适应采样器；Stage 接受
@@ -39,6 +41,12 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
   `defineCardMotionProgram()` / `defineCardEffectProgram()` 验证私有字段前缀、GLSL
   入口、itemSize、初始值、重复字段和显式 `clockUniform`；四个内置特效默认可用
   但延迟加载。加载失败不会永久缓存 rejected Promise。
+- Effect Program 可选 `createRuntime()`，用于一次性资源准备、context restore、
+  activate/update/deactivate/dispose；所有异步操作都收到 destroy/切换可取消的
+  `AbortSignal`，不得在失效后发布资源。
+- `cardsRenderer({ atlasBackend })` 是高级 Atlas 后端入口。实现必须遵守
+  prepare/build/patch/apply/advance/clear/dispose 契约；Renderer 继续负责 latest-wins
+  调度、GPU 状态切换和幂等销毁。
 - `atlasMode` 支持 `'single' | 'array' | 'auto'`，默认 `single`。`array` 使用无 mipmap 的 Texture2DArray 自适应分页与渐进上传；`auto` 仅在 `mipmaps: false` 且完整图集像素不小于 16 MiB 时选择 array。
 - `content` 与 `draw` 互斥；卡片比例限制为 `0.25–4`，最长边归一为一个世界单位。
 - `defineCardTemplate<TMeta>()` 返回 `CardContentRenderer<TMeta>`；模板只生成 Canvas 绘制树，不创建 DOM 或执行脚本。
@@ -47,6 +55,9 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 ## Layout
 
 - `defineLayout()` 创建并冻结自定义 Layout，验证名称、枚举、count、返回数量和所有 Transform 数值。
+- 高吞吐布局可以只实现 `calculateInto()`，从 `@itagan/spatial-motion/layouts`
+  导入 `TransformBuffer` 并通过 `setValues()` 直接写入 SoA 缓冲；内置 Grid/Helix
+  已采用此路径。普通布局继续实现 `calculate()`。
 - `LayoutContext<TMeta>` 提供通用 `itemWidth/itemHeight`、当前可见 `items` 和质量档位，
   自定义布局可以按业务字段分组、排序或加权。
 - `LayoutConfig` 当前格式版本为 `1`；`parseLayoutConfig()` 严格解析外部配置，`createLayout()` 创建内置布局。
@@ -61,4 +72,7 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
   150 KB tarball 和 8 KB layout-only 是自动化硬预算。
 - Stage extension 只能挂载隔离 Group，并负责释放自身 Geometry、Material、Texture 和动画资源。
 - Extension 的 `update(frame)` 会复用同一个只读 frame 对象，扩展不得保存或修改；
+  `updateBudgetMs` 默认 4ms，连续三帧超限会节流一帧并把 delta 带到下一次 update。
+  `beforeRender()` / `afterRender()` 围绕唯一 scene submission 确定性执行，不能提交
+  第二个主体渲染循环；
   `contextLost()` / `contextRestored()` 用于重建自定义 GPU 资源。

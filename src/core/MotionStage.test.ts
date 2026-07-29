@@ -924,6 +924,8 @@ describe('MotionStage', () => {
       order,
       mount: vi.fn(),
       update: () => events.push(`update:${name}`),
+      beforeRender: () => events.push(`before:${name}`),
+      afterRender: () => events.push(`after:${name}`),
       resize: () => events.push(`resize:${name}`),
       pause: () => events.push(`pause:${name}`),
       resume: () => events.push(`resume:${name}`),
@@ -932,6 +934,7 @@ describe('MotionStage', () => {
     await stage.addExtension(createOrderedExtension('later-a', 10))
     await stage.addExtension(createOrderedExtension('first', -1))
     await stage.addExtension(createOrderedExtension('later-b', 10))
+    currentRenderer().render.mockImplementation(() => events.push('render'))
 
     events.length = 0
     stage.resize()
@@ -939,7 +942,18 @@ describe('MotionStage', () => {
     events.length = 0
     const renderFrame = frame as FrameRequestCallback | null
     renderFrame!(1000)
-    expect(events).toEqual(['update:first', 'update:later-a', 'update:later-b'])
+    expect(events).toEqual([
+      'update:first',
+      'update:later-a',
+      'update:later-b',
+      'before:first',
+      'before:later-a',
+      'before:later-b',
+      'render',
+      'after:first',
+      'after:later-a',
+      'after:later-b',
+    ])
     events.length = 0
     stage.pause()
     expect(events).toEqual(['pause:first', 'pause:later-a', 'pause:later-b'])
@@ -1017,6 +1031,38 @@ describe('MotionStage', () => {
       name: 'duplicate',
       active: false,
       enabled: false,
+    })
+    stage.destroy()
+  })
+
+  it('throttles repeated extension budget overruns without losing active elapsed time', async () => {
+    let frame: FrameRequestCallback | null = null
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => ++now)
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
+    const deltas: number[] = []
+    const stage = createStage()
+    await stage.addExtension({
+      name: 'budgeted',
+      updateBudgetMs: 0.5,
+      mount: vi.fn(),
+      update: ({ delta }) => deltas.push(delta),
+    })
+
+    for (const timestamp of [1000, 1016, 1032, 1048, 1064]) {
+      const renderFrame = frame as FrameRequestCallback | null
+      renderFrame!(timestamp)
+    }
+
+    expect(deltas).toHaveLength(4)
+    expect(deltas.at(-1)).toBeCloseTo(0.032)
+    expect(stage.getExtensionStats()[0]).toMatchObject({
+      updateBudgetMs: 0.5,
+      overBudgetFrames: 4,
+      throttledFrames: 1,
     })
     stage.destroy()
   })

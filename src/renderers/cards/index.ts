@@ -9,6 +9,7 @@ import type {
   CardEffectProgramLoader,
   CardMotionProgram,
 } from './programs.js'
+import type { CardAtlasBackend } from './CardAtlasBackend.js'
 import {
   InstancedCardRenderer,
   type CardRendererOptions as InternalCardRendererOptions,
@@ -29,6 +30,8 @@ export interface CardsRendererOptions<TMeta = unknown> {
   atlasMode?: 'single' | 'array' | 'auto'
   motionProgram?: CardMotionProgram<TMeta>
   effectPrograms?: Readonly<Record<string, CardEffectProgramLoader>>
+  /** Advanced raster/storage/upload backend; the default remains lazy and worker-aware. */
+  atlasBackend?: CardAtlasBackend<TMeta>
 }
 
 export function cardsRenderer<TMeta = unknown>(
@@ -53,6 +56,7 @@ export function cardsRenderer<TMeta = unknown>(
     atlasMode: options.atlasMode,
     motionProgram: options.motionProgram,
     effectPrograms: options.effectPrograms,
+    atlasBackend: options.atlasBackend,
   }
   return ({
     root,
@@ -103,8 +107,14 @@ export {
   defineCardMotionProgram,
 } from './programs.js'
 export type {
+  CardAtlasBackend,
+  PreparedCardAtlas,
+} from './CardAtlasBackend.js'
+export type {
   CardEffectProgram,
   CardEffectProgramLoader,
+  CardEffectProgramRuntime,
+  CardEffectProgramRuntimeContext,
   CardMotionProgram,
   CardProgramAttribute,
   CardProgramUniform,

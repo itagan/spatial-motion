@@ -1,4 +1,5 @@
-import type { Layout, Transform } from '../core/types.js'
+import type { Layout } from '../core/types.js'
+import type { TransformBuffer } from '../core/TransformBuffer.js'
 import { defineLayout } from './defineLayout.js'
 
 export interface GridOptions {
@@ -12,31 +13,39 @@ export function grid(options: GridOptions = {}): Layout {
   const fit = options.fit ?? 'fixed'
   return defineLayout({
     name: 'grid',
-    calculate(count, context): Transform[] {
-      if (count <= 0) return []
-      if (fit !== 'fixed') return fittedGrid(count, context, options.columns, fit)
+    calculateInto(count, context, target): void {
+      if (count <= 0) return
+      if (fit !== 'fixed') {
+        fittedGridInto(target, count, context, options.columns, fit)
+        return
+      }
       const columns = Math.max(1, options.columns ?? Math.ceil(Math.sqrt(count)))
       const rows = Math.ceil(count / columns)
-      return Array.from({ length: count }, (_, index) => ({
-        x: centeredColumn(index, count, columns) * gap,
-        y: ((rows - 1) / 2 - Math.floor(index / columns)) * gap,
-        z: 0,
-        scale: Math.min(1, gap * 0.82),
-        rotationX: 0,
-        rotationY: 0,
-        rotationZ: 0,
-        opacity: 1,
-      }))
+      const scale = Math.min(1, gap * 0.82)
+      for (let index = 0; index < count; index += 1) {
+        target.setValues(
+          index,
+          centeredColumn(index, count, columns) * gap,
+          ((rows - 1) / 2 - Math.floor(index / columns)) * gap,
+          0,
+          scale,
+          0,
+          0,
+          0,
+          1,
+        )
+      }
     },
   })
 }
 
-function fittedGrid(
+function fittedGridInto(
+  target: TransformBuffer,
   count: number,
   context: { width: number; height: number; viewportWidth?: number; viewportHeight?: number },
   explicitColumns: number | undefined,
   fit: 'contain' | 'cover',
-): Transform[] {
+): void {
   const viewportHeight = positive(context.viewportHeight, 10)
   const viewportWidth = positive(
     context.viewportWidth,
@@ -53,16 +62,19 @@ function fittedGrid(
     : Math.min(cellWidth, cellHeight)
   const itemScale = cellSize * 0.82
 
-  return Array.from({ length: count }, (_, index) => ({
-    x: centeredColumn(index, count, columns) * cellSize,
-    y: ((rows - 1) / 2 - Math.floor(index / columns)) * cellSize,
-    z: 0,
-    scale: itemScale,
-    rotationX: 0,
-    rotationY: 0,
-    rotationZ: 0,
-    opacity: 1,
-  }))
+  for (let index = 0; index < count; index += 1) {
+    target.setValues(
+      index,
+      centeredColumn(index, count, columns) * cellSize,
+      ((rows - 1) / 2 - Math.floor(index / columns)) * cellSize,
+      0,
+      itemScale,
+      0,
+      0,
+      0,
+      1,
+    )
+  }
 }
 
 function centeredColumn(index: number, count: number, columns: number): number {

@@ -1,4 +1,4 @@
-import type { Layout, Transform } from '../core/types.js'
+import type { Layout } from '../core/types.js'
 import { defineLayout } from './defineLayout.js'
 
 export interface HelixOptions {
@@ -22,28 +22,29 @@ export function helix(options: HelixOptions = {}): Layout {
   return defineLayout({
     name: 'helix',
     orientation,
-    calculate(count): Transform[] {
-      if (count <= 0) return []
+    calculateInto(count, _context, target): void {
+      if (count <= 0) return
       const turns = Math.max(0.25, options.turns ?? Math.max(2, Math.sqrt(count) / 3))
       const totalAngle = turns * Math.PI * 2
       const pathLength = Math.hypot(totalAngle * radius, height)
       const itemSpacing = count > 1 ? pathLength / (count - 1) : 1
       const itemScale = Math.min(1, itemSpacing * Math.max(0, options.density ?? 0.8))
 
-      return Array.from({ length: count }, (_, index) => {
+      for (let index = 0; index < count; index += 1) {
         const progress = count === 1 ? 0.5 : index / (count - 1)
         const angle = startAngle + direction * totalAngle * progress
-        return {
-          x: Math.sin(angle) * radius,
-          y: height * (0.5 - progress),
-          z: Math.cos(angle) * radius,
-          scale: itemScale,
-          rotationX: 0,
-          rotationY: orientation === 'surface' ? angle : 0,
-          rotationZ: 0,
-          opacity: 1,
-        }
-      })
+        target.setValues(
+          index,
+          Math.sin(angle) * radius,
+          height * (0.5 - progress),
+          Math.cos(angle) * radius,
+          itemScale,
+          0,
+          orientation === 'surface' ? angle : 0,
+          0,
+          1,
+        )
+      }
     },
   })
 }

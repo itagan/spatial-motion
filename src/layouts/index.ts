@@ -18,3 +18,7 @@ export type { ScatterOptions } from './scatter.js'
 export { createLayout, parseLayoutConfig } from './config.js'
 export type { LayoutConfig, LayoutConfigType } from './config.js'
 export { defineLayout } from './defineLayout.js'
+export {
+  TransformBuffer,
+  calculateLayoutInto,
+} from '../core/TransformBuffer.js'

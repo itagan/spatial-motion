@@ -21,6 +21,26 @@ export interface CardProgramUploadContext {
   setUniform(name: string, value: number | readonly number[] | Float32Array): void
 }
 
+export interface CardEffectProgramRuntimeContext {
+  readonly signal: AbortSignal
+  readonly upload: CardProgramUploadContext
+}
+
+export interface CardEffectProgramRuntime<TPayload = unknown> {
+  prepare?(
+    context: CardEffectProgramRuntimeContext,
+    payload: TPayload,
+  ): void | Promise<void>
+  restore?(
+    context: CardEffectProgramRuntimeContext,
+    payload: TPayload,
+  ): void | Promise<void>
+  activate?(): void
+  update?(elapsedSeconds: number): void
+  deactivate?(): void
+  dispose?(): void
+}
+
 interface CardProgramDefinition {
   kind: string
   prefix: string
@@ -47,6 +67,7 @@ export interface CardEffectProgram<TPayload = unknown> extends Readonly<CardProg
   readonly type: 'effect'
   /** Optional float Uniform driven by the Stage effect clock. */
   readonly clockUniform?: string
+  createRuntime?(): CardEffectProgramRuntime<TPayload>
   upload(context: CardProgramUploadContext, payload: TPayload): void
 }
 
@@ -69,6 +90,7 @@ export function defineCardMotionProgram<TMeta = unknown>(
 export function defineCardEffectProgram<TPayload>(
   definition: CardProgramDefinition & {
     clockUniform?: string
+    createRuntime?(): CardEffectProgramRuntime<TPayload>
     upload(context: CardProgramUploadContext, payload: TPayload): void
   },
 ): CardEffectProgram<TPayload> {
@@ -76,6 +98,9 @@ export function defineCardEffectProgram<TPayload>(
   validateClockUniform(definition)
   if (typeof definition.upload !== 'function') {
     throw new TypeError('Card effect program upload must be a function')
+  }
+  if (definition.createRuntime !== undefined && typeof definition.createRuntime !== 'function') {
+    throw new TypeError('Card effect program createRuntime must be a function')
   }
   return Object.freeze({ ...definition, type: 'effect' as const })
 }

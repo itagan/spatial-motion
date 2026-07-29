@@ -28,6 +28,7 @@ MotionStage facade
 ├── ItemCoordinator       稳定 id、Patch 合并和异步 revision
 ├── InteractionController 拾取、Hover 和键盘焦点
 ├── ExtensionHost         隔离的外部 Three.js 内容
+├── CompiledRendererRuntime 一次校验后的稳定 Renderer 方法表
 └── MotionRenderer        批量渲染能力协议
 ```
 
@@ -53,6 +54,10 @@ Renderer 通过可异步的 `streamingEffects.enable()` 协商特效 program key
 只管理进入、退出、generation 和时钟，不读取 Renderer 私有 payload，也不假定
 自定义 Renderer 支持内置 Cards Shader。
 
+`MotionRenderer` 的公开 capability 在构造期只校验一次并编译为内部稳定方法表。
+Stage 热路径只调用已解析的方法，不逐帧执行可选链或重新探测 capability；自定义
+Renderer 仍只需实现它实际支持的公开能力。
+
 ### Effect
 
 Effect 提供确定性的 CPU 首帧/拾取 Transform 和
@@ -72,8 +77,36 @@ Effect Program 通过可选 `clockUniform` 显式声明由 Stage 驱动的 float
 Renderer 在 Material 创建时解析一次引用，逐帧不扫描 Program 定义。Program Loader
 只缓存成功或仍在进行的加载；失败 Promise 会被移除，允许下一次激活重试。
 
-Cards Renderer 内部由 Geometry、Atlas Metrics 和 Program Loader 模块分别承担
-实例缓冲、图集诊断与动态实现选择；这些模块不形成新的公共子路径，也不增加 Mesh。
+Cards Renderer 内部由 Geometry、Atlas Metrics、`CardMaterialRuntime` 和 Program
+Loader 分别承担实例缓冲、图集诊断、Material/Program 生命周期与动态实现选择。
+Effect Program 可通过 `createRuntime()` 接管异步 prepare/restore、激活、逐帧更新
+和释放，但只能通过受限 upload context 写入自身字段。Material、Attribute 和
+TypedArray 继续按容量缓存，不增加 Mesh。
+
+### Resource 与 Atlas
+
+`ResourceScheduler` 为 Atlas build/patch 和 Effect Program 准备提供按 channel 的
+latest-wins 提交屏障、AbortSignal 和同步 commit。异步 prepare 可以
+并行，但只有仍拥有 channel 的任务能够发布；过期结果必须 discard。
+
+Cards 默认使用延迟加载、支持 Worker 的 `DefaultCardAtlasBackend`。高级消费者可以
+通过 `atlasBackend` 替换栅格、存储和上传策略，而公共 Renderer 仍拥有调度、纹理
+切换、恢复和销毁语义。Backend 不能增加主体 Draw Call。
+
+### Transform Buffer
+
+Layout 可实现 `calculateInto(count, context, target)`，直接写入按容量增长的 SoA
+`TransformBuffer`。内置 Grid 与 Helix 已使用该路径，避免生成中间 Transform
+对象；旧式 `calculate()` 仍是同一 v2 契约的便利形式。Stage 当前在状态变化时把
+Buffer 转为公共 Transform 快照，因此该路径先优化生成器内存，并为后续 Renderer
+直接消费结构化缓冲保留边界；它不会进入稳态帧循环。
+
+### Extension Render Pass
+
+Extension 的 `beforeRender()` / `afterRender()` 在唯一 Stage scene submission 两侧
+按 `order` 和挂载顺序执行，不获得 WebGLRenderer。`updateBudgetMs` 连续三帧超限时
+跳过一帧 update 并累计 delta，防止单个外部动画长期挤占主体帧预算；渲染钩子耗时
+与节流次数进入独立统计。
 
 ### Quality
 
@@ -93,6 +126,8 @@ Stage 统一使用类型化多订阅事件。框架适配器、调试面板和�
 - 流式特效只更新 Program 时间，Material、实例 Attribute 和 TypedArray 按容量复用。
 - 高频 pointermove 合并到 Stage RAF。
 - Extension 顺序仅在增删时计算，frame context 和有界性能采样缓冲按实例复用。
+- Renderer capability 只在构造期编译一次；Stage 热路径使用稳定方法表。
+- Layout `calculateInto()` 使用 SoA 容量缓冲复用生成阶段内存。
 - 图集构建必须支持取消；失效结果不得覆盖新 revision。
 - 质量下降先减少提交和可见数量，资源压缩不得阻塞当前帧。
 - 生产入口不加载 Dev 诊断，Three.js 始终由应用提供。

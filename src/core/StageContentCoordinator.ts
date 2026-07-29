@@ -1,4 +1,3 @@
-import type { MotionRenderer } from '../renderers/MotionRenderer.js'
 import type {
   Layout,
   LayoutContext,
@@ -6,6 +5,7 @@ import type {
   Transform,
   TransitionOptions,
 } from './types.js'
+import type { CompiledRendererRuntime } from './CompiledRendererRuntime.js'
 import { identityTransform } from './math.js'
 import {
   ItemCoordinator,
@@ -24,7 +24,7 @@ export interface StageContentUpdateOptions<TMeta = unknown> extends TransitionOp
 
 interface StageContentCoordinatorOptions<TMeta> {
   state: StageContentState<TMeta>
-  renderer: MotionRenderer<TMeta>
+  renderer: CompiledRendererRuntime<TMeta>
   motion: MotionController
   effects: EffectController
   interaction: InteractionController<TMeta>
@@ -175,10 +175,10 @@ export class StageContentCoordinator<TMeta = unknown> {
     )
     const prepared = this.items.preparePatch(state.sourceItems, updates, maxItems)
     const revision = this.items.beginOperation()
-    const patch = this.options.renderer.capabilities.patch
-    const applied = patch
-      ? await patch.updateItems(prepared.visibleItems, prepared.changedIndices)
-      : await this.options.renderer.setItems(prepared.visibleItems)
+    const applied = await this.options.renderer.updateItems(
+      prepared.visibleItems,
+      prepared.changedIndices,
+    )
     if (!applied || !this.items.isCurrent(revision)) return false
     state.sourceItems = prepared.sourceItems
     state.items = prepared.visibleItems
@@ -186,7 +186,7 @@ export class StageContentCoordinator<TMeta = unknown> {
     state.visibleRatio = state.items.length
       ? Math.min(1, this.options.quality.getProfile().maxVisibleItems / state.items.length)
       : 1
-    if (!patch) {
+    if (!this.options.renderer.features.patch) {
       this.options.rendererState.restoreAfterItems({
         transforms: state.transforms,
         visual: state.getVisualState(),
@@ -217,7 +217,7 @@ export class StageContentCoordinator<TMeta = unknown> {
     state.items = items
     state.inputItemCount = sourceItems.length
     state.transforms = transforms
-    this.options.renderer.capabilities.visual?.setVisualState(state.getVisualState())
+    this.options.renderer.setVisualState(state.getVisualState())
     this.options.renderer.setTransforms(transforms)
     state.visibleRatio = 1
     this.options.renderer.setVisibleRatio(1)

@@ -108,6 +108,11 @@ export interface Layout<TMeta = unknown> {
   readonly hideBackHemisphere?: boolean
   readonly hemisphereEdgeFade?: number
   calculate(count: number, context: LayoutContext<TMeta>): readonly Transform[]
+  calculateInto?(
+    count: number,
+    context: LayoutContext<TMeta>,
+    target: import('./TransformBuffer.js').TransformBuffer,
+  ): void
 }
 
 export interface LayoutDefinition<TMeta = unknown> {
@@ -115,7 +120,12 @@ export interface LayoutDefinition<TMeta = unknown> {
   readonly orientation?: 'surface' | 'camera'
   readonly hideBackHemisphere?: boolean
   readonly hemisphereEdgeFade?: number
-  readonly calculate: (count: number, context: LayoutContext<TMeta>) => readonly Transform[]
+  readonly calculate?: (count: number, context: LayoutContext<TMeta>) => readonly Transform[]
+  readonly calculateInto?: (
+    count: number,
+    context: LayoutContext<TMeta>,
+    target: import('./TransformBuffer.js').TransformBuffer,
+  ) => void
 }
 
 export interface TransitionOptions {

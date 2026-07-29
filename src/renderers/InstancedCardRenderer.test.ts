@@ -16,6 +16,7 @@ import {
   defineCardMotionProgram,
   type CardEffectProgram,
 } from './cards/programs'
+import type { CardAtlasBackend } from './cards/CardAtlasBackend'
 
 const atlasMock = vi.hoisted(() => ({
   create: vi.fn(),
@@ -173,6 +174,61 @@ describe('InstancedCardRenderer item loading', () => {
 
     expect(await renderer.setItems(items)).toBe(true)
     expect(atlasMock.create).toHaveBeenCalledWith(items, 64, expect.any(Object))
+    renderer.dispose()
+  })
+
+  it('accepts a custom Atlas backend without changing the Cards render pipeline', async () => {
+    const currentAtlas = atlas(2)
+    const backend: CardAtlasBackend = {
+      prepare: vi.fn(async () => {}),
+      build: vi.fn(async () => ({ atlas: currentAtlas.result })),
+      patch: vi.fn(),
+      applyPatch: vi.fn(() => 0),
+      advanceUploads: vi.fn((_, nextLayer) => [nextLayer, false] as const),
+      clearPatchQueue: vi.fn(),
+      dispose: vi.fn(),
+    }
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene, { atlasBackend: backend })
+    const items = [{ id: 'a' }, { id: 'b' }]
+
+    await expect(renderer.setItems(items)).resolves.toBe(true)
+
+    expect(backend.prepare).toHaveBeenCalledOnce()
+    expect(backend.build).toHaveBeenCalledWith(items, 64, expect.any(AbortSignal))
+    expect(atlasMock.create).not.toHaveBeenCalled()
+    expect(scene.children).toHaveLength(1)
+    renderer.dispose()
+    expect(backend.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('prevents a slow custom backend prepare from publishing stale items', async () => {
+    const prepare = deferred<void>()
+    const staleAtlas = atlas(1)
+    const latestAtlas = atlas(2)
+    const backend: CardAtlasBackend = {
+      prepare: vi.fn(() => prepare.promise),
+      build: vi.fn(async (items) => ({
+        atlas: items.length === 1 ? staleAtlas.result : latestAtlas.result,
+      })),
+      patch: vi.fn(),
+      applyPatch: vi.fn(() => 0),
+      advanceUploads: vi.fn((_, nextLayer) => [nextLayer, false] as const),
+      clearPatchQueue: vi.fn(),
+      dispose: vi.fn(),
+    }
+    const renderer = new InstancedCardRenderer(new Scene(), { atlasBackend: backend })
+    const stale = renderer.setItems([{ id: 'stale' }])
+    const latestItems = [{ id: 'latest-a' }, { id: 'latest-b' }]
+    const latest = renderer.setItems(latestItems)
+
+    prepare.resolve()
+    await expect(latest).resolves.toBe(true)
+    await expect(stale).resolves.toBe(false)
+
+    expect(backend.prepare).toHaveBeenCalledOnce()
+    expect(renderer.getStats().instanceCount).toBe(2)
+    expect(staleAtlas.dispose).toHaveBeenCalledOnce()
     renderer.dispose()
   })
 
@@ -693,6 +749,111 @@ describe('InstancedCardRenderer item loading', () => {
       activeCount: 1,
       payload: null,
     })).resolves.toBe(false)
+    renderer.dispose()
+  })
+
+  it('runs custom Program runtime prepare, restore, update, and disposal hooks', async () => {
+    const currentAtlas = atlas(1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const prepare = vi.fn()
+    const restore = vi.fn()
+    const activate = vi.fn()
+    const update = vi.fn()
+    const deactivate = vi.fn()
+    const dispose = vi.fn()
+    const program = defineCardEffectProgram<null>({
+      kind: 'runtime-hooks',
+      prefix: 'program_runtime_',
+      uniforms: [{ name: 'program_runtime_time', type: 'float' }],
+      clockUniform: 'program_runtime_time',
+      vertexBody: 'center.x += program_runtime_time;',
+      createRuntime: () => ({
+        prepare,
+        restore,
+        activate,
+        update,
+        deactivate,
+        dispose,
+      }),
+      upload() {},
+    })
+    const renderer = new InstancedCardRenderer(new Scene(), {
+      effectPrograms: { 'runtime-hooks': program },
+    })
+    await renderer.setItems([{ id: 'a' }])
+
+    await expect(renderer.enableEffect({
+      kind: 'runtime-hooks',
+      activeCount: 1,
+      payload: null,
+    })).resolves.toBe(true)
+    renderer.setEffectTime(2)
+    renderer.refreshResources()
+    await expect(renderer.enableEffect({
+      kind: 'runtime-hooks',
+      activeCount: 1,
+      payload: null,
+    })).resolves.toBe(true)
+    renderer.disableEffect()
+    renderer.dispose()
+
+    expect(prepare).toHaveBeenCalledOnce()
+    expect(restore).toHaveBeenCalledOnce()
+    expect(activate).toHaveBeenCalledTimes(2)
+    expect(update).toHaveBeenCalledWith(2)
+    expect(deactivate).toHaveBeenCalledOnce()
+    expect(dispose).toHaveBeenCalledOnce()
+  })
+
+  it('aborts and disposes a slow Program runtime superseded by a newer effect', async () => {
+    const currentAtlas = atlas(1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const gate = deferred<void>()
+    let slowSignal: AbortSignal | null = null
+    const slowDispose = vi.fn()
+    const slow = defineCardEffectProgram<null>({
+      kind: 'slow-runtime',
+      prefix: 'program_slow_runtime_',
+      vertexBody: 'center.x += 0.0;',
+      createRuntime: () => ({
+        async prepare(context) {
+          slowSignal = context.signal
+          await gate.promise
+        },
+        dispose: slowDispose,
+      }),
+      upload() {},
+    })
+    const fast = defineCardEffectProgram<null>({
+      kind: 'fast-runtime',
+      prefix: 'program_fast_runtime_',
+      vertexBody: 'center.x += 1.0;',
+      upload() {},
+    })
+    const renderer = new InstancedCardRenderer(new Scene(), {
+      effectPrograms: {
+        'slow-runtime': slow,
+        'fast-runtime': fast,
+      },
+    })
+    await renderer.setItems([{ id: 'a' }])
+
+    const pending = renderer.enableEffect({
+      kind: 'slow-runtime',
+      activeCount: 1,
+      payload: null,
+    })
+    await vi.waitFor(() => expect(slowSignal).not.toBeNull())
+    await expect(renderer.enableEffect({
+      kind: 'fast-runtime',
+      activeCount: 1,
+      payload: null,
+    })).resolves.toBe(true)
+    gate.resolve()
+
+    await expect(pending).resolves.toBe(false)
+    expect((slowSignal as AbortSignal | null)?.aborted).toBe(true)
+    expect(slowDispose).toHaveBeenCalledOnce()
     renderer.dispose()
   })
 

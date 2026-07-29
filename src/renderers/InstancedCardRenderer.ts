@@ -10,14 +10,12 @@ import {
 import type { Texture } from 'three'
 import type { MotionItem, Transform } from '../core/types.js'
 import type { StreamingEffectGpuData } from '../effects/types.js'
-import { createCardProgramMaterial } from './CardProgramMaterial.js'
 import type {
   CardEffectProgram,
-  CardEffectProgramLoader,
   CardMotionProgram,
   CardProgramUploadContext,
 } from './cards/programs.js'
-import { CardProgramLoader } from './cards/CardProgramLoader.js'
+import type { CardEffectProgramLoader } from './cards/programs.js'
 import {
   copyAttribute,
   createCardGeometry,
@@ -27,10 +25,16 @@ import {
   resolveBufferCapacity,
 } from './cards/CardGeometry.js'
 import { CardAtlasMetrics } from './cards/CardAtlasMetrics.js'
+import { CardMaterialRuntime } from './cards/CardMaterialRuntime.js'
+import {
+  type CardAtlasBackend,
+  DefaultCardAtlasBackend,
+} from './cards/CardAtlasBackend.js'
+import {
+  ResourceScheduler,
+} from '../runtime/ResourceScheduler.js'
 import type {
-  TextureAtlasImageCache,
   TextureAtlasOptions,
-  TextureAtlasPatch,
   TextureAtlasResult,
 } from './textureAtlas.js'
 import type {
@@ -50,12 +54,7 @@ export interface CardRendererOptions<TMeta = unknown> extends TextureAtlasOption
   prepareProgram?: MotionRendererFactoryContext['prepareProgram']
   motionProgram?: CardMotionProgram<TMeta>
   effectPrograms?: Readonly<Record<string, CardEffectProgramLoader>>
-}
-
-interface CardProgramRuntime {
-  program: CardEffectProgram
-  material: ShaderMaterial
-  timeUniform: { value: unknown } | null
+  atlasBackend?: CardAtlasBackend<TMeta>
 }
 
 const INITIAL_ARRAY_UPLOAD_BYTES = 3 * 1024 * 1024
@@ -67,17 +66,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private mesh: Mesh<InstancedBufferGeometry, ShaderMaterial> | null = null
   private instanceCapacity = 0
   private itemCount = 0
-  private material: ShaderMaterial | null = null
-  private baseMaterial: ShaderMaterial | null = null
-  private readonly programRuntimes = new Map<string, CardProgramRuntime>()
-  private readonly programLoader: CardProgramLoader
-  private effectGeneration = 0
-  private activeProgram: CardProgramRuntime | null = null
-  private configureArrayMaterial: ((material: ShaderMaterial) => void) | undefined
-  private programPrepareMs = 0
-  private programSwitches = 0
-  private programFailures = 0
-  private generation = 0
+  private readonly materialRuntime: CardMaterialRuntime<TMeta>
+  private readonly resourceScheduler: ResourceScheduler
+  private readonly atlasBackend: CardAtlasBackend<TMeta>
+  private atlasBackendReady: Promise<void> | null = null
   private itemFingerprints: string[] = []
   private fingerprintFullScans = 0
   private fingerprintPatchScans = 0
@@ -91,17 +83,21 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private attributeReuses = 0
   private readonly euler = new Euler()
   private readonly quaternion = new Quaternion()
-  private imageCache: TextureAtlasImageCache | null = null
-  private atlasApi: typeof import('./textureAtlas.js') | null = null
-  private atlasApiPromise: Promise<typeof import('./textureAtlas.js')> | null = null
-  private atlasAbortController: AbortController | null = null
   private disposed = false
 
   constructor(
     private readonly root: Object3D,
     private readonly atlasOptions: CardRendererOptions<TMeta> = {},
   ) {
-    this.programLoader = new CardProgramLoader(atlasOptions.effectPrograms)
+    this.resourceScheduler = new ResourceScheduler()
+    this.atlasBackend = atlasOptions.atlasBackend
+      ?? new DefaultCardAtlasBackend(atlasOptions)
+    this.materialRuntime = new CardMaterialRuntime({
+      scheduler: this.resourceScheduler,
+      motionProgram: atlasOptions.motionProgram,
+      effectPrograms: atlasOptions.effectPrograms,
+      prepareProgram: atlasOptions.prepareProgram,
+    })
     const aspectRatio = resolveAspectRatio(atlasOptions.aspectRatio)
     this.descriptor = {
       itemBounds: {
@@ -130,7 +126,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   }
 
   async setItems(items: readonly MotionItem<TMeta>[]): Promise<boolean> {
-    const atlasApi = await this.loadAtlasApi()
+    await this.prepareAtlasBackend()
     if (this.disposed) return false
     const fingerprints = createItemFingerprints(items, this.atlasOptions)
     this.fingerprintFullScans += 1
@@ -138,60 +134,48 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     if (
       this.mesh
       && equalFingerprints(fingerprints, this.itemFingerprints)
-      && !this.atlasAbortController
+      && !this.resourceScheduler.isPending('cards-content')
     ) return true
-    const { controller, generation, options } = this.beginAtlasOperation(atlasApi)
-    let atlas: TextureAtlasResult
-    try {
-      atlas = await atlasApi.createTextureAtlas(
+    const result = await this.resourceScheduler.scheduleLatest('cards-content', {
+      prepare: (signal) => this.atlasBackend.build(
         items,
         resolveAtlasResolution(
           this.atlasOptions.cellSize,
           items.length,
           Boolean(this.atlasOptions.cardContent || this.atlasOptions.drawCard),
         ),
-        options,
-      )
-    } catch (error) {
-      if (generation !== this.generation || isAbortError(error)) return false
-      throw error
-    } finally {
-      if (this.atlasAbortController === controller) this.atlasAbortController = null
-    }
-    if (generation !== this.generation) {
-      this.atlasMetrics.discardBuild()
-      atlas.texture.dispose()
-      return false
-    }
+        signal,
+      ),
+      commit: ({ atlas, configureMaterial }) =>
+        this.commitAtlasBuild(items, fingerprints, atlas, configureMaterial),
+      discard: ({ atlas }) => {
+        this.atlasMetrics.discardBuild()
+        atlas.texture.dispose()
+      },
+    })
+    return result.status === 'committed' && result.value
+  }
+
+  private commitAtlasBuild(
+    items: readonly MotionItem<TMeta>[],
+    fingerprints: string[],
+    atlas: TextureAtlasResult,
+    configureArrayMaterial: ((material: ShaderMaterial) => void) | undefined,
+  ): boolean {
+    if (this.disposed) return false
     const nextCapacity = resolveBufferCapacity(this.instanceCapacity, items.length)
     if (
       this.mesh
-      && this.material
       && nextCapacity === this.instanceCapacity
       && atlas.mode === this.atlas?.mode
     ) {
       this.replaceAtlas(atlas, items.length)
-      this.uploadMotionProgram(items)
+      this.materialRuntime.uploadMotion(items)
       this.prewarmAtlas(atlas)
       this.itemFingerprints = fingerprints
       this.recordAtlasBuild(atlas)
       this.attributeReuses += 1
       return true
-    }
-    let configureArrayMaterial: ((material: ShaderMaterial) => void) | undefined
-    try {
-      if (atlas.mode === 'array') {
-        configureArrayMaterial = (await import('./ArrayCardShader.js')).configureArrayCardMaterial
-      }
-    } catch (error) {
-      atlas.texture.dispose()
-      if (generation !== this.generation) return false
-      throw error
-    }
-    if (generation !== this.generation) {
-      this.atlasMetrics.discardBuild()
-      atlas.texture.dispose()
-      return false
     }
     this.disposeCurrent()
     this.prepareAtlasUploads(atlas)
@@ -206,22 +190,25 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.instanceCapacity = nextCapacity
     this.ensureProgramAttributes(geometry, this.atlasOptions.motionProgram)
     const arrayAtlas = atlas.mode === 'array'
-    this.baseMaterial = createCardProgramMaterial(
+    const material = this.materialRuntime.createBaseMaterial(
       atlas.texture,
       arrayAtlas ? this.nextLayer : 1_000_000,
-      this.atlasOptions.motionProgram,
+      configureArrayMaterial,
     )
-    this.configureArrayMaterial = configureArrayMaterial
-    configureArrayMaterial?.(this.baseMaterial)
-    this.material = this.baseMaterial
-    this.mesh = new Mesh(geometry, this.material)
+    this.mesh = new Mesh(geometry, material)
+    this.materialRuntime.bind({
+      mesh: this.mesh,
+      ensureAttributes: (program) => this.ensureProgramAttributes(geometry, program),
+      createUploadContext: (program, targetMaterial) =>
+        this.createUploadContext(program, targetMaterial),
+    })
     this.itemCount = items.length
     this.geometryBuilds += 1
     this.mesh.frustumCulled = false
     this.root.add(this.mesh)
     this.itemFingerprints = fingerprints
     this.atlas = atlas
-    this.uploadMotionProgram(items)
+    this.materialRuntime.uploadMotion(items)
     this.recordAtlasBuild(atlas)
     return true
   }
@@ -242,38 +229,30 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.fingerprintItemsScanned += fingerprints.length
     if (
       fingerprints.every(({ index, value }) => this.itemFingerprints[index] === value)
-      && !this.atlasAbortController
+      && !this.resourceScheduler.isPending('cards-content')
     ) return true
-    const atlasApi = await this.loadAtlasApi()
+    const baseAtlas = this.atlas
+    await this.prepareAtlasBackend()
     if (this.disposed) return false
-    const { controller, generation, options } = this.beginAtlasOperation(atlasApi)
-    let patch: TextureAtlasPatch
-    try {
-      patch = await atlasApi.createTextureAtlasPatch(items, indices, this.atlas.cellSize, options)
-    } catch (error) {
-      if (generation !== this.generation || isAbortError(error)) return false
-      throw error
-    } finally {
-      if (this.atlasAbortController === controller) this.atlasAbortController = null
-    }
-    if (generation !== this.generation || !this.atlas) {
-      this.atlasMetrics.discardPatch()
-      return false
-    }
-    const atlas = this.atlas
-    const metrics = patch.metrics
-    const arrayAtlas = atlas.mode === 'array'
-    const applyMs = atlasApi.applyTextureAtlasPatch(
-      atlas,
-      patch,
-      arrayAtlas ? this.nextLayer : undefined,
-    )
-    this.atlasMetrics.recordPatch(metrics, applyMs)
-    fingerprints.forEach(({ index, value }) => {
-      this.itemFingerprints[index] = value
+    const result = await this.resourceScheduler.scheduleLatest('cards-content', {
+      prepare: (signal) => this.atlasBackend.patch(items, indices, baseAtlas, signal),
+      commit: (patch) => {
+        if (this.disposed || this.atlas !== baseAtlas) return false
+        const applyMs = this.atlasBackend.applyPatch(
+          baseAtlas,
+          patch,
+          baseAtlas.mode === 'array' ? this.nextLayer : undefined,
+        )
+        this.atlasMetrics.recordPatch(patch.metrics, applyMs)
+        fingerprints.forEach(({ index, value }) => {
+          this.itemFingerprints[index] = value
+        })
+        this.materialRuntime.uploadMotion(items)
+        return true
+      },
+      discard: () => this.atlasMetrics.discardPatch(),
     })
-    this.uploadMotionProgram(items)
-    return true
+    return result.status === 'committed' && result.value
   }
 
   setTransforms(transforms: readonly Transform[]): void {
@@ -351,83 +330,15 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   }
 
   async enableEffect(data: StreamingEffectGpuData): Promise<boolean> {
-    if (!this.mesh || !this.baseMaterial) return false
-    const generation = ++this.effectGeneration
-    let temporaryRuntime: CardProgramRuntime | null = null
-    let createdRuntimeKind: string | null = null
-    try {
-      const program = await this.loadEffectProgram(data.kind)
-      if (!program || generation !== this.effectGeneration || !this.mesh) return false
-      let runtime = this.programRuntimes.get(program.kind)
-      if (!runtime) {
-        const preparedAt = performance.now()
-        this.ensureProgramAttributes(this.mesh.geometry, program)
-        const material = createCardProgramMaterial(
-          this.atlas!.texture,
-          this.atlas?.mode === 'array' ? this.nextLayer : 1_000_000,
-          program,
-        )
-        this.configureArrayMaterial?.(material)
-        temporaryRuntime = {
-          program,
-          material,
-          timeUniform: resolveProgramTimeUniform(program, material),
-        }
-        try {
-          if (this.atlasOptions.prepareProgram) {
-            await this.atlasOptions.prepareProgram(material, this.mesh.geometry)
-          }
-        } catch (error) {
-          material.dispose()
-          temporaryRuntime = null
-          throw error
-        }
-        if (generation !== this.effectGeneration) {
-          material.dispose()
-          temporaryRuntime = null
-          return false
-        }
-        runtime = temporaryRuntime
-        this.programRuntimes.set(program.kind, runtime)
-        createdRuntimeKind = program.kind
-        temporaryRuntime = null
-        this.programPrepareMs += performance.now() - preparedAt
-      }
-      if (generation !== this.effectGeneration) return false
-      this.syncCommonUniforms(runtime.material)
-      program.upload(this.createUploadContext(program, runtime.material), data.payload)
-      if (generation !== this.effectGeneration) return false
-      this.activeProgram = runtime
-      this.material = runtime.material
-      this.mesh.material = runtime.material
-      this.mesh.geometry.instanceCount = Math.min(this.itemCount, data.activeCount)
-      this.programSwitches += 1
-      return true
-    } catch (error) {
-      if (temporaryRuntime) temporaryRuntime.material.dispose()
-      if (createdRuntimeKind) {
-        this.programRuntimes.get(createdRuntimeKind)?.material.dispose()
-        this.programRuntimes.delete(createdRuntimeKind)
-      }
-      this.programFailures += 1
-      if (generation === this.effectGeneration) this.disableEffect()
-      throw error
-    }
+    return this.materialRuntime.enableEffect(data, this.itemCount)
   }
 
   disableEffect(): void {
-    this.effectGeneration += 1
-    this.activeProgram = null
-    if (this.mesh && this.baseMaterial) {
-      this.material = this.baseMaterial
-      this.mesh.material = this.baseMaterial
-      this.mesh.geometry.instanceCount = this.itemCount
-    }
+    this.materialRuntime.disableEffect(this.itemCount)
   }
 
   setEffectTime(elapsedSeconds: number): void {
-    const timeUniform = this.activeProgram?.timeUniform
-    if (timeUniform) timeUniform.value = elapsedSeconds
+    this.materialRuntime.setEffectTime(elapsedSeconds)
   }
 
   setVisibleRatio(ratio: number): void {
@@ -443,6 +354,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
 
   refreshResources(): void {
     if (this.atlas) {
+      this.materialRuntime.markResourcesLost()
       this.atlas.initialized = false
       this.prepareAtlasUploads(this.atlas)
       this.setCommonUniform(
@@ -456,6 +368,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   }
 
   getStats(): MotionRendererStats {
+    const resourceStats = this.resourceScheduler.getStats()
     return {
       instanceCount: this.mesh ? this.itemCount : 0,
       submittedInstanceCount: this.mesh?.geometry.instanceCount ?? 0,
@@ -476,12 +389,12 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
         capacity: this.mesh ? this.instanceCapacity : 0,
         geometryBuilds: this.geometryBuilds,
         attributeReuses: this.attributeReuses,
-        programLoads: this.programLoader.getLoadCount(),
-        programLoadMs: this.programLoader.getLoadMs(),
-        programPrepareMs: this.programPrepareMs,
-        programSwitches: this.programSwitches,
-        programFailures: this.programFailures,
-        cachedPrograms: this.programRuntimes.size,
+        ...this.materialRuntime.getStats(),
+        resourceTasks: resourceStats.scheduled,
+        resourceCommits: resourceStats.committed,
+        resourceSuperseded: resourceStats.superseded,
+        resourceFailures: resourceStats.failures,
+        resourcePrepareMs: resourceStats.prepareMs,
         atlasResolution: this.atlas?.cellSize ?? 0,
         atlasMipmaps: this.atlas?.mipmaps ? 1 : 0,
         ...this.atlasOptions.cardContent?.getMetrics?.(),
@@ -492,23 +405,19 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
-    this.generation += 1
-    this.effectGeneration += 1
-    this.atlasAbortController?.abort()
-    this.atlasAbortController = null
-    this.imageCache?.clear()
+    this.resourceScheduler.dispose()
+    this.atlasBackend.dispose()
     this.disposeCurrent()
-    this.programLoader.clear()
+    this.materialRuntime.dispose()
   }
 
   private replaceAtlas(atlas: TextureAtlasResult, itemCount: number): void {
-    if (!this.mesh || !this.material) return
+    if (!this.mesh) return
     this.atlas?.texture.dispose()
     this.atlas = atlas
-    this.setCommonUniform('atlas', atlas.texture)
     this.prepareAtlasUploads(atlas)
-    this.setCommonUniform(
-      'uLayers',
+    this.materialRuntime.replaceAtlas(
+      atlas.texture,
       atlas.mode === 'array' ? this.nextLayer : 1_000_000,
     )
     copyAttribute(
@@ -543,7 +452,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private prepareAtlasUploads(atlas: TextureAtlasResult): void {
     this.nextLayer = 0
     this.skipUploadFrames = 0
-    this.atlasApi?.clearTextureAtlasPatchQueue(atlas)
+    this.atlasBackend.clearPatchQueue(atlas)
     if (atlas.mode !== 'array' || !('layerUpdates' in atlas.texture)) return
     atlas.texture.layerUpdates.clear()
     const initialLayers = Math.min(
@@ -562,14 +471,13 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     if (
       !atlas
       || atlas.mode !== 'array'
-      || !this.material
       || !('layerUpdates' in atlas.texture)
     ) return
     if (this.skipUploadFrames > 0) {
       this.skipUploadFrames -= 1
       return
     }
-    const [end, uploaded] = this.atlasApi!.advanceTextureAtlasUploads(
+    const [end, uploaded] = this.atlasBackend.advanceUploads(
       atlas,
       this.nextLayer,
       this.layersPerUpload(atlas, FRAME_ARRAY_UPLOAD_BYTES),
@@ -583,58 +491,18 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     return Math.max(1, Math.floor(byteBudget / (atlas.width * atlas.height * 4)))
   }
 
-  private beginAtlasOperation(atlasApi: typeof import('./textureAtlas.js')): {
-    controller: AbortController
-    generation: number
-    options: TextureAtlasOptions<TMeta>
-  } {
-    this.atlasAbortController?.abort()
-    this.imageCache ??= new atlasApi.TextureAtlasImageCache(
-      normalizeImageCacheSize(this.atlasOptions.imageCacheSize),
-    )
-    const controller = new AbortController()
-    this.atlasAbortController = controller
-    return {
-      controller,
-      generation: ++this.generation,
-      options: {
-        ...this.atlasOptions,
-        imageCache: this.imageCache,
-        signal: controller.signal,
-      },
-    }
-  }
-
-  private async loadAtlasApi(): Promise<typeof import('./textureAtlas.js')> {
-    if (this.atlasApi) return this.atlasApi
-    this.atlasApiPromise ??= import('./textureAtlas.js')
-    this.atlasApi = await this.atlasApiPromise
-    return this.atlasApi
-  }
-
   private disposeCurrent(): void {
     if (!this.mesh) return
-    this.effectGeneration += 1
     this.root.remove(this.mesh)
     this.mesh.geometry.dispose()
-    const texture = this.material?.uniforms.atlas?.value as { dispose?: () => void } | undefined
-    texture?.dispose?.()
-    this.baseMaterial?.dispose()
-    this.programRuntimes.forEach(({ material }) => material.dispose())
-    this.programRuntimes.clear()
+    this.atlas?.texture.dispose()
+    this.materialRuntime.disposeCurrent()
     this.mesh = null
     this.instanceCapacity = 0
     this.itemCount = 0
-    this.material = null
-    this.baseMaterial = null
-    this.activeProgram = null
     this.itemFingerprints = []
     this.atlasMetrics.resetTexture()
     this.atlas = null
-  }
-
-  private async loadEffectProgram(kind: string): Promise<CardEffectProgram | null> {
-    return this.programLoader.load(kind)
   }
 
   private createUploadContext(
@@ -695,39 +563,16 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     }
   }
 
-  private uploadMotionProgram(items: readonly MotionItem<TMeta>[]): void {
-    const program = this.atlasOptions.motionProgram
-    if (!program?.upload || !this.mesh || !this.baseMaterial) return
-    program.upload(this.createUploadContext(program, this.baseMaterial), items)
-  }
-
-  private syncCommonUniforms(target: ShaderMaterial): void {
-    if (!this.baseMaterial) return
-    for (const name of [
-      'atlas',
-      'progress',
-      'fromBillboard',
-      'toBillboard',
-      'fromHideBackHemisphere',
-      'toHideBackHemisphere',
-      'fromHemisphereEdgeFade',
-      'toHemisphereEdgeFade',
-      'visibleRatio',
-      'hoverIndex',
-      'uLayers',
-    ]) {
-      target.uniforms[name]!.value = this.baseMaterial.uniforms[name]!.value
-    }
-  }
-
   private setCommonUniform(name: string, value: unknown): void {
-    const baseMaterial = this.baseMaterial
-    if (!baseMaterial) return
-    baseMaterial.uniforms[name]!.value = value
-    const activeMaterial = this.activeProgram?.material
-    if (activeMaterial && activeMaterial !== baseMaterial) {
-      activeMaterial.uniforms[name]!.value = value
-    }
+    this.materialRuntime.setCommonUniform(name, value)
+  }
+
+  private prepareAtlasBackend(): Promise<void> {
+    this.atlasBackendReady ??= this.atlasBackend.prepare().catch((error) => {
+      this.atlasBackendReady = null
+      throw error
+    })
+    return this.atlasBackendReady
   }
 
   private writeTransform(
@@ -750,10 +595,6 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   }
 }
 
-function normalizeImageCacheSize(value: number | undefined): number {
-  return Math.min(1024, Math.max(0, Math.floor(Number.isFinite(value) ? value as number : 128)))
-}
-
 function resolveAtlasResolution(
   value: number | 'auto' | undefined,
   itemCount: number,
@@ -762,19 +603,6 @@ function resolveAtlasResolution(
   if (typeof value === 'number') return Number.isFinite(value) ? value : 64
   if (value === undefined && customContent) return 64
   return itemCount > 1024 ? 48 : 64
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError'
-}
-
-function resolveProgramTimeUniform(
-  program: CardEffectProgram,
-  material: ShaderMaterial,
-): { value: unknown } | null {
-  return program.clockUniform
-    ? material.uniforms[program.clockUniform] ?? null
-    : null
 }
 
 function createItemFingerprints<TMeta>(

@@ -44,6 +44,9 @@
 - 可覆盖的质量 Profile 与自适应采样策略
 - 类型化多订阅 Stage 事件，支持框架适配器、调试面板和业务同时监听
 - Renderer 特效能力协商，自定义 Renderer 可定义自己的 GPU 特效 key
+- Layout `calculateInto()` 与 SoA `TransformBuffer`，为自定义布局复用生成阶段内存
+- 可替换 Cards Atlas backend，以及可管理异步资源生命周期的 Effect Program runtime
+- Extension 渲染前后钩子、逐扩展 update 预算和自动节流诊断
 
 源码仓库为 [itagan/spatial-motion](https://github.com/itagan/spatial-motion)。包名为 `@itagan/spatial-motion`；源码已推进到 v1.15.0 交互与动画控制完善阶段，目前可从 GitHub 安装，暂不执行 npm 发布。
 
@@ -238,6 +241,7 @@ import { Mesh, MeshBasicMaterial, TorusGeometry } from 'three'
 const extension: StageExtension = {
   name: 'orbit-ring',
   order: 10,
+  updateBudgetMs: 4,
   mount({ root, camera, signal }) {
     const geometry = new TorusGeometry(6, 0.03, 8, 96)
     const material = new MeshBasicMaterial({ color: 0x67e8f9 })
@@ -248,6 +252,8 @@ const extension: StageExtension = {
   update({ elapsed }) {
     // elapsed 不包含 Stage 暂停或页面隐藏的时间
   },
+  beforeRender() {}, // 唯一 scene submission 之前
+  afterRender() {},  // 唯一 scene submission 之后
   resize({ width, height, pixelRatio }) {},
   qualityChange(quality) {},
   reducedMotionChange(reducedMotion) {},
@@ -266,7 +272,7 @@ handle.remove() // 幂等；同时 abort signal、移除隔离 Group 并 dispose
 
 每个扩展只获得独立 `Group`、只读相机引用和取消信号。Stage 继续独占场景渲染循环；扩展不能访问内部卡片 Mesh 或 WebGLRenderer。`update(frame)` 的只读 frame 对象会按扩展复用，不应保存或修改。`extensionerror` 事件会收到生命周期错误，故障扩展会被隔离移除，其他扩展与卡片渲染继续运行。GSAP 等库应仅驱动扩展自己的对象，并通过 `update({ elapsed })` 对齐 Stage 时钟；核心包不依赖任何动画库。
 
-`stage.getExtensionStats()` 按 `order` 和挂载顺序返回活动扩展，并附带最近 20 个已释放扩展的纯数据快照。重复名称通过稳定 `id` 区分；诊断包括 enabled、update 次数、平均/P95/P99/最大耗时、超过 2ms 的慢帧、错误次数和最近错误文本。
+`stage.getExtensionStats()` 按 `order` 和挂载顺序返回活动扩展，并附带最近 20 个已释放扩展的纯数据快照。重复名称通过稳定 `id` 区分；诊断包括 enabled、update 与 render hook 耗时、预算超限/节流帧、慢帧、错误次数和最近错误文本。`updateBudgetMs` 默认 4ms，连续三帧超限会跳过一帧并在恢复时累计 delta。
 
 响应式平面、低动态偏好与悬停高亮：
 

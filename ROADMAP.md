@@ -63,6 +63,10 @@
   资源抖动，稳定窗口后再压缩显存。
 - [x] **Cards Program**：布局运动与 GPU 特效使用受约束的可注册 Program；内置
   特效和 Atlas 引擎按需加载，自定义 Program 与外部 Extension 保持明确边界。
+- [x] **热路径编译与缓冲**：Renderer capability 构造期编译为稳定方法表；Layout
+  可直接写入 SoA TransformBuffer，内置高频布局复用容量。
+- [x] **资源与渲染扩展边界**：Atlas/Program 使用可取消 latest-wins 调度，Cards
+  支持替换 Atlas backend；Extension 提供单次提交两侧钩子和 update 预算节流。
 
 - [x] 建立可比较的 steady、cold-start、atlas-update 与 transition-stress 基准。
 - [x] 暴露 P50/P95/P99、长帧、CPU/提交、图集和图片加载指标。

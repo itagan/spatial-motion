@@ -23,6 +23,7 @@ interface ExtensionRecord {
   paused: boolean
   hasUpdated: boolean
   elapsed: number
+  pendingDelta: number
   frameContext: { elapsed: number; delta: number }
   updateCalls: number
   updateTotalMs: number
@@ -31,6 +32,14 @@ interface ExtensionRecord {
   updateSampleCount: number
   maximumUpdateMs: number
   slowFrames: number
+  updateBudgetMs: number
+  consecutiveOverBudget: number
+  throttleRemaining: number
+  overBudgetFrames: number
+  throttledFrames: number
+  renderCalls: number
+  renderTotalMs: number
+  maximumRenderHookMs: number
   errorCount: number
   lastError: string | null
 }
@@ -51,6 +60,7 @@ export class ExtensionHost {
   private readonly history: StageExtensionStats[] = []
   private sequence = 0
   private updateDurationMs = 0
+  private renderDurationMs = 0
 
   constructor(private readonly options: ExtensionHostOptions) {}
 
@@ -76,6 +86,7 @@ export class ExtensionHost {
       paused: false,
       hasUpdated: false,
       elapsed: 0,
+      pendingDelta: 0,
       frameContext: { elapsed: 0, delta: 0 },
       updateCalls: 0,
       updateTotalMs: 0,
@@ -84,6 +95,14 @@ export class ExtensionHost {
       updateSampleCount: 0,
       maximumUpdateMs: 0,
       slowFrames: 0,
+      updateBudgetMs: positiveBudget(extension.updateBudgetMs),
+      consecutiveOverBudget: 0,
+      throttleRemaining: 0,
+      overBudgetFrames: 0,
+      throttledFrames: 0,
+      renderCalls: 0,
+      renderTotalMs: 0,
+      maximumRenderHookMs: 0,
       errorCount: 0,
       lastError: null,
     }
@@ -163,10 +182,18 @@ export class ExtensionHost {
         continue
       }
       const extensionDelta = record.hasUpdated ? delta : 0
-      record.hasUpdated = true
       record.elapsed += extensionDelta
+      record.pendingDelta += extensionDelta
+      if (record.throttleRemaining > 0) {
+        record.throttleRemaining -= 1
+        record.throttledFrames += 1
+        index += 1
+        continue
+      }
+      record.hasUpdated = true
       record.frameContext.elapsed = record.elapsed
-      record.frameContext.delta = extensionDelta
+      record.frameContext.delta = record.pendingDelta
+      record.pendingDelta = 0
       const extensionStartedAt = performance.now()
       try {
         record.extension.update(record.frameContext)
@@ -180,6 +207,14 @@ export class ExtensionHost {
     this.updateDurationMs = performance.now() - startedAt
   }
 
+  beforeRender(): void {
+    this.renderDurationMs = this.runRenderHook('beforeRender')
+  }
+
+  afterRender(): void {
+    this.renderDurationMs += this.runRenderHook('afterRender')
+  }
+
   setPaused(paused: boolean): void {
     for (const record of this.extensions) this.syncPaused(record, paused)
   }
@@ -190,6 +225,10 @@ export class ExtensionHost {
 
   getUpdateDuration(): number {
     return this.updateDurationMs
+  }
+
+  getRenderDuration(): number {
+    return this.renderDurationMs
   }
 
   getStats(): StageExtensionStats[] {
@@ -206,6 +245,7 @@ export class ExtensionHost {
   private setEnabled(record: ExtensionRecord, enabled: boolean): void {
     if (!record.active || record.enabled === enabled) return
     record.enabled = enabled
+    record.pendingDelta = 0
     record.root.visible = enabled
     if (enabled && record.mounted && record.extension.resize) {
       try {
@@ -273,9 +313,45 @@ export class ExtensionHost {
     record.updateTotalMs += duration
     record.maximumUpdateMs = Math.max(record.maximumUpdateMs, duration)
     if (duration > SLOW_UPDATE_MS) record.slowFrames += 1
+    if (duration > record.updateBudgetMs) {
+      record.overBudgetFrames += 1
+      record.consecutiveOverBudget += 1
+      if (record.consecutiveOverBudget >= 3) {
+        record.consecutiveOverBudget = 0
+        record.throttleRemaining = 1
+      }
+    } else {
+      record.consecutiveOverBudget = 0
+    }
     record.updateSamples[record.updateSampleCursor] = duration
     record.updateSampleCursor = (record.updateSampleCursor + 1) % SAMPLE_LIMIT
     record.updateSampleCount = Math.min(SAMPLE_LIMIT, record.updateSampleCount + 1)
+  }
+
+  private runRenderHook(callbackName: 'beforeRender' | 'afterRender'): number {
+    const startedAt = performance.now()
+    let index = 0
+    while (index < this.extensions.length) {
+      const record = this.extensions[index]
+      const callback = record.extension[callbackName]
+      if (!record.active || !record.mounted || !record.enabled || !callback) {
+        index += 1
+        continue
+      }
+      const hookStartedAt = performance.now()
+      try {
+        callback.call(record.extension)
+      } catch (error) {
+        this.fail(record, error)
+      } finally {
+        const duration = Math.max(0, performance.now() - hookStartedAt)
+        record.renderCalls += 1
+        record.renderTotalMs += duration
+        record.maximumRenderHookMs = Math.max(record.maximumRenderHookMs, duration)
+      }
+      if (this.extensions[index] === record) index += 1
+    }
+    return performance.now() - startedAt
   }
 
   private recordError(record: ExtensionRecord, error: unknown): void {
@@ -349,6 +425,14 @@ function extensionStats(record: ExtensionRecord): StageExtensionStats {
     updateTimeP99: percentile(orderedSamples, 0.99),
     maximumUpdateMs: record.maximumUpdateMs,
     slowFrames: record.slowFrames,
+    updateBudgetMs: record.updateBudgetMs,
+    overBudgetFrames: record.overBudgetFrames,
+    throttledFrames: record.throttledFrames,
+    renderCalls: record.renderCalls,
+    averageRenderHookMs: record.renderCalls
+      ? record.renderTotalMs / record.renderCalls
+      : 0,
+    maximumRenderHookMs: record.maximumRenderHookMs,
     errorCount: record.errorCount,
     lastError: record.lastError,
   }
@@ -364,4 +448,8 @@ function percentile(orderedValues: number[], fraction: number): number {
     orderedValues.length - 1,
     Math.floor(orderedValues.length * fraction),
   )]
+}
+
+function positiveBudget(value: number | undefined): number {
+  return Number.isFinite(value) && (value ?? 0) > 0 ? value as number : 4
 }

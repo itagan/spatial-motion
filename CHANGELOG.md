@@ -18,6 +18,13 @@
   `contextLost` / `contextRestored` 生命周期。
 - Effect Program 使用显式 `clockUniform` 绑定 Stage 时钟；瞬时 chunk 加载失败不会
   永久污染缓存，后续激活可以重试。
+- Renderer capability 在构造期编译为稳定方法表，Stage 热路径不再逐帧探测可选能力。
+- Cards 新增 `CardMaterialRuntime`、可取消的 Effect Program runtime，以及可替换
+  `atlasBackend`；Atlas 与 Program 准备统一通过 latest-wins 资源调度提交。
+- Layout 新增 SoA `TransformBuffer` 与 `calculateInto()`；Grid/Helix 直接写入生成
+  缓冲，再由状态更新边界输出公共 Transform 快照。
+- Extension 新增确定性的 `beforeRender` / `afterRender` 和 `updateBudgetMs` 节流，
+  并报告 render hook、预算超限与节流指标。
 
 ### Added
 
@@ -62,8 +69,8 @@
 - 未发布事件 API 直接重构：删除 `MotionStageOptions` 的单回调字段和 `stage.off()`，
   统一使用 `stage.on()` 返回的取消订阅函数；仅需要 hover 事件时显式设置
   `hover: true`。
-- preserved-module 总量检查改为 170 KB anti-bundling sentinel，以容纳拆分后的内部
-  Host/Coordinator 模块；真实 root 40 KB、
+- anti-bundling 检查改为逐模块 64 KB 上限并继续验证 Three.js 外置，避免内部模块
+  拆分数量影响诊断；真实 root 40 KB、
   Core 16 KB、Cards 10 KB gzip、layout-only 8 KB 和 tarball 150 KB 为当前产品预算。
 - 发布构建改用 Terser 保持既有 40 KB gzip 预算；本地继续生成隐藏 JavaScript source map，但 npm tarball 不再携带 `.js.map`，类型声明和运行时导出不变。
 - 主库继续受 40 KB gzip 门禁约束，模板与 Points 入口分别限制为 12 KB；Cards `content` 与 `draw` 互斥。

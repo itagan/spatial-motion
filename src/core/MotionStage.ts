@@ -37,12 +37,15 @@ import { StageRenderHost } from './StageRenderHost.js'
 import { RendererStateCoordinator } from './RendererStateCoordinator.js'
 import { StageClock } from './StageClock.js'
 import {
-  assertMotionRenderer,
   countVisibleItems,
   normalizeRendererStats,
 } from './MotionRendererSupport.js'
 import { StageContentState } from './StageContentState.js'
 import { StageRotationController } from './StageRotationController.js'
+import {
+  compileRendererRuntime,
+  type CompiledRendererRuntime,
+} from './CompiledRendererRuntime.js'
 import { StageContentCoordinator } from './StageContentCoordinator.js'
 
 export interface MotionStageOptions<TMeta = unknown> {
@@ -146,6 +149,7 @@ export interface StagePerformanceStats extends PerformanceStats {
   pickOperations: number
   extensions: number
   extensionUpdateMs: number
+  extensionRenderMs: number
 }
 
 export interface StagePerformanceEnvironment {
@@ -182,7 +186,7 @@ export interface MotionStageEventMap<TMeta = unknown> {
 export class MotionStage<TMeta = unknown> {
   readonly ready: Promise<void>
   private readonly host: StageRenderHost
-  private readonly contentRenderer: MotionRenderer<TMeta>
+  private readonly contentRenderer: CompiledRendererRuntime<TMeta>
   private readonly interaction: InteractionController<TMeta>
   private readonly contentCoordinator: StageContentCoordinator<TMeta>
   private readonly motionController = new MotionController()
@@ -237,18 +241,19 @@ export class MotionStage<TMeta = unknown> {
       this.motionQuery?.addEventListener('change', this.handleMotionPreferenceChange)
     }
     let contentRenderer: MotionRenderer<TMeta> | null = null
+    let rendererRuntime: CompiledRendererRuntime<TMeta>
     try {
       contentRenderer = options.renderer(this.host.createRendererFactoryContext())
-      assertMotionRenderer(contentRenderer)
+      rendererRuntime = compileRendererRuntime(contentRenderer)
     } catch (error) {
       contentRenderer?.dispose?.()
       this.cleanupCanvasAndListeners()
       this.host.dispose()
       throw error
     }
-    this.contentRenderer = contentRenderer
+    this.contentRenderer = rendererRuntime
     this.effectController = new EffectController(
-      contentRenderer.capabilities.streamingEffects,
+      this.contentRenderer.streamingEffects,
       (event) => this.events.emit('effecterror', event),
     )
     const itemBounds = contentRenderer.descriptor.itemBounds
@@ -281,7 +286,7 @@ export class MotionStage<TMeta = unknown> {
       onContextLost: () => this.extensionHost.contextLost(),
       onContextRestored: () => {
         this.host.restoreBaseState()
-        this.contentRenderer.capabilities.resourceRecovery?.refreshResources()
+        this.contentRenderer.refreshResources()
         void this.effectController.restoreRendererState()
         this.extensionHost.contextRestored()
       },
@@ -308,7 +313,7 @@ export class MotionStage<TMeta = unknown> {
       hasScheduledFrame: () => this.runtime.hasScheduledFrame(),
       isDestroyed: () => this.destroyed,
       setHighlightIndex: (index) =>
-        this.contentRenderer.capabilities.highlight?.setHighlightIndex(index),
+        this.contentRenderer.setHighlightIndex(index),
       onItemClick: (item, index) => this.events.emit('itemclick', { item, index }),
       onItemHover: (item, index) => this.events.emit('itemhover', { item, index }),
       onItemFocus: (item, index) => this.events.emit('itemfocus', { item, index }),
@@ -434,7 +439,7 @@ export class MotionStage<TMeta = unknown> {
     const ease = options.easing ?? this.options.transition?.easing ?? easing.sineInOut
     if (duration === 0) {
       this.contentState.transforms = target
-      this.contentRenderer.capabilities.visual?.setVisualState({
+      this.contentRenderer.setVisualState({
         billboard: targetBillboard,
         hideBackHemisphere: targetHideBack,
         hemisphereEdgeFade: targetHemisphereEdgeFade,
@@ -445,7 +450,7 @@ export class MotionStage<TMeta = unknown> {
       return Promise.resolve(result)
     }
     this.contentRenderer.prepareTransition(from, target)
-    this.contentRenderer.capabilities.visual?.prepareVisualTransition(visualState, {
+    this.contentRenderer.prepareVisualTransition(visualState, {
       billboard: targetBillboard,
       hideBackHemisphere: targetHideBack,
       hemisphereEdgeFade: targetHemisphereEdgeFade,
@@ -673,7 +678,7 @@ export class MotionStage<TMeta = unknown> {
       this.contentRenderer.setTransforms(this.contentState.transforms)
     }
     const viewport = this.extensionViewport()
-    this.contentRenderer.capabilities.viewport?.resize(viewport)
+    this.contentRenderer.resize(viewport)
     this.extensionHost.resize(viewport)
   }
 
@@ -734,6 +739,7 @@ export class MotionStage<TMeta = unknown> {
       pickOperations: interactionStats.pickOperations,
       extensions: this.extensionHost.getCount(),
       extensionUpdateMs: this.extensionHost.getUpdateDuration(),
+      extensionRenderMs: this.extensionHost.getRenderDuration(),
     }
   }
 
@@ -808,13 +814,15 @@ export class MotionStage<TMeta = unknown> {
     if (nextQuality) this.applyQuality(nextQuality)
     this.rotation.advance(delta)
     this.effectController.advance(now)
-    this.contentRenderer.capabilities.frame?.update(delta)
+    this.contentRenderer.updateFrame(delta)
     this.interaction.flushPendingPointerMove()
     this.extensionHost.update(delta)
     this.frameCpuMs = performance.now() - frameCpuStartedAt
+    this.extensionHost.beforeRender()
     const renderStartedAt = performance.now()
     this.host.render()
     this.renderSubmitMs = performance.now() - renderStartedAt
+    this.extensionHost.afterRender()
   }
 
   private applyQuality(quality: QualityLevel): void {

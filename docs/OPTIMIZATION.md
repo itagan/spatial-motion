@@ -310,3 +310,30 @@ P95 18.55ms，两个 Extension 合计平均 update 0.037ms、无慢帧或错误�
 
 完整验证为 29 个测试文件、336 项测试。真实 root/Core/Cards-only 为
 36,558/15,644/8,859 bytes gzip，tarball 约 114 KiB；浏览器控制台无 warning/error。
+
+## 编译式 Renderer、可取消资源与 SoA Layout
+
+公开 Renderer capability 在 Stage 构造期校验并编译为固定方法表，帧循环不再探测
+可选能力。Cards 的 Material、Effect Program lifecycle 和 Atlas backend 分别由
+`CardMaterialRuntime`、`ResourceScheduler` 与 `CardAtlasBackend` 管理；同一资源
+channel 严格 latest-wins，backend prepare 共享一次可重试 Promise，避免完成顺序
+反转让旧数据晚于新 revision 发布。Layout 新增按容量增长的 SoA
+`TransformBuffer`，Grid/Helix 通过 `calculateInto()` 直接写入。
+
+Extension 增加唯一 scene submission 前后的 render hook，并以默认 4ms update 预算
+统计连续超限；连续三帧超限时跳过一帧，下一次 update 收到累计 delta。主体继续只
+使用 Stage 的一条 RAF，render hook 不获得 WebGLRenderer。
+
+2026-07-29 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2000 Cards/high
+3 秒回归：steady 为 60.00 FPS、P95/P99 17.70/17.70ms；transition-stress 为
+60.00 FPS、P95/P99 17.60/17.70ms并完成 4 次操作；interaction-stress 为
+60.00 FPS、P95/P99 18.50/18.60ms，751 次输入合并为 180 次拾取。三组主体均为
+1 Draw Call、0 个 24/33/50ms 长帧。Native Three.js 与 GSAP 双 Extension 稳态为
+59.99 FPS、P95/P99 18.60/18.70ms、4 Draw Calls、平均 Extension update
+0.037ms，无预算超限、节流或页面 error。四个内置 Effect Program 均完成真实
+WebGL 延迟加载与 Shader 激活。
+
+完整验证为 32 个测试文件、351 项测试（最终资源竞态补测后为 353 项）。真实
+root/Core/Cards-only 为 39,539/16,351/10,165 bytes gzip，layout-only 8,166 bytes，
+tarball 123,624 bytes；全部保持在 40/16/10 KB gzip、8 KB layout 与 150 KB
+tarball 硬预算内。

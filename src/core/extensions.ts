@@ -27,8 +27,14 @@ export interface StageExtension {
   readonly name?: string
   /** Lower values run first; equal values retain mount order. */
   readonly order?: number
+  /** CPU budget per update. Three consecutive overruns throttle one frame. Defaults to 4ms. */
+  readonly updateBudgetMs?: number
   mount(context: StageExtensionContext): void | Promise<void>
   update?(frame: StageFrameContext): void
+  /** Runs immediately before the Stage submits its scene, in extension order. */
+  beforeRender?(): void
+  /** Runs immediately after scene submission, in extension order. */
+  afterRender?(): void
   resize?(viewport: StageViewport): void
   qualityChange?(quality: QualityLevel): void
   reducedMotionChange?(reducedMotion: boolean): void
@@ -61,6 +67,12 @@ export interface StageExtensionStats {
   readonly updateTimeP99: number
   readonly maximumUpdateMs: number
   readonly slowFrames: number
+  readonly updateBudgetMs: number
+  readonly overBudgetFrames: number
+  readonly throttledFrames: number
+  readonly renderCalls: number
+  readonly averageRenderHookMs: number
+  readonly maximumRenderHookMs: number
   readonly errorCount: number
   readonly lastError: string | null
 }
