@@ -23,9 +23,12 @@ interface ExtensionRecord {
   paused: boolean
   hasUpdated: boolean
   elapsed: number
+  frameContext: { elapsed: number; delta: number }
   updateCalls: number
   updateTotalMs: number
-  updateSamples: number[]
+  updateSamples: Float64Array
+  updateSampleCursor: number
+  updateSampleCount: number
   maximumUpdateMs: number
   slowFrames: number
   errorCount: number
@@ -44,7 +47,7 @@ interface ExtensionHostOptions {
 }
 
 export class ExtensionHost {
-  private readonly extensions = new Set<ExtensionRecord>()
+  private readonly extensions: ExtensionRecord[] = []
   private readonly history: StageExtensionStats[] = []
   private sequence = 0
   private updateDurationMs = 0
@@ -73,15 +76,19 @@ export class ExtensionHost {
       paused: false,
       hasUpdated: false,
       elapsed: 0,
+      frameContext: { elapsed: 0, delta: 0 },
       updateCalls: 0,
       updateTotalMs: 0,
-      updateSamples: [],
+      updateSamples: new Float64Array(SAMPLE_LIMIT),
+      updateSampleCursor: 0,
+      updateSampleCount: 0,
       maximumUpdateMs: 0,
       slowFrames: 0,
       errorCount: 0,
       lastError: null,
     }
-    this.extensions.add(record)
+    this.extensions.push(record)
+    this.extensions.sort(compareRecords)
     this.options.parent.add(root)
     const context: StageExtensionContext = {
       root,
@@ -120,7 +127,7 @@ export class ExtensionHost {
   }
 
   resize(viewport: StageViewport): void {
-    for (const record of this.ordered()) {
+    for (const record of this.extensions) {
       if (!record.active || !record.mounted || !record.enabled || !record.extension.resize) continue
       try {
         record.extension.resize(viewport)
@@ -138,31 +145,47 @@ export class ExtensionHost {
     this.notify('reducedMotionChange', reducedMotion)
   }
 
+  contextLost(): void {
+    this.notifyContext('contextLost')
+  }
+
+  contextRestored(): void {
+    this.notifyContext('contextRestored')
+  }
+
   update(delta: number): void {
     const startedAt = performance.now()
-    for (const record of this.ordered()) {
-      if (!record.active || !record.mounted || !record.enabled || !record.extension.update) continue
+    let index = 0
+    while (index < this.extensions.length) {
+      const record = this.extensions[index]
+      if (!record.active || !record.mounted || !record.enabled || !record.extension.update) {
+        index += 1
+        continue
+      }
       const extensionDelta = record.hasUpdated ? delta : 0
       record.hasUpdated = true
       record.elapsed += extensionDelta
+      record.frameContext.elapsed = record.elapsed
+      record.frameContext.delta = extensionDelta
       const extensionStartedAt = performance.now()
       try {
-        record.extension.update({ elapsed: record.elapsed, delta: extensionDelta })
+        record.extension.update(record.frameContext)
       } catch (error) {
         this.fail(record, error)
       } finally {
         this.recordUpdate(record, performance.now() - extensionStartedAt)
       }
+      if (this.extensions[index] === record) index += 1
     }
     this.updateDurationMs = performance.now() - startedAt
   }
 
   setPaused(paused: boolean): void {
-    for (const record of this.ordered()) this.syncPaused(record, paused)
+    for (const record of this.extensions) this.syncPaused(record, paused)
   }
 
   getCount(): number {
-    return this.extensions.size
+    return this.extensions.length
   }
 
   getUpdateDuration(): number {
@@ -171,18 +194,13 @@ export class ExtensionHost {
 
   getStats(): StageExtensionStats[] {
     return [
-      ...this.ordered().map((record) => extensionStats(record)),
+      ...this.extensions.map((record) => extensionStats(record)),
       ...this.history.map((stats) => ({ ...stats })),
     ]
   }
 
   dispose(): void {
-    for (const record of this.ordered()) this.removeRecord(record)
-  }
-
-  private ordered(): ExtensionRecord[] {
-    return [...this.extensions].sort((left, right) =>
-      left.order - right.order || left.sequence - right.sequence)
+    while (this.extensions.length) this.removeRecord(this.extensions[0])
   }
 
   private setEnabled(record: ExtensionRecord, enabled: boolean): void {
@@ -218,7 +236,7 @@ export class ExtensionHost {
     callbackName: 'qualityChange' | 'reducedMotionChange',
     value: QualityLevel | boolean,
   ): void {
-    for (const record of this.ordered()) {
+    for (const record of this.extensions) {
       if (!record.active || !record.mounted) continue
       try {
         if (callbackName === 'qualityChange') {
@@ -232,14 +250,32 @@ export class ExtensionHost {
     }
   }
 
+  private notifyContext(callbackName: 'contextLost' | 'contextRestored'): void {
+    let index = 0
+    while (index < this.extensions.length) {
+      const record = this.extensions[index]
+      if (!record.active || !record.mounted) {
+        index += 1
+        continue
+      }
+      try {
+        record.extension[callbackName]?.()
+      } catch (error) {
+        this.fail(record, error)
+      }
+      if (this.extensions[index] === record) index += 1
+    }
+  }
+
   private recordUpdate(record: ExtensionRecord, durationMs: number): void {
     const duration = Math.max(0, durationMs)
     record.updateCalls += 1
     record.updateTotalMs += duration
     record.maximumUpdateMs = Math.max(record.maximumUpdateMs, duration)
     if (duration > SLOW_UPDATE_MS) record.slowFrames += 1
-    record.updateSamples.push(duration)
-    if (record.updateSamples.length > SAMPLE_LIMIT) record.updateSamples.shift()
+    record.updateSamples[record.updateSampleCursor] = duration
+    record.updateSampleCursor = (record.updateSampleCursor + 1) % SAMPLE_LIMIT
+    record.updateSampleCount = Math.min(SAMPLE_LIMIT, record.updateSampleCount + 1)
   }
 
   private recordError(record: ExtensionRecord, error: unknown): void {
@@ -257,7 +293,8 @@ export class ExtensionHost {
     if (!record.active) return
     record.active = false
     record.abortController.abort()
-    this.extensions.delete(record)
+    const index = this.extensions.indexOf(record)
+    if (index >= 0) this.extensions.splice(index, 1)
     record.root.removeFromParent()
     if (record.mounted) this.disposeRecord(record)
   }
@@ -297,7 +334,9 @@ const HISTORY_LIMIT = 20
 const SLOW_UPDATE_MS = 2
 
 function extensionStats(record: ExtensionRecord): StageExtensionStats {
-  const orderedSamples = [...record.updateSamples].sort((left, right) => left - right)
+  const orderedSamples = Array.from(
+    record.updateSamples.subarray(0, record.updateSampleCount),
+  ).sort((left, right) => left - right)
   return {
     id: record.id,
     name: record.extension.name ?? 'anonymous',
@@ -313,6 +352,10 @@ function extensionStats(record: ExtensionRecord): StageExtensionStats {
     errorCount: record.errorCount,
     lastError: record.lastError,
   }
+}
+
+function compareRecords(left: ExtensionRecord, right: ExtensionRecord): number {
+  return left.order - right.order || left.sequence - right.sequence
 }
 
 function percentile(orderedValues: number[], fraction: number): number {

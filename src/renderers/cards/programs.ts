@@ -45,6 +45,8 @@ export interface CardMotionProgram<TMeta = unknown> extends Readonly<CardProgram
 
 export interface CardEffectProgram<TPayload = unknown> extends Readonly<CardProgramDefinition> {
   readonly type: 'effect'
+  /** Optional float Uniform driven by the Stage effect clock. */
+  readonly clockUniform?: string
   upload(context: CardProgramUploadContext, payload: TPayload): void
 }
 
@@ -66,14 +68,31 @@ export function defineCardMotionProgram<TMeta = unknown>(
 
 export function defineCardEffectProgram<TPayload>(
   definition: CardProgramDefinition & {
+    clockUniform?: string
     upload(context: CardProgramUploadContext, payload: TPayload): void
   },
 ): CardEffectProgram<TPayload> {
   validateProgram(definition)
+  validateClockUniform(definition)
   if (typeof definition.upload !== 'function') {
     throw new TypeError('Card effect program upload must be a function')
   }
   return Object.freeze({ ...definition, type: 'effect' as const })
+}
+
+function validateClockUniform(
+  definition: CardProgramDefinition & { clockUniform?: string },
+): void {
+  if (definition.clockUniform === undefined) return
+  const uniform = definition.uniforms?.find(({ name }) => name === definition.clockUniform)
+  if (!uniform) {
+    throw new TypeError(
+      `Card effect clockUniform "${definition.clockUniform}" must reference a declared uniform`,
+    )
+  }
+  if (uniform.type !== 'float') {
+    throw new TypeError(`Card effect clockUniform "${definition.clockUniform}" must be a float`)
+  }
 }
 
 const reservedFields = new Set([

@@ -1,12 +1,6 @@
-interface StageRuntimeFrame {
-  now: number
-  rawFrameMs: number
-  deltaSeconds: number
-}
-
 interface StageRuntimeOptions {
   element: HTMLCanvasElement
-  onFrame: (frame: StageRuntimeFrame) => void
+  onFrame: (now: number, rawFrameMs: number, deltaSeconds: number) => void
   onPauseChange: (paused: boolean) => void
   onResume: (now: number) => void
   onContextLost: () => void
@@ -87,11 +81,7 @@ export class StageRuntime {
     this.frameId = 0
     const rawFrameMs = now - this.lastFrame || 0
     this.lastFrame = now
-    this.options.onFrame({
-      now,
-      rawFrameMs,
-      deltaSeconds: Math.min(0.05, rawFrameMs / 1000),
-    })
+    this.options.onFrame(now, rawFrameMs, Math.min(0.05, rawFrameMs / 1000))
     if (!this.destroyed && !this.isPaused()) {
       this.frameId = requestAnimationFrame(this.render)
     }

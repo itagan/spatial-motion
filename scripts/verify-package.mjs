@@ -333,6 +333,7 @@ try {
       prefix: 'program_consumer_',
       attributes: [{ name: 'program_consumer_phase', itemSize: 1 }],
       uniforms: [{ name: 'program_consumer_time', type: 'float' }],
+      clockUniform: 'program_consumer_time',
       vertexBody: 'center.y += sin(program_consumer_phase + program_consumer_time);',
       upload(context, payload) {
         context.setAttribute('program_consumer_phase', payload)

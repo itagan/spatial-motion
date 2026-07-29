@@ -17,12 +17,15 @@ describe('Cards programs', () => {
       kind: 'custom-wave',
       prefix: 'program_wave_',
       attributes: [{ name: 'program_wave_phase', itemSize: 1 }],
+      uniforms: [{ name: 'program_wave_time', type: 'float' }],
+      clockUniform: 'program_wave_time',
       vertexBody: 'center.x += program_wave_phase;',
       upload,
     })
 
     expect(motion.type).toBe('motion')
     expect(effect.type).toBe('effect')
+    expect(effect.clockUniform).toBe('program_wave_time')
     expect(Object.isFrozen(effect)).toBe(true)
   })
 
@@ -57,5 +60,25 @@ describe('Cards programs', () => {
     }),
   ])('rejects an invalid contract', (define) => {
     expect(define).toThrow(TypeError)
+  })
+
+  it.each([
+    {
+      clockUniform: 'program_clock_missing',
+      uniforms: [{ name: 'program_clock_time', type: 'float' as const }],
+    },
+    {
+      clockUniform: 'program_clock_value',
+      uniforms: [{ name: 'program_clock_value', type: 'vec2' as const }],
+    },
+  ])('rejects an invalid effect clock binding', ({ clockUniform, uniforms }) => {
+    expect(() => defineCardEffectProgram({
+      kind: 'clock',
+      prefix: 'program_clock_',
+      uniforms,
+      clockUniform,
+      vertexBody: 'center.x += 1.0;',
+      upload() {},
+    })).toThrow(TypeError)
   })
 })

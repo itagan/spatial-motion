@@ -1,11 +1,9 @@
 import {
-  DynamicDrawUsage,
   Euler,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
   Mesh,
   Object3D,
-  PlaneGeometry,
   Quaternion,
   ShaderMaterial,
 } from 'three'
@@ -19,6 +17,16 @@ import type {
   CardMotionProgram,
   CardProgramUploadContext,
 } from './cards/programs.js'
+import { CardProgramLoader } from './cards/CardProgramLoader.js'
+import {
+  copyAttribute,
+  createCardGeometry,
+  dynamicAttribute,
+  geometryByteLength,
+  markAttribute,
+  resolveBufferCapacity,
+} from './cards/CardGeometry.js'
+import { CardAtlasMetrics } from './cards/CardAtlasMetrics.js'
 import type {
   TextureAtlasImageCache,
   TextureAtlasOptions,
@@ -62,12 +70,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private material: ShaderMaterial | null = null
   private baseMaterial: ShaderMaterial | null = null
   private readonly programRuntimes = new Map<string, CardProgramRuntime>()
-  private readonly programLoads = new Map<string, Promise<CardEffectProgram | null>>()
+  private readonly programLoader: CardProgramLoader
   private effectGeneration = 0
   private activeProgram: CardProgramRuntime | null = null
   private configureArrayMaterial: ((material: ShaderMaterial) => void) | undefined
-  private programLoadCount = 0
-  private programLoadMs = 0
   private programPrepareMs = 0
   private programSwitches = 0
   private programFailures = 0
@@ -79,33 +85,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private nextLayer = 0
   private skipUploadFrames = 0
   private layerUploadFrames = 0
-  private textureBytes = 0
   private atlas: TextureAtlasResult | null = null
-  private atlasBuilds = 0
-  private atlasPatches = 0
-  private atlasDiscardedBuilds = 0
-  private atlasDiscardedPatches = 0
-  private atlasCellsUpdated = 0
-  private atlasBuildMs = 0
-  private atlasPatchMs = 0
-  private atlasDrawMs = 0
-  private atlasPrepareMs = 0
-  private atlasImageLoadWallMs = 0
-  private atlasCellRenderMs = 0
-  private atlasReadbackMs = 0
-  private atlasWorkerRenders = 0
-  private atlasImageBitmapDecodeMs = 0
-  private atlasTexturePrewarms = 0
-  private atlasTexturePrewarmMs = 0
-  private atlasTexturePrewarmFailures = 0
-  private atlasTexturePrewarmSkips = 0
-  private imageLoadMs = 0
-  private imageRequests = 0
-  private imageFailures = 0
-  private estimatedTextureUploadBytes = 0
+  private readonly atlasMetrics = new CardAtlasMetrics()
   private geometryBuilds = 0
   private attributeReuses = 0
-  private atlasUploadRanges = 0
   private readonly euler = new Euler()
   private readonly quaternion = new Quaternion()
   private imageCache: TextureAtlasImageCache | null = null
@@ -118,6 +101,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     private readonly root: Object3D,
     private readonly atlasOptions: CardRendererOptions<TMeta> = {},
   ) {
+    this.programLoader = new CardProgramLoader(atlasOptions.effectPrograms)
     const aspectRatio = resolveAspectRatio(atlasOptions.aspectRatio)
     this.descriptor = {
       itemBounds: {
@@ -175,7 +159,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       if (this.atlasAbortController === controller) this.atlasAbortController = null
     }
     if (generation !== this.generation) {
-      this.atlasDiscardedBuilds += 1
+      this.atlasMetrics.discardBuild()
       atlas.texture.dispose()
       return false
     }
@@ -205,7 +189,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       throw error
     }
     if (generation !== this.generation) {
-      this.atlasDiscardedBuilds += 1
+      this.atlasMetrics.discardBuild()
       atlas.texture.dispose()
       return false
     }
@@ -213,27 +197,12 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.prepareAtlasUploads(atlas)
     this.prewarmAtlas(atlas)
     const aspectRatio = resolveAspectRatio(this.atlasOptions.aspectRatio)
-    const plane = new PlaneGeometry(
-      aspectRatio >= 1 ? 1 : aspectRatio,
-      aspectRatio >= 1 ? 1 / aspectRatio : 1,
+    const geometry = createCardGeometry(
+      nextCapacity,
+      items.length,
+      aspectRatio,
+      atlas.rects,
     )
-    const geometry = new InstancedBufferGeometry()
-    geometry.index = plane.index
-    geometry.setAttribute('position', plane.getAttribute('position'))
-    geometry.setAttribute('uv', plane.getAttribute('uv'))
-    geometry.instanceCount = items.length
-    geometry.setAttribute('atlasRect', dynamicAttribute(new Float32Array(nextCapacity * 4), 4))
-    geometry.setAttribute('visibilityRank', new InstancedBufferAttribute(createVisibilityRanks(nextCapacity), 1))
-    geometry.setAttribute('itemIndex', new InstancedBufferAttribute(createItemIndices(nextCapacity), 1))
-    geometry.setAttribute('fromPosition', dynamicAttribute(new Float32Array(nextCapacity * 3), 3))
-    geometry.setAttribute('toPosition', dynamicAttribute(new Float32Array(nextCapacity * 3), 3))
-    geometry.setAttribute('fromQuaternion', dynamicAttribute(new Float32Array(nextCapacity * 4), 4))
-    geometry.setAttribute('toQuaternion', dynamicAttribute(new Float32Array(nextCapacity * 4), 4))
-    geometry.setAttribute('fromScale', dynamicAttribute(new Float32Array(nextCapacity), 1))
-    geometry.setAttribute('toScale', dynamicAttribute(new Float32Array(nextCapacity), 1))
-    geometry.setAttribute('fromOpacity', dynamicAttribute(new Float32Array(nextCapacity), 1))
-    geometry.setAttribute('toOpacity', dynamicAttribute(new Float32Array(nextCapacity), 1))
-    copyAttribute(geometry.getAttribute('atlasRect') as InstancedBufferAttribute, atlas.rects)
     this.instanceCapacity = nextCapacity
     this.ensureProgramAttributes(geometry, this.atlasOptions.motionProgram)
     const arrayAtlas = atlas.mode === 'array'
@@ -288,7 +257,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       if (this.atlasAbortController === controller) this.atlasAbortController = null
     }
     if (generation !== this.generation || !this.atlas) {
-      this.atlasDiscardedPatches += 1
+      this.atlasMetrics.discardPatch()
       return false
     }
     const atlas = this.atlas
@@ -299,18 +268,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       patch,
       arrayAtlas ? this.nextLayer : undefined,
     )
-    this.atlasPatches += 1
-    this.atlasCellsUpdated += metrics.cells
-    this.atlasPatchMs += metrics.renderMs + applyMs
-    this.atlasDrawMs += applyMs
-    this.atlasPrepareMs += metrics.prepareMs
-    this.atlasImageLoadWallMs += metrics.imageLoadWallMs
-    this.atlasCellRenderMs += metrics.cellRenderMs
-    this.imageLoadMs += metrics.imageLoadMs
-    this.imageRequests += metrics.imageRequests
-    this.imageFailures += metrics.imageFailures
-    this.estimatedTextureUploadBytes += metrics.uploadBytes
-    this.atlasUploadRanges += metrics.uploadRanges ?? 0
+    this.atlasMetrics.recordPatch(metrics, applyMs)
     fingerprints.forEach(({ index, value }) => {
       this.itemFingerprints[index] = value
     })
@@ -492,7 +450,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
         this.atlas.mode === 'array' ? this.nextLayer : 1_000_000,
       )
       this.atlas.texture.needsUpdate = true
-      this.estimatedTextureUploadBytes += this.atlas.data.byteLength
+      this.atlasMetrics.recordUpload(this.atlas.data.byteLength)
       this.prewarmAtlas(this.atlas)
     }
   }
@@ -501,27 +459,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     return {
       instanceCount: this.mesh ? this.itemCount : 0,
       submittedInstanceCount: this.mesh?.geometry.instanceCount ?? 0,
-      gpuBytes: this.textureBytes + geometryByteLength(this.mesh?.geometry),
+      gpuBytes: this.atlasMetrics.textureBytes + geometryByteLength(this.mesh?.geometry),
       metrics: {
-        textureBytes: this.textureBytes,
-        atlasBuilds: this.atlasBuilds,
-        atlasPatches: this.atlasPatches,
-        atlasDiscardedBuilds: this.atlasDiscardedBuilds,
-        atlasDiscardedPatches: this.atlasDiscardedPatches,
-        atlasCellsUpdated: this.atlasCellsUpdated,
-        atlasBuildMs: this.atlasBuildMs,
-        atlasPatchMs: this.atlasPatchMs,
-        atlasDrawMs: this.atlasDrawMs,
-        atlasPrepareMs: this.atlasPrepareMs,
-        atlasImageLoadWallMs: this.atlasImageLoadWallMs,
-        atlasCellRenderMs: this.atlasCellRenderMs,
-        atlasReadbackMs: this.atlasReadbackMs,
-        atlasWorkerRenders: this.atlasWorkerRenders,
-        atlasImageBitmapDecodeMs: this.atlasImageBitmapDecodeMs,
-        atlasTexturePrewarms: this.atlasTexturePrewarms,
-        atlasTexturePrewarmMs: this.atlasTexturePrewarmMs,
-        atlasTexturePrewarmFailures: this.atlasTexturePrewarmFailures,
-        atlasTexturePrewarmSkips: this.atlasTexturePrewarmSkips,
+        textureBytes: this.atlasMetrics.textureBytes,
+        ...this.atlasMetrics.snapshot(),
         atlasMode: this.atlas?.mode === 'array' ? 1 : 0,
         atlasLayers: this.atlas?.depth ?? 0,
         uploadedLayers: this.atlas?.mode === 'array' ? this.nextLayer : 0,
@@ -532,20 +473,15 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
         fingerprintFullScans: this.fingerprintFullScans,
         fingerprintPatchScans: this.fingerprintPatchScans,
         fingerprintItemsScanned: this.fingerprintItemsScanned,
-        imageLoadMs: this.imageLoadMs,
-        imageRequests: this.imageRequests,
-        imageFailures: this.imageFailures,
-        estimatedTextureUploadBytes: this.estimatedTextureUploadBytes,
         capacity: this.mesh ? this.instanceCapacity : 0,
         geometryBuilds: this.geometryBuilds,
         attributeReuses: this.attributeReuses,
-        programLoads: this.programLoadCount,
-        programLoadMs: this.programLoadMs,
+        programLoads: this.programLoader.getLoadCount(),
+        programLoadMs: this.programLoader.getLoadMs(),
         programPrepareMs: this.programPrepareMs,
         programSwitches: this.programSwitches,
         programFailures: this.programFailures,
         cachedPrograms: this.programRuntimes.size,
-        atlasUploadRanges: this.atlasUploadRanges,
         atlasResolution: this.atlas?.cellSize ?? 0,
         atlasMipmaps: this.atlas?.mipmaps ? 1 : 0,
         ...this.atlasOptions.cardContent?.getMetrics?.(),
@@ -562,6 +498,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.atlasAbortController = null
     this.imageCache?.clear()
     this.disposeCurrent()
+    this.programLoader.clear()
   }
 
   private replaceAtlas(atlas: TextureAtlasResult, itemCount: number): void {
@@ -583,24 +520,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   }
 
   private recordAtlasBuild(atlas: TextureAtlasResult): void {
-    this.textureBytes = Math.ceil(
-      atlas.width * atlas.height * atlas.depth * 4 * (atlas.mipmaps ? 4 / 3 : 1),
-    )
-    this.atlasBuilds += 1
-    this.atlasCellsUpdated += atlas.metrics.cells
-    this.atlasBuildMs += atlas.metrics.renderMs
-    this.atlasDrawMs += atlas.metrics.applyMs
-    this.atlasPrepareMs += atlas.metrics.prepareMs
-    this.atlasImageLoadWallMs += atlas.metrics.imageLoadWallMs
-    this.atlasCellRenderMs += atlas.metrics.cellRenderMs
-    this.atlasReadbackMs += atlas.metrics.readbackMs
-    this.atlasWorkerRenders += atlas.metrics.workerRenders ?? 0
-    this.atlasImageBitmapDecodeMs += atlas.metrics.imageBitmapDecodeMs ?? 0
-    this.imageLoadMs += atlas.metrics.imageLoadMs
-    this.imageRequests += atlas.metrics.imageRequests
-    this.imageFailures += atlas.metrics.imageFailures
-    this.estimatedTextureUploadBytes += atlas.metrics.uploadBytes
-    this.atlasUploadRanges += atlas.metrics.uploadRanges ?? 0
+    this.atlasMetrics.recordBuild(atlas)
   }
 
   private prewarmAtlas(atlas: TextureAtlasResult): void {
@@ -610,17 +530,13 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
         && atlas.data.byteLength <= 16 * 1024 * 1024
       )
     if (!shouldPrewarm || !this.atlasOptions.prepareTexture) {
-      this.atlasTexturePrewarmSkips += 1
+      this.atlasMetrics.recordPrewarmSkipped()
       return
     }
     try {
-      this.atlasTexturePrewarmMs += Math.max(
-        0,
-        this.atlasOptions.prepareTexture(atlas.texture),
-      )
-      this.atlasTexturePrewarms += 1
+      this.atlasMetrics.recordPrewarm(this.atlasOptions.prepareTexture(atlas.texture))
     } catch {
-      this.atlasTexturePrewarmFailures += 1
+      this.atlasMetrics.recordPrewarmFailure()
     }
   }
 
@@ -713,32 +629,12 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.baseMaterial = null
     this.activeProgram = null
     this.itemFingerprints = []
-    this.textureBytes = 0
+    this.atlasMetrics.resetTexture()
     this.atlas = null
   }
 
   private async loadEffectProgram(kind: string): Promise<CardEffectProgram | null> {
-    const cached = this.programLoads.get(kind)
-    if (cached) return cached
-    const configured = this.atlasOptions.effectPrograms?.[kind]
-    const builtin = isBuiltinEffect(kind)
-    if (!configured && !builtin) return null
-    this.programLoadCount += 1
-    const startedAt = performance.now()
-    const loading = Promise.resolve().then(async () => {
-      const program = configured
-        ? typeof configured === 'function' ? await configured() : configured
-        : await loadBuiltinEffectProgram(kind)
-      if (!program) return null
-      if (program.kind !== kind) {
-        throw new TypeError(`Cards effect program "${kind}" loaded mismatched kind "${program.kind}"`)
-      }
-      return program
-    }).finally(() => {
-      this.programLoadMs += performance.now() - startedAt
-    })
-    this.programLoads.set(kind, loading)
-    return loading
+    return this.programLoader.load(kind)
   }
 
   private createUploadContext(
@@ -868,47 +764,17 @@ function resolveAtlasResolution(
   return itemCount > 1024 ? 48 : 64
 }
 
-function geometryByteLength(geometry: InstancedBufferGeometry | undefined): number {
-  if (!geometry) return 0
-  const attributes = Object.values(geometry.attributes)
-    .reduce((total, attribute) => total + attribute.array.byteLength, 0)
-  return attributes + (geometry.index?.array.byteLength ?? 0)
-}
-
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError'
-}
-
-function isBuiltinEffect(kind: string): boolean {
-  return kind === 'tunnel'
-    || kind === 'linear-shooter'
-    || kind === 'vortex'
-    || kind === 'radial-burst'
-}
-
-async function loadBuiltinEffectProgram(kind: string): Promise<CardEffectProgram | null> {
-  switch (kind) {
-    case 'tunnel':
-      return (await import('./cards/tunnelProgram.js')).tunnelProgram
-    case 'linear-shooter':
-      return (await import('./cards/linearShooterProgram.js')).linearShooterProgram
-    case 'vortex':
-      return (await import('./cards/vortexProgram.js')).vortexProgram
-    case 'radial-burst':
-      return (await import('./cards/radialBurstProgram.js')).radialBurstProgram
-    default:
-      return null
-  }
 }
 
 function resolveProgramTimeUniform(
   program: CardEffectProgram,
   material: ShaderMaterial,
 ): { value: unknown } | null {
-  for (const uniform of program.uniforms ?? []) {
-    if (uniform.name.endsWith('_time')) return material.uniforms[uniform.name] ?? null
-  }
-  return null
+  return program.clockUniform
+    ? material.uniforms[program.clockUniform] ?? null
+    : null
 }
 
 function createItemFingerprints<TMeta>(
@@ -949,41 +815,4 @@ function normalizeChangedIndices(indices: readonly number[], itemCount: number):
 
 function resolveAspectRatio(value: number | undefined): number {
   return Number.isFinite(value) ? Math.min(4, Math.max(0.25, value as number)) : 1
-}
-
-function createVisibilityRanks(count: number): Float32Array {
-  const ranks = new Float32Array(count)
-  for (let index = 0; index < count; index += 1) {
-    // Irrational-step sequence distributes retained instances across layouts
-    // instead of removing complete latitude rings or rows from the tail.
-    ranks[index] = (index * 0.618033988749895) % 1
-  }
-  return ranks
-}
-
-function createItemIndices(count: number): Float32Array {
-  return Float32Array.from({ length: count }, (_, index) => index)
-}
-
-function resolveBufferCapacity(current: number, required: number): number {
-  if (required <= 0) return 0
-  if (required <= current && required >= current / 2) return current
-  return 2 ** Math.ceil(Math.log2(required))
-}
-
-function dynamicAttribute(array: Float32Array, itemSize: number): InstancedBufferAttribute {
-  return new InstancedBufferAttribute(array, itemSize).setUsage(DynamicDrawUsage)
-}
-
-function copyAttribute(attribute: InstancedBufferAttribute, values: Float32Array): void {
-  const target = attribute.array as Float32Array
-  target.fill(0)
-  target.set(values.subarray(0, target.length))
-  markAttribute(attribute, Math.min(target.length, values.length))
-}
-
-function markAttribute(attribute: InstancedBufferAttribute, count: number): void {
-  attribute.clearUpdateRanges()
-  if (count > 0) attribute.addUpdateRange(0, count)
-  attribute.needsUpdate = true
 }

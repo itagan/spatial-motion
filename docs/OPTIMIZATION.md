@@ -279,3 +279,34 @@ Program runtime 在 Material 创建时一次性解析时间 Uniform，逐帧更�
 180 次拾取，累计 picking 141.3ms。三组均保持 1 Draw Call、0 个 24/33/50ms
 长帧且无浏览器 warning/error。完整验证为 29 个测试文件、333 项测试；真实
 root/Core/Cards-only 为 35,743/15,075/8,635 bytes gzip，tarball 113,285 bytes。
+
+## Stage 内容协调、Extension 热路径与 Cards 内聚
+
+`MotionStage` 不再直接拥有 items、Transform、Layout 视觉状态、Stage wait 和主体
+旋转；数据全量更新、Patch 合并、质量扩容和活动特效恢复由
+`StageContentState` / `StageContentCoordinator` 编排。Renderer 协议校验与统计归一
+也移入内部支持模块。`MotionStage.ts` 从 1163 行降至 877 行，实际类主体保持约
+700 行，继续只承担跨控制器用例和公共门面。
+
+`StageRuntime` 的帧回调改为三个标量参数，不再逐帧创建 frame 对象。
+`ExtensionHost` 只在 Extension 增删时排序，逐帧复用每个 Extension 的只读 frame
+context，并用固定 `Float64Array` 环形缓冲记录 120 个耗时样本；不再执行 Set 复制、
+排序或数组 `shift()`。Extension 同时获得明确的 `contextLost()` /
+`contextRestored()` 生命周期，恢复顺序固定为 Host、主体 Renderer、Effect Program、
+Extension，之后才恢复 Stage RAF。
+
+Cards 内部拆出 `CardGeometry`、`CardAtlasMetrics` 与 `CardProgramLoader`。
+Effect Program 通过显式 `clockUniform` 绑定 Stage 时钟；失败的动态加载 Promise
+立即从缓存删除，允许瞬时 chunk 故障在下一次激活重试。`InstancedCardRenderer.ts`
+从 989 行降至 818 行，仍保持一个主体 Mesh、一个活动 Material 和一个 Draw Call。
+
+2026-07-28 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2000 Cards/high
+3 秒回归：steady 为 60.00 FPS、P95/P99 18.50/18.60ms、平均 CPU/submit
+0.012/0.125ms；transition-stress 为 60.00 FPS、P95/P99 18.40/18.70ms、完成
+4 次操作；interaction-stress 为 59.99 FPS、P95/P99 18.45/18.70ms，751 次输入
+合并为 180 次拾取，累计 picking 115.3ms。三组主体均为 1 Draw Call、0 个
+24/33/50ms 长帧。Native Three.js 与 GSAP 双 Extension 稳态为 60.02 FPS、
+P95 18.55ms，两个 Extension 合计平均 update 0.037ms、无慢帧或错误。
+
+完整验证为 29 个测试文件、336 项测试。真实 root/Core/Cards-only 为
+36,558/15,644/8,859 bytes gzip，tarball 约 114 KiB；浏览器控制台无 warning/error。

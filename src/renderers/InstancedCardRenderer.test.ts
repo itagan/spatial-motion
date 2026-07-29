@@ -656,6 +656,7 @@ describe('InstancedCardRenderer item loading', () => {
       prefix: 'program_wave_',
       attributes: [{ name: 'program_wave_phase', itemSize: 1 }],
       uniforms: [{ name: 'program_wave_time', type: 'float' }],
+      clockUniform: 'program_wave_time',
       vertexBody: 'center.y += sin(program_wave_phase + program_wave_time);',
       upload(context, payload) {
         context.setAttribute('program_wave_phase', payload)
@@ -756,6 +757,43 @@ describe('InstancedCardRenderer item loading', () => {
     const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
     expect(mesh.material.vertexShader).toContain('FAST_PROGRAM')
     expect(mesh.material.vertexShader).not.toContain('SLOW_PROGRAM')
+    renderer.dispose()
+  })
+
+  it('retries a Program loader after a transient failure', async () => {
+    const currentAtlas = atlas(1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const program = defineCardEffectProgram<null>({
+      kind: 'retryable',
+      prefix: 'program_retryable_',
+      vertexBody: 'center.x += 0.0;',
+      upload() {},
+    })
+    const loader = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary chunk failure'))
+      .mockResolvedValueOnce(program)
+    const renderer = new InstancedCardRenderer(new Scene(), {
+      effectPrograms: { retryable: loader },
+    })
+    await renderer.setItems([{ id: 'a' }])
+
+    await expect(renderer.enableEffect({
+      kind: 'retryable',
+      activeCount: 1,
+      payload: null,
+    })).rejects.toThrow('temporary chunk failure')
+    await expect(renderer.enableEffect({
+      kind: 'retryable',
+      activeCount: 1,
+      payload: null,
+    })).resolves.toBe(true)
+
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(renderer.getStats().metrics).toMatchObject({
+      programLoads: 2,
+      programFailures: 1,
+      cachedPrograms: 1,
+    })
     renderer.dispose()
   })
 

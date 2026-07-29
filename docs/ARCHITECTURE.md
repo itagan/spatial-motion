@@ -18,6 +18,9 @@ Renderer、Effect 和 Extension 组合完成。
 MotionStage facade
 ├── StageRuntime          RAF、暂停、页面可见性和 WebGL context
 ├── StageRenderHost       Scene、Camera、WebGLRenderer、Canvas 和能力
+├── StageContentCoordinator 数据、Patch、质量扩容和特效恢复
+├── StageContentState     items、Transform、Layout 与视觉状态
+├── StageClock / Rotation Stage 时间等待与主体旋转
 ├── RendererStateCoordinator setItems 后的渲染状态统一恢复
 ├── QualityController     档位、Profile 和自适应性能状态
 ├── MotionController      可中断布局过渡
@@ -65,6 +68,13 @@ Attribute、Uniform、运动 GLSL 和上传函数。Atlas、过渡、Highlight�
 最终投影与 Material 生命周期仍由 Cards 公共管线负责。需要完整替换管线时使用
 自定义 `MotionRenderer`，不通过 Program 绕过公共契约。
 
+Effect Program 通过可选 `clockUniform` 显式声明由 Stage 驱动的 float Uniform，
+Renderer 在 Material 创建时解析一次引用，逐帧不扫描 Program 定义。Program Loader
+只缓存成功或仍在进行的加载；失败 Promise 会被移除，允许下一次激活重试。
+
+Cards Renderer 内部由 Geometry、Atlas Metrics 和 Program Loader 模块分别承担
+实例缓冲、图集诊断与动态实现选择；这些模块不形成新的公共子路径，也不增加 Mesh。
+
 ### Quality
 
 `QualityController` 是质量状态的唯一所有者。应用可以覆盖三档 Profile 和自适应
@@ -82,6 +92,7 @@ Stage 统一使用类型化多订阅事件。框架适配器、调试面板和�
 - 布局变换只在状态变化时计算，动画逐帧只更新进度 uniform。
 - 流式特效只更新 Program 时间，Material、实例 Attribute 和 TypedArray 按容量复用。
 - 高频 pointermove 合并到 Stage RAF。
+- Extension 顺序仅在增删时计算，frame context 和有界性能采样缓冲按实例复用。
 - 图集构建必须支持取消；失效结果不得覆盖新 revision。
 - 质量下降先减少提交和可见数量，资源压缩不得阻塞当前帧。
 - 生产入口不加载 Dev 诊断，Three.js 始终由应用提供。

@@ -815,8 +815,10 @@ describe('MotionStage', () => {
     const firstFrame = frame as FrameRequestCallback | null
     expect(firstFrame).not.toBeNull()
     firstFrame!(1000)
+    const firstContext = update.mock.calls[0][0]
     const secondFrame = frame as FrameRequestCallback | null
     secondFrame!(1016)
+    expect(update.mock.calls[1][0]).toBe(firstContext)
     expect(update).toHaveBeenLastCalledWith({ elapsed: 0.016, delta: 0.016 })
     expect(stage.getPerformanceStats()).toMatchObject({ extensions: 1 })
 
@@ -1183,7 +1185,15 @@ describe('MotionStage', () => {
     stage.on('contextchange', ({ state }) => contextChanges(state))
     const extensionPause = vi.fn()
     const extensionResume = vi.fn()
-    await stage.addExtension({ mount: vi.fn(), pause: extensionPause, resume: extensionResume })
+    const extensionContextLost = vi.fn()
+    const extensionContextRestored = vi.fn()
+    await stage.addExtension({
+      mount: vi.fn(),
+      pause: extensionPause,
+      resume: extensionResume,
+      contextLost: extensionContextLost,
+      contextRestored: extensionContextRestored,
+    })
     const cards = currentCards()
     const canvas = document.querySelector('canvas')!
     const lost = new Event('webglcontextlost', { cancelable: true })
@@ -1193,12 +1203,14 @@ describe('MotionStage', () => {
     expect(stage.getPerformanceStats()).toMatchObject({ paused: true, contextLost: true })
     expect(contextChanges).toHaveBeenCalledWith('lost')
     expect(extensionPause).toHaveBeenCalledOnce()
+    expect(extensionContextLost).toHaveBeenCalledOnce()
 
     canvas.dispatchEvent(new Event('webglcontextrestored'))
     expect(cards.refreshResources).toHaveBeenCalledOnce()
     expect(stage.getPerformanceStats()).toMatchObject({ paused: false, contextLost: false })
     expect(contextChanges).toHaveBeenLastCalledWith('restored')
     expect(extensionResume).toHaveBeenCalledOnce()
+    expect(extensionContextRestored).toHaveBeenCalledOnce()
 
     stage.pause()
     canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
@@ -1207,6 +1219,8 @@ describe('MotionStage', () => {
     stage.resume()
     expect(extensionPause).toHaveBeenCalledTimes(2)
     expect(extensionResume).toHaveBeenCalledTimes(2)
+    expect(extensionContextLost).toHaveBeenCalledTimes(2)
+    expect(extensionContextRestored).toHaveBeenCalledTimes(2)
 
     stage.destroy()
     canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
@@ -1433,14 +1447,14 @@ describe('MotionStage', () => {
     await stage.setItems([{ id: 'center' }])
     await stage.to(layout(() => [transform()]), { duration: 0 })
     const internals = stage as unknown as {
-      transforms: Transform[]
+      contentState: { transforms: Transform[] }
       resolveCurrentTransforms(now: number): Transform[]
     }
-    const settled = internals.transforms
+    const settled = internals.contentState.transforms
 
     expect(internals.resolveCurrentTransforms(performance.now())).toBe(settled)
     stage.pick(50, 50)
-    expect(internals.transforms).toBe(settled)
+    expect(internals.contentState.transforms).toBe(settled)
     stage.destroy()
   })
 
