@@ -407,3 +407,26 @@ Buffer 的对象物化与有限值校验移到 `defineLayout()` 定义边界，S
 为 60.01 FPS、P95/P99 18.00/18.30ms并完成 4 次操作。interaction-stress 三轮均
 执行 180 次拾取，累计 73.5/59.9/63.8ms，中位约 0.354ms/次，P95 为
 18.00ms。全部场景保持主体 1 Draw Call、0 个 24/33/50ms 长帧，页面无 warning/error。
+
+## Effect CPU 路径 Buffer 化
+
+`StreamingEffect` 的 CPU 契约由返回 `Transform[]` 改为
+`calculateInto(count, elapsedSeconds, target)`。`EffectController` 独占并复用一组
+按容量增长的 `TransformBuffer`，进入特效、活动态拾取和 Reduced Motion 收敛都直接
+写入同一 SoA TypedArray；Stage 不再物化 Effect Transform 对象，也不再做数组到
+Buffer 的二次适配。四个内置 Effect 同时改为标量写入，路径和速度 payload 在相同
+item 容量下原位更新，质量上限变化不会替换 GPU 上传数组。
+
+完整验证为 32 个测试文件、362 项测试。真实 root/Core/Cards-only 为
+38,322/16,278/10,052 bytes gzip，layout-only 为 8,002 bytes，tarball 为
+125,935 bytes；继续满足 40/16/10 KB gzip、8 KB layout 与 150 KB tarball
+硬预算。
+
+2026-07-30 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2,000 Cards/high
+3 秒回归：steady 为 60.01 FPS、P95/P99 17.70/18.45ms；transition-stress 为
+60.00 FPS、P95/P99 17.50/17.60ms并完成 4 次操作；layout interaction-stress
+为 60.01 FPS、P95/P99 17.50/17.60ms，746 次输入合并为 180 次拾取。四个内置
+Effect Program 均完成首次按需加载并保持活动池 300、主体 1 Draw Call。
+Radial Burst 激活态 interaction-stress 为 60.01 FPS、P95/P99 17.50/17.60ms，
+751 次输入合并为 180 次拾取，累计 157.9ms。所有场景均为 0 个 24/33/50ms
+长帧，WebGL READY，浏览器控制台无 warning/error。

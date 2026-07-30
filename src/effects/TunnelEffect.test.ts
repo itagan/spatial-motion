@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { tunnel } from './TunnelEffect'
+import { calculateEffectTransforms } from './transforms.test-helper'
 
 describe('TunnelEffect', () => {
   it('keeps a fixed deterministic path buffer for the instance pool', () => {
@@ -17,8 +18,8 @@ describe('TunnelEffect', () => {
 
   it('cycles finite transforms between the far and near planes', () => {
     const effect = tunnel({ farZ: -20, nearZ: 10, seed: 7 })
-    const initial = effect.calculateTransforms(500, 0)
-    const later = effect.calculateTransforms(500, 1)
+    const initial = calculateEffectTransforms(effect, 500, 0)
+    const later = calculateEffectTransforms(effect, 500, 1)
 
     expect(initial).toHaveLength(500)
     expect(initial.every((value) => Object.values(value).every(Number.isFinite))).toBe(true)
@@ -28,7 +29,7 @@ describe('TunnelEffect', () => {
 
   it('keeps excess pool entries dormant without reallocating the pool', () => {
     const effect = tunnel({ maxActiveItems: 120 })
-    const transforms = effect.calculateTransforms(600, 0)
+    const transforms = calculateEffectTransforms(effect, 600, 0)
     const gpuData = effect.getGpuData()
 
     expect(transforms.filter(({ opacity }) => opacity > 0).length).toBeLessThanOrEqual(120)
@@ -44,7 +45,8 @@ describe('TunnelEffect', () => {
 
   it('supports deterministic square cross sections', () => {
     const effect = tunnel({ crossSection: 'square', twist: 0, seed: 5 })
-    const transforms = effect.calculateTransforms(120, 0.5).filter(({ opacity }) => opacity > 0)
+    const transforms = calculateEffectTransforms(effect, 120, 0.5)
+      .filter(({ opacity }) => opacity > 0)
     transforms.forEach(({ x, y }) => {
       expect(Math.max(Math.abs(x), Math.abs(y))).toBeGreaterThan(0)
     })
@@ -53,8 +55,8 @@ describe('TunnelEffect', () => {
 
   it('applies burst and wave emission envelopes to CPU transforms and GPU parameters', () => {
     const burst = tunnel({ emission: { mode: 'burst', burstInterval: 2, burstDuration: 0.4 } })
-    const active = burst.calculateTransforms(80, 0.1)
-    const dormant = burst.calculateTransforms(80, 1)
+    const active = calculateEffectTransforms(burst, 80, 0.1)
+    const dormant = calculateEffectTransforms(burst, 80, 1)
     expect(active.some(({ opacity }) => opacity > 0)).toBe(true)
     expect(dormant.every(({ opacity }) => opacity === 0)).toBe(true)
     const parameters = Array.from(burst.getGpuData().payload.parameters.slice(7))
@@ -63,7 +65,7 @@ describe('TunnelEffect', () => {
     })
 
     const wave = tunnel({ emission: { mode: 'wave', waveFrequency: 0.5, waveStrength: 1 } })
-    expect(wave.calculateTransforms(80, 1.5).every(({ opacity }) => opacity === 0)).toBe(true)
-    expect(wave.calculateTransforms(80, 0.5).some(({ opacity }) => opacity > 0)).toBe(true)
+    expect(calculateEffectTransforms(wave, 80, 1.5).every(({ opacity }) => opacity === 0)).toBe(true)
+    expect(calculateEffectTransforms(wave, 80, 0.5).some(({ opacity }) => opacity > 0)).toBe(true)
   })
 })

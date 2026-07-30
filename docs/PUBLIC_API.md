@@ -44,6 +44,10 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 - Renderer 的 `streamingEffects.enable()` 可同步或异步协商开放式 effect key；
   `StreamingEffectGpuData` 仅包含 `kind`、`activeCount` 和 Renderer 私有 `payload`。
   不支持或准备失败时 Stage 使用确定性的静态首帧。
+- `StreamingEffect.calculateInto(count, elapsedSeconds, target)` 直接写入调用方持有的
+  `TransformBuffer`，用于入场首帧、CPU fallback、拾取和 reduced-motion 结算。
+  Effect 不返回 Transform 数组，也不得保存 target；`prepare()` 应按 count 复用路径
+  与 payload TypedArray，相同容量的质量重配不应重新分配。
 
 ## Cards 与模板
 

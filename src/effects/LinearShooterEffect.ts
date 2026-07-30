@@ -1,4 +1,4 @@
-import type { Transform } from '../core/types.js'
+import type { TransformBuffer } from '../core/TransformBuffer.js'
 import {
   createEffectParameters,
   effectEdgeFade,
@@ -60,8 +60,10 @@ export class LinearShooterEffect implements StreamingEffect {
     if (this.preparedCount === count && this.preparedActiveCount === activeCount) return
     this.preparedCount = count
     this.preparedActiveCount = activeCount
-    this.paths = new Float32Array(count * 4)
-    this.speedFactors = new Float32Array(count)
+    if (this.speedFactors.length !== count) {
+      this.paths = new Float32Array(count * 4)
+      this.speedFactors = new Float32Array(count)
+    }
     for (let index = 0; index < count; index += 1) {
       const direction = index % this.options.directionCount
       const laneAngle = (direction / this.options.directionCount) * Math.PI * 2
@@ -73,16 +75,26 @@ export class LinearShooterEffect implements StreamingEffect {
       const offset = index < activeCount
         ? stableEffectPhase(index, this.options.seed)
         : 0
-      this.paths.set([laneAngle + jitter, radius, offset, 0], index * 4)
+      const pathIndex = index * 4
+      this.paths[pathIndex] = laneAngle + jitter
+      this.paths[pathIndex + 1] = radius
+      this.paths[pathIndex + 2] = offset
+      this.paths[pathIndex + 3] = 0
       this.speedFactors[index] = index < activeCount
         ? 0.9 + random(index + 9000, this.options.seed) * 0.2
         : -1
     }
   }
 
-  calculateTransforms(count: number, elapsedSeconds: number): Transform[] {
+  calculateInto(
+    count: number,
+    elapsedSeconds: number,
+    target: TransformBuffer,
+  ): void {
     if (this.preparedCount !== count) this.prepare(count)
-    return Array.from({ length: count }, (_, index) => {
+    target.resize(count)
+    const emission = emissionEnvelope(this.options.emission, elapsedSeconds)
+    for (let index = 0; index < count; index += 1) {
       const pathIndex = index * 4
       const angle = this.paths[pathIndex]
       const outerRadius = this.paths[pathIndex + 1]
@@ -92,17 +104,18 @@ export class LinearShooterEffect implements StreamingEffect {
       const travel = effectTravel(progress)
       const distance = this.options.sourceRadius
         + (outerRadius - this.options.sourceRadius) * travel
-      return {
-        x: Math.cos(angle) * distance,
-        y: Math.sin(angle) * distance,
-        z: this.options.z,
-        scale: this.options.startScale + (this.options.endScale - this.options.startScale) * travel,
-        rotationX: 0,
-        rotationY: 0,
-        rotationZ: 0,
-        opacity: enabled ? effectEdgeFade(progress, 0.06, 0.22) * emissionEnvelope(this.options.emission, elapsedSeconds) : 0,
-      }
-    })
+      target.setValues(
+        index,
+        Math.cos(angle) * distance,
+        Math.sin(angle) * distance,
+        this.options.z,
+        this.options.startScale + (this.options.endScale - this.options.startScale) * travel,
+        0,
+        0,
+        0,
+        enabled ? effectEdgeFade(progress, 0.06, 0.22) * emission : 0,
+      )
+    }
   }
 
   getGpuData(): LinearShooterGpuData {

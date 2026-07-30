@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { linearShooter } from './LinearShooterEffect'
+import { calculateEffectTransforms } from './transforms.test-helper'
 
 describe('LinearShooterEffect', () => {
   it('creates deterministic lanes in a fixed instance pool', () => {
@@ -15,8 +16,8 @@ describe('LinearShooterEffect', () => {
 
   it('moves active items outward on a camera-facing plane', () => {
     const effect = linearShooter({ sourceRadius: 0.1, outerRadius: 9, maxActiveItems: 100 })
-    const initial = effect.calculateTransforms(300, 0)
-    const later = effect.calculateTransforms(300, 0.5)
+    const initial = calculateEffectTransforms(effect, 300, 0)
+    const later = calculateEffectTransforms(effect, 300, 0.5)
 
     expect(initial).toHaveLength(300)
     expect(initial.every((value) => Object.values(value).every(Number.isFinite))).toBe(true)
@@ -28,8 +29,8 @@ describe('LinearShooterEffect', () => {
     const effect = linearShooter({
       emission: { mode: 'burst', burstInterval: 1.5, burstDuration: 0.3 },
     })
-    expect(effect.calculateTransforms(100, 0.1).some(({ opacity }) => opacity > 0)).toBe(true)
-    expect(effect.calculateTransforms(100, 0.8).every(({ opacity }) => opacity === 0)).toBe(true)
+    expect(calculateEffectTransforms(effect, 100, 0.1).some(({ opacity }) => opacity > 0)).toBe(true)
+    expect(calculateEffectTransforms(effect, 100, 0.8).every(({ opacity }) => opacity === 0)).toBe(true)
     const parameters = Array.from(effect.getGpuData().payload.parameters.slice(7))
     ;[1, 1.5, 0.3, 0.35, 0.75].forEach((value, index) => {
       expect(parameters[index]).toBeCloseTo(value)

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { radialBurst } from './RadialBurstEffect'
+import { calculateEffectTransforms } from './transforms.test-helper'
 
 describe('RadialBurstEffect', () => {
   it('creates deterministic 3D rays without exceeding the active pool cap', () => {
@@ -15,8 +16,8 @@ describe('RadialBurstEffect', () => {
 
   it('moves active cards along finite radial paths with depth variation', () => {
     const effect = radialBurst({ outerRadius: 8, depthScale: 0.4, maxActiveItems: 90 })
-    const initial = effect.calculateTransforms(300, 0)
-    const later = effect.calculateTransforms(300, 0.4)
+    const initial = calculateEffectTransforms(effect, 300, 0)
+    const later = calculateEffectTransforms(effect, 300, 0.4)
 
     expect(initial).toHaveLength(300)
     expect(initial.every((value) => Object.values(value).every(Number.isFinite))).toBe(true)
@@ -26,8 +27,8 @@ describe('RadialBurstEffect', () => {
   })
 
   it('reverses travel for aggregation without rebuilding the data pool', () => {
-    const inward = radialBurst({ direction: 'in', seed: 9 }).calculateTransforms(30, 0)
-    const outward = radialBurst({ direction: 'out', seed: 9 }).calculateTransforms(30, 0)
+    const inward = calculateEffectTransforms(radialBurst({ direction: 'in', seed: 9 }), 30, 0)
+    const outward = calculateEffectTransforms(radialBurst({ direction: 'out', seed: 9 }), 30, 0)
     const radius = (value: (typeof inward)[number]) => Math.hypot(value.x, value.y)
 
     expect(radius(inward[0])).toBeGreaterThan(radius(outward[0]))

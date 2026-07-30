@@ -73,6 +73,8 @@
   `pick()` 异步精确查询，热态 DOM 交互不创建 Promise，冷启动结果可失效。
 - [x] **端到端 SoA Transform**：Stage 状态、过渡插值、Cards/Points 上传和精确
   拾取统一消费 Buffer；Renderer 使用强制 BufferView 契约，聚焦布局按需加载。
+- [x] **Effect CPU Buffer**：StreamingEffect 直接写入复用 TransformBuffer，内置
+  特效消除逐项 Transform/路径临时数组，质量重配复用 GPU payload 容量。
 
 - [x] 建立可比较的 steady、cold-start、atlas-update 与 transition-stress 基准。
 - [x] 暴露 P50/P95/P99、长帧、CPU/提交、图集和图片加载指标。

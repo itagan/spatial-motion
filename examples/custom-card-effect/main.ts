@@ -4,7 +4,7 @@ import {
   defineCardEffectProgram,
   sphere,
   type StreamingEffect,
-  type Transform,
+  type TransformBuffer,
 } from '@itagan/spatial-motion'
 import '../shared.css'
 
@@ -47,20 +47,22 @@ class BusinessWaveEffect implements StreamingEffect {
     this.phases = Float32Array.from({ length: count }, (_, index) => index / Math.max(1, count))
   }
 
-  calculateTransforms(count: number): Transform[] {
-    return Array.from({ length: count }, (_, index) => {
+  calculateInto(count: number, _elapsedSeconds: number, target: TransformBuffer): void {
+    target.resize(count)
+    for (let index = 0; index < count; index += 1) {
       const angle = index / Math.max(1, count) * Math.PI * 2
-      return {
-        x: Math.cos(angle) * 4.8,
-        y: 0,
-        z: Math.sin(angle) * 4.8,
-        scale: 0.72,
-        rotationX: 0,
-        rotationY: 0,
-        rotationZ: 0,
-        opacity: index < this.activeCount ? 1 : 0,
-      }
-    })
+      target.setValues(
+        index,
+        Math.cos(angle) * 4.8,
+        0,
+        Math.sin(angle) * 4.8,
+        0.72,
+        0,
+        0,
+        0,
+        index < this.activeCount ? 1 : 0,
+      )
+    }
   }
 
   getGpuData() {

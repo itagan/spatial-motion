@@ -302,7 +302,7 @@ try {
       sphere,
     } from '${packageName}'
     import { box, createLayout as createLayoutFromSubpath, parseLayoutConfig as parseLayoutConfigFromSubpath, ring, scatter, type LayoutConfig as SubpathLayoutConfig } from '${packageName}/layouts'
-    import { vortex, type EmissionOptions } from '${packageName}/effects'
+    import { vortex, type EmissionOptions, type StreamingEffect } from '${packageName}/effects'
     import { BenchmarkSession, compareBenchmarkResults, evaluateBenchmarkRegression, parseBenchmarkResult, type BenchmarkRegressionThresholds, type BenchmarkResult } from '${packageName}/performance'
     import { defineCardTemplate, html, type CardTemplateStyle } from '${packageName}/card-template'
     import { TransformBuffer, defineMotionRenderer, type TransformBufferView, type MotionRenderer, type MotionRendererCapabilities, type MotionRendererDescriptor, type MotionRendererFactory, type MotionRendererFactoryContext, type MotionRendererFrameCapability, type MotionRendererHighlightCapability, type MotionRendererPatchCapability, type MotionRendererPickShape, type MotionRendererResourceRecoveryCapability, type MotionRendererStats, type MotionRendererStreamingEffectsCapability, type MotionRendererViewport, type MotionRendererViewportCapability, type MotionRendererVisualCapability, type MotionRendererVisualState } from '${packageName}/core'
@@ -381,6 +381,18 @@ try {
     const transformBuffer = new TransformBuffer(1)
     transformBuffer.setValues(0, 0, 0, 0, 1, 0, 0, 0, 1)
     const transformView: TransformBufferView = transformBuffer
+    const streamingEffect: StreamingEffect = {
+      name: 'consumer-effect',
+      kind: 'consumer-effect',
+      prepare(count, activeLimit) { void [count, activeLimit] },
+      calculateInto(count, elapsedSeconds, target) {
+        target.resize(count)
+        if (count) target.setValues(0, elapsedSeconds, 0, 0, 1, 0, 0, 0, 1)
+      },
+      getGpuData() {
+        return { kind: 'consumer-effect', activeCount: 1, payload: null }
+      },
+    }
     const patchCapability: MotionRendererPatchCapability = {
       async updateItems(nextItems, changedIndices) { void [nextItems, changedIndices]; return true },
     }
@@ -481,7 +493,7 @@ try {
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
     declare const rendererFrame: MotionRendererFrameCapability
-    void [items, stage, cardsRenderer, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, rendererGpuBytes, rendererMetrics, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), pickResult, vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions, rendererCapabilities, rendererVisualState, rendererPickShape, rendererDescriptor, rendererViewport, transformBuffer, transformView, rendererStats, rendererFactory, rendererFrame, pointStageOptions, layoutReport, rendererReport, debugVisualization]
+    void [items, stage, cardsRenderer, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, rendererGpuBytes, rendererMetrics, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), pickResult, vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions, rendererCapabilities, rendererVisualState, rendererPickShape, rendererDescriptor, rendererViewport, transformBuffer, transformView, streamingEffect, rendererStats, rendererFactory, rendererFrame, pointStageOptions, layoutReport, rendererReport, debugVisualization]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
