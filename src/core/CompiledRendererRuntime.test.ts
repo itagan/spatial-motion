@@ -5,6 +5,7 @@ import type {
 } from '../renderers/MotionRenderer.js'
 import type { MotionItem, Transform } from './types.js'
 import { compileRendererRuntime } from './CompiledRendererRuntime.js'
+import { TransformBuffer } from './TransformBuffer.js'
 
 const item: MotionItem = { id: 'one' }
 const transform: Transform = {
@@ -85,7 +86,8 @@ describe('CompiledRendererRuntime', () => {
 
     expect(runtime.supportsPatch).toBe(true)
     expect(await runtime.updateItems([item], [0])).toBe(true)
-    runtime.setTransforms([transform])
+    const transformBuffer = new TransformBuffer().copyFrom([transform])
+    runtime.setTransforms(transformBuffer)
     runtime.setVisualState(visual)
     runtime.prepareVisualTransition(visual, visual)
     runtime.setHighlightIndex(0)
@@ -98,7 +100,7 @@ describe('CompiledRendererRuntime', () => {
 
     expect(patch).toHaveBeenCalledWith([item], [0])
     expect(renderer.setItems).not.toHaveBeenCalled()
-    expect(renderer.setTransforms).toHaveBeenCalledWith([transform])
+    expect(renderer.setTransforms).toHaveBeenCalledWith(transformBuffer)
     expect(setVisualState).toHaveBeenCalledWith(visual)
     expect(prepareVisualTransition).toHaveBeenCalledWith(visual, visual)
     expect(setHighlightIndex).toHaveBeenCalledWith(0)

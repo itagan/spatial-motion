@@ -1,7 +1,7 @@
 import type {
   MotionRendererVisualState,
 } from '../renderers/MotionRenderer.js'
-import type { Transform } from './types.js'
+import type { TransformBufferView } from './TransformBuffer.js'
 import type { CompiledRendererRuntime } from './CompiledRendererRuntime.js'
 import type { EffectController } from './EffectController.js'
 import type { InteractionController } from './InteractionController.js'
@@ -16,7 +16,7 @@ export class RendererStateCoordinator<TMeta = unknown> {
   ) {}
 
   restoreAfterItems(state: {
-    transforms: readonly Transform[]
+    transforms: TransformBufferView
     visual: MotionRendererVisualState
     visibleRatio: number
     now: number

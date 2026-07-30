@@ -69,7 +69,9 @@ npm run pack:check
 
 ### `src/layouts`
 
-布局是无渲染依赖的计算模块：根据数量和 `LayoutContext` 返回完整 `Transform[]`。新增布局应：
+布局是无渲染依赖的计算模块：根据数量和 `LayoutContext` 返回 `Transform[]`，或通过
+`calculateInto()` 直接写入可复用的 SoA `TransformBuffer`。高频/大数量布局优先使用
+Buffer 路径。新增布局应：
 
 1. 实现稳定的 `Layout` 契约。
 2. 对 `count = 0`、单个元素和常见大量元素提供有限数值。

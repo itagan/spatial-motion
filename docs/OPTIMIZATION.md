@@ -382,3 +382,28 @@ Promise。键盘方向导航同时改为循环扫描可见项，不再为每次�
 控制台无 warning/error。刷新页面后从未加载 picker 的冷态 interaction-stress
 同样为 60.00 FPS、P95/P99 18.25/18.60ms，首次加载计入后 180 次累计
 picking 151.5ms，未产生长帧。
+
+## 端到端 SoA Transform 与按需聚焦布局
+
+Stage 的 settled 状态、稳定 id 重排、MotionController 过渡插值、Cards/Points
+Renderer 上传和 `ProjectedItemPicker` 已统一为 `TransformBufferView`。Renderer 的
+`setTransforms()` / `prepareTransition()` 不再接收 Transform 对象数组；Cards 直接
+写入既有 Attribute，Points 复制到自有容量 Buffer，精确拾取按 TypedArray 下标读取。
+过渡 scratch 和 Effect 适配 Buffer 均复用容量，交互路径不再物化 O(n) Transform。
+
+Buffer 的对象物化与有限值校验移到 `defineLayout()` 定义边界，Stage 不重复扫描已经
+验证的布局结果；`setValues()` 去掉每项重复边界判断。低频 `focusItems()` 布局构造
+拆为 0.45 KB gzip 动态 chunk，并在加载期间通过 items 引用和 destroy 状态阻止旧结果
+提交。拾取循环缓存 positions/scales/rotations/opacities 数组引用，避免每项重复属性
+查找。
+
+完整验证为 32 个测试文件、357 项测试。真实 root/Core/Cards-only 为
+38,205/16,271/10,052 bytes gzip，layout-only 为 8,002 bytes，tarball 为
+125,555 bytes；全部保持既有 40/16/10 KB gzip、8 KB layout 与 150 KB tarball
+硬预算。
+
+2026-07-30 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2,000 Cards/high
+3 秒最终回归：steady 为 59.99 FPS、P95/P99 18.00/18.40ms；transition-stress
+为 60.01 FPS、P95/P99 18.00/18.30ms并完成 4 次操作。interaction-stress 三轮均
+执行 180 次拾取，累计 73.5/59.9/63.8ms，中位约 0.354ms/次，P95 为
+18.00ms。全部场景保持主体 1 Draw Call、0 个 24/33/50ms 长帧，页面无 warning/error。

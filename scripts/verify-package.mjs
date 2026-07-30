@@ -305,7 +305,7 @@ try {
     import { vortex, type EmissionOptions } from '${packageName}/effects'
     import { BenchmarkSession, compareBenchmarkResults, evaluateBenchmarkRegression, parseBenchmarkResult, type BenchmarkRegressionThresholds, type BenchmarkResult } from '${packageName}/performance'
     import { defineCardTemplate, html, type CardTemplateStyle } from '${packageName}/card-template'
-    import { defineMotionRenderer, type MotionRenderer, type MotionRendererCapabilities, type MotionRendererDescriptor, type MotionRendererFactory, type MotionRendererFactoryContext, type MotionRendererFrameCapability, type MotionRendererHighlightCapability, type MotionRendererPatchCapability, type MotionRendererPickShape, type MotionRendererResourceRecoveryCapability, type MotionRendererStats, type MotionRendererStreamingEffectsCapability, type MotionRendererViewport, type MotionRendererViewportCapability, type MotionRendererVisualCapability, type MotionRendererVisualState } from '${packageName}/core'
+    import { TransformBuffer, defineMotionRenderer, type TransformBufferView, type MotionRenderer, type MotionRendererCapabilities, type MotionRendererDescriptor, type MotionRendererFactory, type MotionRendererFactoryContext, type MotionRendererFrameCapability, type MotionRendererHighlightCapability, type MotionRendererPatchCapability, type MotionRendererPickShape, type MotionRendererResourceRecoveryCapability, type MotionRendererStats, type MotionRendererStreamingEffectsCapability, type MotionRendererViewport, type MotionRendererViewportCapability, type MotionRendererVisualCapability, type MotionRendererVisualState } from '${packageName}/core'
     import { cardsRenderer as cardsRendererFromSubpath, defineCardEffectProgram } from '${packageName}/renderers/cards'
     import {
       pointsRenderer,
@@ -378,6 +378,9 @@ try {
     }
     const rendererDescriptor: MotionRendererDescriptor = { itemBounds: rendererPickShape }
     const rendererViewport: MotionRendererViewport = { width: 100, height: 100, pixelRatio: 1 }
+    const transformBuffer = new TransformBuffer(1)
+    transformBuffer.setValues(0, 0, 0, 0, 1, 0, 0, 0, 1)
+    const transformView: TransformBufferView = transformBuffer
     const patchCapability: MotionRendererPatchCapability = {
       async updateItems(nextItems, changedIndices) { void [nextItems, changedIndices]; return true },
     }
@@ -414,6 +417,8 @@ try {
       metrics: { customUpdates: 2 },
     }
     declare const renderer: MotionRenderer
+    renderer.setTransforms(transformView)
+    renderer.prepareTransition(transformView, transformView)
     declare const rendererContext: MotionRendererFactoryContext
     const rendererFactory: MotionRendererFactory = defineMotionRenderer((context) => {
       void [context, rendererContext]
@@ -476,7 +481,7 @@ try {
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
     declare const rendererFrame: MotionRendererFrameCapability
-    void [items, stage, cardsRenderer, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, rendererGpuBytes, rendererMetrics, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), pickResult, vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions, rendererCapabilities, rendererVisualState, rendererPickShape, rendererDescriptor, rendererViewport, rendererStats, rendererFactory, rendererFrame, pointStageOptions, layoutReport, rendererReport, debugVisualization]
+    void [items, stage, cardsRenderer, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, rendererGpuBytes, rendererMetrics, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), pickResult, vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions, rendererCapabilities, rendererVisualState, rendererPickShape, rendererDescriptor, rendererViewport, transformBuffer, transformView, rendererStats, rendererFactory, rendererFrame, pointStageOptions, layoutReport, rendererReport, debugVisualization]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {

@@ -17,6 +17,7 @@ import {
   type CardEffectProgram,
 } from './cards/programs'
 import type { CardAtlasBackend } from './cards/CardAtlasBackend'
+import { TransformBuffer } from '../core/TransformBuffer'
 
 const atlasMock = vi.hoisted(() => ({
   create: vi.fn(),
@@ -365,14 +366,14 @@ describe('InstancedCardRenderer item loading', () => {
 
     await renderer.setItems([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }])
     renderer.prepareTransition(
-      Array.from({ length: 4 }, () => ({
+      new TransformBuffer().copyFrom(Array.from({ length: 4 }, () => ({
         x: 0, y: 0, z: 0, scale: 1,
         rotationX: 0, rotationY: 0, rotationZ: 0, opacity: 1,
-      })),
-      Array.from({ length: 4 }, () => ({
+      }))),
+      new TransformBuffer().copyFrom(Array.from({ length: 4 }, () => ({
         x: 1, y: 0, z: 0, scale: 1,
         rotationX: 0, rotationY: 0, rotationZ: 0, opacity: 1,
-      })),
+      }))),
     )
 
     expect(scene.children[0]).toBe(mesh)
@@ -387,6 +388,30 @@ describe('InstancedCardRenderer item loading', () => {
         geometryBuilds: 1,
       },
     })
+    renderer.dispose()
+  })
+
+  it('uploads TransformBuffer transitions without materializing Transform objects', async () => {
+    atlasMock.create.mockResolvedValueOnce(atlas(2).result)
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene)
+    await renderer.setItems([{ id: 'a' }, { id: 'b' }])
+    const from = new TransformBuffer(2)
+      .setValues(0, 1, 2, 3, 0.5, 0, 0, 0, 0.4)
+      .setValues(1, 4, 5, 6, 0.75, 0, 0, 0, 0.8)
+    const to = new TransformBuffer(2)
+      .setValues(0, 7, 8, 9, 1, 0, 0, 0, 1)
+      .setValues(1, 10, 11, 12, 1.25, 0, 0, 0, 0.9)
+
+    renderer.prepareTransition(from, to)
+
+    const geometry = (scene.children[0] as Mesh<InstancedBufferGeometry>).geometry
+    expect(Array.from(geometry.getAttribute('fromPosition').array).slice(0, 6))
+      .toEqual([1, 2, 3, 4, 5, 6])
+    expect(Array.from(geometry.getAttribute('toPosition').array).slice(0, 6))
+      .toEqual([7, 8, 9, 10, 11, 12])
+    expect(Array.from(geometry.getAttribute('toScale').array).slice(0, 2))
+      .toEqual([1, 1.25])
     renderer.dispose()
   })
 
@@ -1008,8 +1033,8 @@ describe('InstancedCardRenderer item loading', () => {
     }
 
     renderer.prepareTransition(
-      [transform],
-      [transform],
+      new TransformBuffer().copyFrom([transform]),
+      new TransformBuffer().copyFrom([transform]),
     )
     renderer.prepareVisualTransition(
       { billboard: 0, hideBackHemisphere: 0, hemisphereEdgeFade: 0.05 },

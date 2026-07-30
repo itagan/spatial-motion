@@ -6,7 +6,8 @@ import type {
   MotionRendererViewport,
   MotionRendererVisualState,
 } from '../renderers/MotionRenderer.js'
-import type { MotionItem, Transform } from './types.js'
+import type { MotionItem } from './types.js'
+import type { TransformBufferView } from './TransformBuffer.js'
 import { assertMotionRenderer } from './MotionRendererSupport.js'
 
 export interface CompiledRendererRuntime<TMeta = unknown> {
@@ -18,8 +19,8 @@ export interface CompiledRendererRuntime<TMeta = unknown> {
     items: readonly MotionItem<TMeta>[],
     changedIndices: readonly number[],
   ): Promise<boolean>
-  setTransforms(transforms: readonly Transform[]): void
-  prepareTransition(from: readonly Transform[], to: readonly Transform[]): void
+  setTransforms(buffer: TransformBufferView): void
+  prepareTransition(from: TransformBufferView, to: TransformBufferView): void
   setProgress(progress: number): void
   setVisibleRatio(ratio: number): void
   setVisualState(state: MotionRendererVisualState): void

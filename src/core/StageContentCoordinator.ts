@@ -2,11 +2,14 @@ import type {
   Layout,
   LayoutContext,
   MotionItem,
-  Transform,
   TransitionOptions,
 } from './types.js'
 import type { CompiledRendererRuntime } from './CompiledRendererRuntime.js'
-import { identityTransform } from './math.js'
+import {
+  calculateLayoutInto,
+  TransformBuffer,
+  type TransformBufferView,
+} from './TransformBuffer.js'
 import {
   ItemCoordinator,
   type CoordinatedItemUpdate,
@@ -30,7 +33,7 @@ interface StageContentCoordinatorOptions<TMeta> {
   interaction: InteractionController<TMeta>
   quality: QualityController
   rendererState: RendererStateCoordinator<TMeta>
-  resolveTransforms: (now: number) => Transform[]
+  resolveTransformBuffer: (now: number) => TransformBufferView
   getLayoutContext: () => LayoutContext<TMeta>
   transitionTo: (layout: Layout<TMeta>, options: TransitionOptions) => Promise<boolean>
   isPaused: () => boolean
@@ -72,7 +75,7 @@ export class StageContentCoordinator<TMeta = unknown> {
       items,
       this.options.quality.getProfile().maxVisibleItems,
     )
-    const nextTransforms = prepared.visibleItems.map(identityTransform)
+    const nextTransforms = createIdentityBuffer(prepared.visibleItems.length)
     const applied = await this.options.renderer.setItems(prepared.visibleItems)
     if (!applied || !this.items.isCurrent(revision)) return
     this.commitItems(prepared.sourceItems, prepared.visibleItems, nextTransforms)
@@ -104,24 +107,27 @@ export class StageContentCoordinator<TMeta = unknown> {
   ): Promise<boolean> {
     const state = this.options.state
     const now = performance.now()
-    const current = this.options.resolveTransforms(now)
+    const current = this.options.resolveTransformBuffer(now)
     const previousById = new Map(
-      state.items.map((item, index) => [item.id, current[index]]),
+      state.items.map((item, index) => [item.id, index]),
     )
     const currentEffect = preserveEffect ? this.options.effects.getToken() : null
     const revision = this.items.beginOperation()
     this.options.motion.cancel('interrupted')
     if (!preserveEffect) this.options.effects.deactivate()
-    state.transforms = current
-    this.options.renderer.setTransforms(current)
+    state.transforms = new TransformBuffer().copyFromBuffer(current)
+    this.options.renderer.setTransforms(state.transforms)
 
     const prepared = this.items.prepareItems(
       items,
       this.options.quality.getProfile().maxVisibleItems,
     )
-    const nextTransforms = prepared.visibleItems.map((item) => {
+    const nextTransforms = createIdentityBuffer(prepared.visibleItems.length)
+    prepared.visibleItems.forEach((item, index) => {
       const previous = previousById.get(item.id)
-      return previous ? { ...previous } : identityTransform()
+      if (previous !== undefined && previous < current.count) {
+        nextTransforms.setFromBuffer(index, current, previous)
+      }
     })
     const applied = await this.options.renderer.setItems(prepared.visibleItems)
     if (!applied || !this.items.isCurrent(revision)) return false
@@ -130,10 +136,12 @@ export class StageContentCoordinator<TMeta = unknown> {
     const targetLayout = options.layout ?? state.lastLayout
     if (this.options.effects.isTokenActive(currentEffect)) {
       if (targetLayout) {
-        state.transforms = [...targetLayout.calculate(
+        state.transforms = calculateLayoutInto(
+          targetLayout,
           state.items.length,
           this.options.getLayoutContext(),
-        )]
+          new TransformBuffer(),
+        )
         this.options.renderer.setTransforms(state.transforms)
         if (options.layout) state.lastLayout = options.layout
       }
@@ -210,7 +218,7 @@ export class StageContentCoordinator<TMeta = unknown> {
   private commitItems(
     sourceItems: MotionItem<TMeta>[],
     items: MotionItem<TMeta>[],
-    transforms: Transform[],
+    transforms: TransformBuffer,
   ): void {
     const state = this.options.state
     state.sourceItems = sourceItems
@@ -223,6 +231,13 @@ export class StageContentCoordinator<TMeta = unknown> {
     this.options.renderer.setVisibleRatio(1)
     this.options.interaction.syncItems()
   }
+}
+
+function createIdentityBuffer(count: number): TransformBuffer {
+  const buffer = new TransformBuffer(count)
+  buffer.scales.fill(0.01, 0, count)
+  buffer.opacities.fill(1, 0, count)
+  return buffer
 }
 
 function isBatchableItemUpdate(options: StageContentUpdateOptions): boolean {

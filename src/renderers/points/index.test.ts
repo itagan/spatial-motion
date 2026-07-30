@@ -2,6 +2,7 @@ import { BufferAttribute, BufferGeometry, Group, Points, ShaderMaterial } from '
 import { describe, expect, it, vi } from 'vitest'
 import type { MotionItem, Transform } from '../../core/types'
 import { pointsRenderer } from './index'
+import { TransformBuffer } from '../../core/TransformBuffer'
 
 function items(count: number): MotionItem[] {
   return Array.from({ length: count }, (_value, index) => ({
@@ -22,6 +23,10 @@ function transform(overrides: Partial<Transform> = {}): Transform {
     opacity: 1,
     ...overrides,
   }
+}
+
+function buffer(...transforms: Transform[]): TransformBuffer {
+  return new TransformBuffer().copyFrom(transforms)
 }
 
 function createRenderer(options = {}) {
@@ -72,13 +77,13 @@ describe('pointsRenderer', () => {
     const material = points.material
     const fromPosition = geometry.getAttribute('fromPosition')
     renderer.prepareTransition(
-      Array.from({ length: 3 }, () => transform()),
-      Array.from({ length: 3 }, () => transform({ x: 1 })),
+      buffer(...Array.from({ length: 3 }, () => transform())),
+      buffer(...Array.from({ length: 3 }, () => transform({ x: 1 }))),
     )
     await renderer.setItems(items(4))
     renderer.prepareTransition(
-      Array.from({ length: 4 }, () => transform()),
-      Array.from({ length: 4 }, () => transform({ y: 1 })),
+      buffer(...Array.from({ length: 4 }, () => transform())),
+      buffer(...Array.from({ length: 4 }, () => transform({ y: 1 }))),
     )
     expect(points.geometry).toBe(geometry)
     expect(points.material).toBe(material)
@@ -87,6 +92,26 @@ describe('pointsRenderer', () => {
       capacity: 4,
       geometryBuilds: 1,
     })
+  })
+
+  it('copies SoA transition ranges through the TransformBuffer capability', async () => {
+    const { points, renderer } = createRenderer()
+    await renderer.setItems(items(2))
+    const from = new TransformBuffer(2)
+      .setValues(0, 1, 2, 3, 0.5, 0, 0, 0, 0.4)
+      .setValues(1, 4, 5, 6, 0.75, 0, 0, 0, 0.8)
+    const to = new TransformBuffer(2)
+      .setValues(0, 7, 8, 9, 1, 0, 0, 0, 1)
+      .setValues(1, 10, 11, 12, 1.25, 0, 0, 0, 0.9)
+
+    renderer.prepareTransition(from, to)
+
+    expect(Array.from(points.geometry.getAttribute('fromPosition').array).slice(0, 6))
+      .toEqual([1, 2, 3, 4, 5, 6])
+    expect(Array.from(points.geometry.getAttribute('toPosition').array).slice(0, 6))
+      .toEqual([7, 8, 9, 10, 11, 12])
+    expect(Array.from(points.geometry.getAttribute('toOpacity').array).slice(0, 2))
+      .toEqual([1, expect.closeTo(0.9)])
   })
 
   it('patches only colors without replacing geometry', async () => {
@@ -116,8 +141,8 @@ describe('pointsRenderer', () => {
     expect(Array.from((points.geometry.getAttribute('itemColor') as BufferAttribute).array)).toEqual(firstColors)
 
     renderer.prepareTransition(
-      [transform(), transform()],
-      [transform({ x: 1 }), transform({ y: 1 })],
+      buffer(transform(), transform()),
+      buffer(transform({ x: 1 }), transform({ y: 1 })),
     )
     renderer.capabilities.visual?.prepareVisualTransition(
       { billboard: 0, hideBackHemisphere: 0, hemisphereEdgeFade: 0 },

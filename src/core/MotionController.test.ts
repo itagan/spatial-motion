@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MotionController } from './MotionController.js'
 import type { Layout, Transform } from './types.js'
+import { TransformBuffer } from './TransformBuffer.js'
 
 const layout: Layout = {
   name: 'target',
@@ -16,8 +17,8 @@ describe('MotionController', () => {
   it('interpolates, advances, and completes a transition', async () => {
     const motion = new MotionController()
     const finished = motion.start({
-      from: [transform({ x: 0 })],
-      to: [transform({ x: 10 })],
+      from: buffer(transform({ x: 0 })),
+      to: buffer(transform({ x: 10 })),
       fromVisual: visual,
       toVisual: { ...visual, billboard: 1 },
       targetLayout: layout,
@@ -26,18 +27,18 @@ describe('MotionController', () => {
       now: 0,
     })
 
-    expect(motion.resolveTransforms([], 50, false)[0].x).toBe(5)
+    expect(motion.resolveBuffer(new TransformBuffer(), 50, false).positions[0]).toBe(5)
     expect(motion.resolveVisualState(visual, 50, false).billboard).toBe(0.5)
     expect(motion.advance(50, vi.fn())).toBeNull()
-    expect(motion.advance(100, vi.fn())?.[0].x).toBe(10)
+    expect(motion.advance(100, vi.fn())?.positions[0]).toBe(10)
     await expect(finished).resolves.toEqual({ completed: true, status: 'completed' })
   })
 
   it('freezes pending progress while paused and rebases on resume', () => {
     const motion = new MotionController()
     void motion.start({
-      from: [transform({ x: 0 })],
-      to: [transform({ x: 10 })],
+      from: buffer(transform({ x: 0 })),
+      to: buffer(transform({ x: 10 })),
       fromVisual: visual,
       toVisual: visual,
       targetLayout: layout,
@@ -56,8 +57,8 @@ describe('MotionController', () => {
     const motion = new MotionController()
     const controller = new AbortController()
     const finished = motion.start({
-      from: [transform()],
-      to: [transform({ x: 1 })],
+      from: buffer(transform()),
+      to: buffer(transform({ x: 1 })),
       fromVisual: visual,
       toVisual: visual,
       targetLayout: layout,
@@ -101,4 +102,8 @@ function transform(overrides: Partial<Transform> = {}): Transform {
     opacity: 1,
     ...overrides,
   }
+}
+
+function buffer(...transforms: Transform[]): TransformBuffer {
+  return new TransformBuffer().copyFrom(transforms)
 }

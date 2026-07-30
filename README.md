@@ -440,7 +440,7 @@ await stage.setItems(items)
 
 `pointsRenderer()` 只创建一个 `THREE.Points`、Geometry 和 Material，支持布局插值、质量裁剪、hover/focus、圆形拾取与资源恢复，不创建 Atlas。自定义 Factory 只能获得隔离 `Group`、GPU 限制和销毁信号，不能接管 Scene、Camera、WebGLRenderer 或 RAF。不支持流式特效的渲染器会稳定停在特效时间 0 的静态首帧。
 
-自定义 `MotionRenderer` 只需实现数据、Transform、过渡进度、质量可见比例、统计与销毁；局部 patch、视觉状态、高亮、viewport、资源恢复和流式特效通过 `capabilities` 按需声明。`descriptor.itemBounds` 可使用 quad、disc 或 `null`。`getPerformanceStats()` 将场景提交数据放在 `render`，将实例、GPU 字节与 Renderer 专属指标放在 `renderer`。
+自定义 `MotionRenderer` 只需实现数据、Transform Buffer、过渡进度、质量可见比例、统计与销毁；`setTransforms()` / `prepareTransition()` 同步消费 SoA `TransformBufferView`，可直接上传或复制到按容量复用的 TypedArray，不需要还原逐项对象。局部 patch、视觉状态、高亮、viewport、资源恢复和流式特效通过 `capabilities` 按需声明。`descriptor.itemBounds` 可使用 quad、disc 或 `null`。`getPerformanceStats()` 将场景提交数据放在 `render`，将实例、GPU 字节与 Renderer 专属指标放在 `renderer`。
 
 开发自定义 Renderer 或 Layout 时可使用独立诊断入口：
 
@@ -566,14 +566,14 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| 根入口真实消费者 gzip | ≤ 40 KB | 35.7 KB（36,558 bytes） |
-| Core-only 真实消费者 gzip | ≤ 16 KB | 15.3 KB（15,644 bytes） |
-| Cards-only 真实消费者 gzip | ≤ 10 KB | 8.7 KB（8,859 bytes） |
+| 根入口真实消费者 gzip | ≤ 40 KB | 37.3 KB（38,205 bytes） |
+| Core-only 真实消费者 gzip | ≤ 16 KB | 15.9 KB（16,271 bytes） |
+| Cards-only 真实消费者 gzip | ≤ 10 KB | 9.8 KB（10,052 bytes） |
 | 按需 card-template gzip | ≤ 12 KB | 6.0 KB（6,194 bytes） |
-| 按需 Points Renderer gzip | ≤ 12 KB | 2.8 KB（2,918 bytes） |
-| 按需开发诊断 gzip | ≤ 12 KB | 3.8 KB（3,923 bytes） |
-| npm tarball | ≤ 150 KB | 约 114 KiB |
-| 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 5.5 KB（5,598 bytes） |
+| 按需 Points Renderer gzip | ≤ 12 KB | 2.8 KB（2,859 bytes） |
+| 按需开发诊断 gzip | ≤ 12 KB | 3.9 KB（3,951 bytes） |
+| npm tarball | ≤ 150 KB | 约 122.6 KiB（125,555 bytes） |
+| 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 7.8 KB（8,002 bytes） |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。根入口、Core-only 与 Cards-only 的预算按真实 Vite/Terser 消费产物计算，并保持 Three.js external；各输出模块 gzip 相加只保留为诊断值，不作为用户下载体积门禁。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。
 

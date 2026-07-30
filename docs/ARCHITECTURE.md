@@ -28,6 +28,7 @@ MotionStage facade
 ├── ItemCoordinator       稳定 id、Patch 合并和异步 revision
 ├── InteractionController Hover 合帧、键盘焦点和拾取竞态
 ├── ProjectedItemPicker   按需加载的精确投影拾取内核
+├── FocusLayout           按需加载的聚焦布局构造
 ├── ExtensionHost         隔离的外部 Three.js 内容
 ├── CompiledRendererRuntime 一次校验后的稳定 Renderer 方法表
 └── MotionRenderer        批量渲染能力协议
@@ -50,6 +51,11 @@ Layout 是纯计算。`LayoutContext<TMeta>` 除视口和卡片尺寸外，还�
 Renderer 独占主体批量对象和内容资源。核心方法负责数据、Transform、过渡进度
 和提交比例；可选 capability 负责 Patch、视觉状态、拾取高亮、资源恢复、逐帧
 更新和流式特效。
+
+Renderer 的 Transform 契约直接使用 `TransformBufferView`。视图只保证在当前同步
+调用期间有效；内置 Cards 直接上传到既有 Attribute，Points 复制到自有容量 Buffer。
+完全自定义 Renderer 可以按同一原则复用 GPU/TypedArray 容量，不需要接收或还原
+每项 Transform 对象。
 
 Renderer 通过可异步的 `streamingEffects.enable()` 协商特效 program key。Core
 只管理进入、退出、generation 和时钟，不读取 Renderer 私有 payload，也不假定
@@ -99,9 +105,14 @@ Cards entry；传入自定义 backend 时不会下载默认实现。Backend 不�
 
 Layout 可实现 `calculateInto(count, context, target)`，直接写入按容量增长的 SoA
 `TransformBuffer`。内置 Grid 与 Helix 已使用该路径，避免生成中间 Transform
-对象；旧式 `calculate()` 仍是同一 v2 契约的便利形式。Stage 当前在状态变化时把
-Buffer 转为公共 Transform 快照，因此该路径先优化生成器内存，并为后续 Renderer
-直接消费结构化缓冲保留边界；它不会进入稳态帧循环。
+对象；`calculate()` 仍是同一 v2 契约的便利形式。Stage 状态、稳定 id 重排、
+MotionController 插值、Cards/Points Renderer 和精确拾取都直接消费同一 SoA
+契约，不再经过公共 Transform 快照。过渡 scratch、Effect 适配 Buffer 和 Renderer
+Attribute 按容量复用，不在稳态帧循环分配 Transform 对象。
+
+`defineLayout()` 在定义边界验证 count 与有限值；Stage 信任已定义 Layout，避免每次
+切换重复扫描同一 Buffer。低频 `focusItems()` 的布局构造位于独立动态 chunk，首次
+调用加载并缓存，不占用非聚焦消费者的 Core 基础体积。
 
 ### Interaction
 
@@ -109,7 +120,8 @@ Buffer 转为公共 Transform 快照，因此该路径先优化生成器内存�
 焦点索引和异步 generation。投影四边形、遮挡深度与 surface 正反面计算位于
 `ProjectedItemPicker` 动态 chunk；首次显式 `pick()` 或 pointer 交互加载并等待
 同一个缓存 Promise，非交互 Stage 不下载。加载完成后 pointer hover/click 直接同步调用已缓存内核，
-不在稳态交互路径创建 Promise，也不增加 RAF 或 GPU readback。销毁和 pointerleave
+并按 TypedArray 下标读取 TransformBuffer，不物化 Transform 对象；不在稳态交互路径
+创建 Promise，也不增加 RAF 或 GPU readback。销毁和 pointerleave
 会使尚未完成的冷启动结果失效。
 
 ### Extension Render Pass

@@ -7,7 +7,11 @@ import {
   ShaderMaterial,
   type Group,
 } from 'three'
-import type { MotionItem, Transform } from '../../core/types.js'
+import type { MotionItem } from '../../core/types.js'
+import {
+  TransformBuffer,
+  type TransformBufferView,
+} from '../../core/TransformBuffer.js'
 import type {
   MotionRenderer,
   MotionRendererCapabilities,
@@ -114,7 +118,7 @@ class PointsMotionRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
   private readonly material: ShaderMaterial
   private readonly points: Points<BufferGeometry, ShaderMaterial>
   private items: MotionItem<TMeta>[] = []
-  private transforms: Transform[] = []
+  private readonly transforms = new TransformBuffer()
   private disposed = false
   private capacity = 0
   private geometryBuilds = 0
@@ -170,7 +174,7 @@ class PointsMotionRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
   async setItems(items: readonly MotionItem<TMeta>[]): Promise<boolean> {
     if (this.disposed || this.signal.aborted) return false
     this.items = items.map((item) => ({ ...item }))
-    this.transforms = fitTransforms(this.transforms, items.length)
+    this.transforms.resize(items.length)
     const nextCapacity = resolveBufferCapacity(this.capacity, items.length)
     if (nextCapacity !== this.capacity) {
       const previousGeometry = this.geometry
@@ -208,17 +212,17 @@ class PointsMotionRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
     return true
   }
 
-  setTransforms(transforms: readonly Transform[]): void {
-    this.transforms = transforms.map((transform) => ({ ...transform }))
-    this.writeTransition(this.transforms, this.transforms)
+  setTransforms(buffer: TransformBufferView): void {
+    this.transforms.copyFromBuffer(buffer)
+    this.writeTransition(buffer, buffer)
     this.setProgress(1)
   }
 
   prepareTransition(
-    from: readonly Transform[],
-    to: readonly Transform[],
+    from: TransformBufferView,
+    to: TransformBufferView,
   ): void {
-    this.transforms = to.map((transform) => ({ ...transform }))
+    this.transforms.copyFromBuffer(to)
     this.writeTransition(from, to)
     this.setProgress(0)
   }
@@ -285,24 +289,24 @@ class PointsMotionRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
     this.geometry.dispose()
     this.material.dispose()
     this.items = []
-    this.transforms = []
+    this.transforms.resize(0)
   }
 
-  private writeTransition(from: readonly Transform[], to: readonly Transform[]): void {
+  private writeTransition(from: TransformBufferView, to: TransformBufferView): void {
     if (this.disposed) return
-    const count = Math.min(from.length, to.length, this.items.length)
+    const count = Math.min(from.count, to.count, this.items.length)
     const fromPosition = this.geometry.getAttribute('fromPosition') as BufferAttribute
     const toPosition = this.geometry.getAttribute('toPosition') as BufferAttribute
     const fromScale = this.geometry.getAttribute('fromScale') as BufferAttribute
     const toScale = this.geometry.getAttribute('toScale') as BufferAttribute
     const fromOpacity = this.geometry.getAttribute('fromOpacity') as BufferAttribute
     const toOpacity = this.geometry.getAttribute('toOpacity') as BufferAttribute
-    for (let index = 0; index < count; index += 1) {
-      writeTransform(from[index], index, fromPosition.array as Float32Array,
-        fromScale.array as Float32Array, fromOpacity.array as Float32Array)
-      writeTransform(to[index], index, toPosition.array as Float32Array,
-        toScale.array as Float32Array, toOpacity.array as Float32Array)
-    }
+    ;(fromPosition.array as Float32Array).set(from.positions.subarray(0, count * 3))
+    ;(toPosition.array as Float32Array).set(to.positions.subarray(0, count * 3))
+    ;(fromScale.array as Float32Array).set(from.scales.subarray(0, count))
+    ;(toScale.array as Float32Array).set(to.scales.subarray(0, count))
+    ;(fromOpacity.array as Float32Array).set(from.opacities.subarray(0, count))
+    ;(toOpacity.array as Float32Array).set(to.opacities.subarray(0, count))
     ;[fromPosition, toPosition].forEach((attribute) => markAttributeRange(attribute, count * 3))
     ;[fromScale, toScale, fromOpacity, toOpacity]
       .forEach((attribute) => markAttributeRange(attribute, count))
@@ -366,33 +370,6 @@ function itemColor<TMeta>(
     color.setHSL(hashUnit(item.id), 0.68, 0.58)
   }
   return [color.r, color.g, color.b]
-}
-
-function writeTransform(
-  transform: Transform,
-  index: number,
-  positions: Float32Array,
-  scales: Float32Array,
-  opacities: Float32Array,
-): void {
-  positions.set([transform.x, transform.y, transform.z], index * 3)
-  scales[index] = transform.scale
-  opacities[index] = transform.opacity
-}
-
-function fitTransforms(transforms: readonly Transform[], count: number): Transform[] {
-  return Array.from({ length: count }, (_value, index) => transforms[index]
-    ? { ...transforms[index] }
-    : {
-        x: 0,
-        y: 0,
-        z: 0,
-        scale: 0,
-        rotationX: 0,
-        rotationY: 0,
-        rotationZ: 0,
-        opacity: 0,
-      })
 }
 
 function createVisibilityRanks(count: number): Float32Array {

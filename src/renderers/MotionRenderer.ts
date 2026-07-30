@@ -1,6 +1,7 @@
 import type { BufferGeometry, Group, Material, Texture } from 'three'
 import type { StreamingEffectGpuData } from '../effects/types.js'
-import type { MotionItem, Transform } from '../core/types.js'
+import type { MotionItem } from '../core/types.js'
+import type { TransformBufferView } from '../core/TransformBuffer.js'
 
 export interface MotionRendererVisualState {
   readonly billboard: number
@@ -90,8 +91,12 @@ export interface MotionRenderer<TMeta = unknown> {
   readonly descriptor: MotionRendererDescriptor
   readonly capabilities: MotionRendererCapabilities<TMeta>
   setItems(items: readonly MotionItem<TMeta>[]): Promise<boolean>
-  setTransforms(transforms: readonly Transform[]): void
-  prepareTransition(from: readonly Transform[], to: readonly Transform[]): void
+  /**
+   * Buffer views remain valid only until the next Stage transform submission
+   * and must be consumed synchronously.
+   */
+  setTransforms(buffer: TransformBufferView): void
+  prepareTransition(from: TransformBufferView, to: TransformBufferView): void
   setProgress(progress: number): void
   setVisibleRatio(ratio: number): void
   getStats(): MotionRendererStats
