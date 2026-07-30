@@ -3,7 +3,10 @@ import type {
   StreamingEffectGpuData,
 } from '../effects/types.js'
 import type { MotionRendererStreamingEffectsCapability } from '../renderers/MotionRenderer.js'
-import type { Transform } from './types.js'
+import {
+  TransformBuffer,
+  type TransformBufferView,
+} from './TransformBuffer.js'
 
 interface ActiveEffect {
   effect: StreamingEffect
@@ -25,15 +28,20 @@ export class EffectController {
   private generation = 0
   private disposed = false
   private activating = false
+  private readonly transforms = new TransformBuffer()
 
   constructor(
     private readonly renderer: MotionRendererStreamingEffectsCapability | undefined,
     private readonly onError?: (event: EffectControllerError) => void,
   ) {}
 
-  prepare(effect: StreamingEffect, count: number, activeLimit: number): Transform[] {
+  prepare(
+    effect: StreamingEffect,
+    count: number,
+    activeLimit: number,
+  ): TransformBufferView {
     effect.prepare(count, activeLimit)
-    return effect.calculateTransforms(count, 0)
+    return this.calculateInto(effect, count, 0)
   }
 
   async activate(effect: StreamingEffect, now: number): Promise<boolean> {
@@ -97,9 +105,14 @@ export class EffectController {
     return this.active?.gpuData.activeCount ?? 0
   }
 
-  resolveTransforms(count: number, now: number, paused: boolean): Transform[] | null {
+  resolveBuffer(
+    count: number,
+    now: number,
+    paused: boolean,
+  ): TransformBufferView | null {
     if (!this.active) return null
-    return this.active.effect.calculateTransforms(
+    return this.calculateInto(
+      this.active.effect,
       count,
       this.elapsedAt(now, paused),
     )
@@ -169,11 +182,21 @@ export class EffectController {
     }
   }
 
-  settleReducedMotion(count: number): Transform[] | null {
+  settleReducedMotion(count: number): TransformBufferView | null {
     if (!this.active) return null
-    const transforms = this.active.effect.calculateTransforms(count, 0)
+    const transforms = this.calculateInto(this.active.effect, count, 0)
     this.deactivate()
     return transforms
+  }
+
+  private calculateInto(
+    effect: StreamingEffect,
+    count: number,
+    elapsedSeconds: number,
+  ): TransformBuffer {
+    this.transforms.resize(count)
+    effect.calculateInto(count, elapsedSeconds, this.transforms)
+    return this.transforms
   }
 
   private elapsedAt(now: number, paused: boolean): number {

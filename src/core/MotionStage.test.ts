@@ -2059,7 +2059,9 @@ describe('MotionStage', () => {
       name: 'fixed-test-effect',
       kind: 'radial-burst',
       prepare: vi.fn(),
-      calculateTransforms: () => [transform({ z: 3, scale: 2 })],
+      calculateInto: (_count, _elapsedSeconds, target) => {
+        target.setValues(0, 0, 0, 3, 2, 0, 0, 0, 1)
+      },
       getGpuData: () => ({
         kind: 'radial-burst',
         activeCount: 1,

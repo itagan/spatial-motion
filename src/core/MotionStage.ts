@@ -201,7 +201,6 @@ export class MotionStage<TMeta = unknown> {
   private readonly rendererState: RendererStateCoordinator<TMeta>
   private readonly stageClock = new StageClock()
   private readonly contentState = new StageContentState<TMeta>()
-  private readonly effectTransformBuffer = new TransformBuffer()
   private readonly rotation: StageRotationController
   private readonly events = new StageEventHub<MotionStageEventMap<TMeta>>()
   private readonly itemWidth: number
@@ -507,21 +506,21 @@ export class MotionStage<TMeta = unknown> {
         orientation: 'camera',
         hideBackHemisphere: false,
         hemisphereEdgeFade: 0,
-        calculate: () => target,
+        calculate: () => [],
         calculateInto: (_count, _context, buffer) => {
-          buffer.copyFrom(target)
+          buffer.copyFromBuffer(target)
         },
       },
       options,
     )
     if (!entered) return false
     if (this.reducedMotion) {
-      this.contentState.transforms = new TransformBuffer().copyFrom(target)
+      this.contentState.transforms = new TransformBuffer().copyFromBuffer(target)
       this.contentRenderer.setTransforms(this.contentState.transforms)
       return true
     }
     if (!await this.effectController.activate(effect, performance.now())) {
-      this.contentState.transforms = new TransformBuffer().copyFrom(target)
+      this.contentState.transforms = new TransformBuffer().copyFromBuffer(target)
       this.contentRenderer.setTransforms(this.contentState.transforms)
       return true
     }
@@ -758,12 +757,12 @@ export class MotionStage<TMeta = unknown> {
   }
 
   private resolveCurrentTransformBuffer(now: number): TransformBufferView {
-    const effectTransforms = this.effectController.resolveTransforms(
+    const effectTransforms = this.effectController.resolveBuffer(
       this.contentState.items.length,
       now,
       this.runtime.isPaused(),
     )
-    if (effectTransforms) return this.effectTransformBuffer.copyFrom(effectTransforms)
+    if (effectTransforms) return effectTransforms
     return this.motionController.resolveBuffer(
       this.contentState.transforms,
       now,
@@ -860,7 +859,7 @@ export class MotionStage<TMeta = unknown> {
     this.stopRotation()
     const transforms = this.effectController.settleReducedMotion(this.contentState.items.length)
     if (!transforms) return
-    this.contentState.transforms = new TransformBuffer().copyFrom(transforms)
+    this.contentState.transforms = new TransformBuffer().copyFromBuffer(transforms)
     this.contentRenderer.setTransforms(this.contentState.transforms)
   }
 

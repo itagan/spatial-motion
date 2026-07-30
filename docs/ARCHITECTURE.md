@@ -67,11 +67,16 @@ Renderer 仍只需实现它实际支持的公开能力。
 
 ### Effect
 
-Effect 提供确定性的 CPU 首帧/拾取 Transform 和
+Effect 通过 `calculateInto()` 把确定性的 CPU 首帧、fallback 与拾取状态直接写入
+EffectController 拥有的复用 `TransformBuffer`，并提供
 `{ kind, activeCount, payload }`。Cards 通过受约束的 Effect Program 处理 payload；
 四个内置 Program 使用彼此独立的动态 chunk，首次进入对应 kind 时才加载并缓存。
 其他 Renderer 可以定义自己的 key。
 能力不匹配或 Program 准备失败时 Stage 固定降级为静态首帧并发出 `effecterror`。
+
+内置 Effect 的路径与速度 payload 在 count 不变的质量重配中保持同一 TypedArray；
+路径字段使用标量写入，不为每个实例创建临时数组。EffectController 的 CPU Buffer
+在入场、活动采样和 reduced-motion 之间复用，调用方只能同步消费返回视图。
 
 ### Cards Program
 
@@ -107,7 +112,7 @@ Layout 可实现 `calculateInto(count, context, target)`，直接写入按容量
 `TransformBuffer`。内置 Grid 与 Helix 已使用该路径，避免生成中间 Transform
 对象；`calculate()` 仍是同一 v2 契约的便利形式。Stage 状态、稳定 id 重排、
 MotionController 插值、Cards/Points Renderer 和精确拾取都直接消费同一 SoA
-契约，不再经过公共 Transform 快照。过渡 scratch、Effect 适配 Buffer 和 Renderer
+契约，不再经过公共 Transform 快照。过渡 scratch、Effect CPU Buffer 和 Renderer
 Attribute 按容量复用，不在稳态帧循环分配 Transform 对象。
 
 `defineLayout()` 在定义边界验证 count 与有限值；Stage 信任已定义 Layout，避免每次

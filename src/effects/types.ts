@@ -1,4 +1,4 @@
-import type { Transform } from '../core/types.js'
+import type { TransformBuffer } from '../core/TransformBuffer.js'
 
 export type EmissionMode = 'continuous' | 'burst' | 'wave'
 
@@ -43,7 +43,12 @@ export interface StreamingEffect {
   readonly name: string
   readonly kind: StreamingEffectKind
   prepare(count: number, activeLimit?: number): void
-  calculateTransforms(count: number, elapsedSeconds: number): Transform[]
+  /** Write the CPU fallback/picking frame into the caller-owned reusable buffer. */
+  calculateInto(
+    count: number,
+    elapsedSeconds: number,
+    target: TransformBuffer,
+  ): void
   getGpuData(): StreamingEffectGpuData
 }
 

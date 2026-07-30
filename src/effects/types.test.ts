@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { TransformBuffer } from '../core/TransformBuffer'
 import { linearShooter } from './LinearShooterEffect'
 import { radialBurst } from './RadialBurstEffect'
 import { tunnel } from './TunnelEffect'
@@ -57,10 +58,36 @@ describe('shared effect motion curves', () => {
     radialBurst({ seed: 12, maxActiveItems: 100 }),
   ])('$name preserves active trajectories when the quality cap changes', (effect) => {
     effect.prepare(100, 30)
+    const pathBuffer = effect.getGpuData().payload.paths
+    const speedBuffer = effect.getGpuData().payload.speedFactors
     const paths = Array.from(effect.getGpuData().payload.paths.slice(0, 30 * 4))
     const speeds = Array.from(effect.getGpuData().payload.speedFactors.slice(0, 30))
     effect.prepare(100, 60)
+    expect(effect.getGpuData().payload.paths).toBe(pathBuffer)
+    expect(effect.getGpuData().payload.speedFactors).toBe(speedBuffer)
     expect(Array.from(effect.getGpuData().payload.paths.slice(0, 30 * 4))).toEqual(paths)
     expect(Array.from(effect.getGpuData().payload.speedFactors.slice(0, 30))).toEqual(speeds)
+  })
+
+  it.each([
+    tunnel({ seed: 13 }),
+    linearShooter({ seed: 13 }),
+    vortex({ seed: 13 }),
+    radialBurst({ seed: 13 }),
+  ])('$name writes steady frames into the caller-owned capacity', (effect) => {
+    const target = new TransformBuffer(100)
+    const positions = target.positions
+    const scales = target.scales
+    const rotations = target.rotations
+    const opacities = target.opacities
+
+    effect.prepare(100, 50)
+    effect.calculateInto(100, 0, target)
+    effect.calculateInto(100, 1, target)
+
+    expect(target.positions).toBe(positions)
+    expect(target.scales).toBe(scales)
+    expect(target.rotations).toBe(rotations)
+    expect(target.opacities).toBe(opacities)
   })
 })

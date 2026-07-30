@@ -81,7 +81,10 @@ Buffer 路径。新增布局应：
 
 ### `src/effects`
 
-特效描述持续变化的 GPU 路径，必须复用固定实例池，并遵守 `maxActiveItems` 与质量档位限制。新增特效时应复用统一的路径/参数结构，避免为切换效果新建 Mesh 或 Draw Call，并补充配置边界与更新行为测试。
+特效描述持续变化的 GPU 路径，必须复用固定实例池，并遵守 `maxActiveItems` 与质量
+档位限制。CPU 首帧、fallback 和拾取通过 `calculateInto()` 写入调用方 Buffer；
+`prepare()` 在 count 不变时复用路径、速度和参数 TypedArray，禁止逐项临时数组。
+新增特效不得为切换新建 Mesh 或 Draw Call，并需覆盖配置边界、容量复用和更新行为。
 
 ### `src/renderers`
 

@@ -1,4 +1,4 @@
-import type { Transform } from '../core/types.js'
+import type { TransformBuffer } from '../core/TransformBuffer.js'
 import {
   createEffectParameters,
   effectEdgeFade,
@@ -55,8 +55,10 @@ export class VortexEffect implements StreamingEffect {
     if (this.preparedCount === count && this.preparedActiveCount === activeCount) return
     this.preparedCount = count
     this.preparedActiveCount = activeCount
-    this.paths = new Float32Array(count * 4)
-    this.speedFactors = new Float32Array(count)
+    if (this.speedFactors.length !== count) {
+      this.paths = new Float32Array(count * 4)
+      this.speedFactors = new Float32Array(count)
+    }
 
     for (let index = 0; index < count; index += 1) {
       const angle = random(index * 3 + 1, this.options.seed) * Math.PI * 2
@@ -64,16 +66,25 @@ export class VortexEffect implements StreamingEffect {
       const offset = index < activeCount
         ? stableEffectPhase(index, this.options.seed)
         : 0
-      this.paths.set([angle, radius, offset, 0], index * 4)
+      const pathIndex = index * 4
+      this.paths[pathIndex] = angle
+      this.paths[pathIndex + 1] = radius
+      this.paths[pathIndex + 2] = offset
+      this.paths[pathIndex + 3] = 0
       this.speedFactors[index] = index < activeCount
         ? 0.88 + random(index + 10_000, this.options.seed) * 0.24
         : -1
     }
   }
 
-  calculateTransforms(count: number, elapsedSeconds: number): Transform[] {
+  calculateInto(
+    count: number,
+    elapsedSeconds: number,
+    target: TransformBuffer,
+  ): void {
     if (this.preparedCount !== count) this.prepare(count)
-    return Array.from({ length: count }, (_, index) => {
+    target.resize(count)
+    for (let index = 0; index < count; index += 1) {
       const pathIndex = index * 4
       const baseAngle = this.paths[pathIndex]
       const outerRadius = this.paths[pathIndex + 1]
@@ -87,17 +98,18 @@ export class VortexEffect implements StreamingEffect {
       const angleDirection = this.options.direction === 'out' ? 1 : -1
       const angle = baseAngle + progress * this.options.turns * Math.PI * 2 * angleDirection
       const radius = this.options.innerRadius + (outerRadius - this.options.innerRadius) * spread
-      return {
-        x: Math.cos(angle) * radius,
-        y: Math.sin(angle) * radius,
-        z: this.options.nearZ + (this.options.farZ - this.options.nearZ) * travel,
-        scale: this.options.startScale + (this.options.endScale - this.options.startScale) * travel,
-        rotationX: 0,
-        rotationY: 0,
-        rotationZ: 0,
-        opacity: enabled ? effectEdgeFade(progress, 0.07, 0.18) : 0,
-      }
-    })
+      target.setValues(
+        index,
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius,
+        this.options.nearZ + (this.options.farZ - this.options.nearZ) * travel,
+        this.options.startScale + (this.options.endScale - this.options.startScale) * travel,
+        0,
+        0,
+        0,
+        enabled ? effectEdgeFade(progress, 0.07, 0.18) : 0,
+      )
+    }
   }
 
   getGpuData(): VortexGpuData {

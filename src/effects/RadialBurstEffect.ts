@@ -1,4 +1,4 @@
-import type { Transform } from '../core/types.js'
+import type { TransformBuffer } from '../core/TransformBuffer.js'
 import {
   createEffectParameters,
   effectEdgeFade,
@@ -53,8 +53,10 @@ export class RadialBurstEffect implements StreamingEffect {
     if (this.preparedCount === count && this.preparedActiveCount === activeCount) return
     this.preparedCount = count
     this.preparedActiveCount = activeCount
-    this.paths = new Float32Array(count * 4)
-    this.speedFactors = new Float32Array(count)
+    if (this.speedFactors.length !== count) {
+      this.paths = new Float32Array(count * 4)
+      this.speedFactors = new Float32Array(count)
+    }
 
     for (let index = 0; index < count; index += 1) {
       const azimuth = random(index * 4 + 1, this.options.seed) * Math.PI * 2
@@ -63,16 +65,25 @@ export class RadialBurstEffect implements StreamingEffect {
       const offset = index < activeCount
         ? stableEffectPhase(index, this.options.seed)
         : 0
-      this.paths.set([azimuth, elevation, radius, offset], index * 4)
+      const pathIndex = index * 4
+      this.paths[pathIndex] = azimuth
+      this.paths[pathIndex + 1] = elevation
+      this.paths[pathIndex + 2] = radius
+      this.paths[pathIndex + 3] = offset
       this.speedFactors[index] = index < activeCount
         ? 0.9 + random(index + 11_000, this.options.seed) * 0.2
         : -1
     }
   }
 
-  calculateTransforms(count: number, elapsedSeconds: number): Transform[] {
+  calculateInto(
+    count: number,
+    elapsedSeconds: number,
+    target: TransformBuffer,
+  ): void {
     if (this.preparedCount !== count) this.prepare(count)
-    return Array.from({ length: count }, (_, index) => {
+    target.resize(count)
+    for (let index = 0; index < count; index += 1) {
       const pathIndex = index * 4
       const azimuth = this.paths[pathIndex]
       const elevation = this.paths[pathIndex + 1]
@@ -86,17 +97,18 @@ export class RadialBurstEffect implements StreamingEffect {
       const distance = this.options.sourceRadius
         + (outerRadius - this.options.sourceRadius) * smoothstep(0, 1, travel)
       const horizontal = Math.cos(elevation) * distance
-      return {
-        x: Math.cos(azimuth) * horizontal,
-        y: Math.sin(elevation) * distance,
-        z: this.options.z + Math.sin(azimuth) * horizontal * this.options.depthScale,
-        scale: this.options.startScale + (this.options.endScale - this.options.startScale) * travel,
-        rotationX: 0,
-        rotationY: 0,
-        rotationZ: 0,
-        opacity: enabled ? effectEdgeFade(progress, 0.06, 0.2) : 0,
-      }
-    })
+      target.setValues(
+        index,
+        Math.cos(azimuth) * horizontal,
+        Math.sin(elevation) * distance,
+        this.options.z + Math.sin(azimuth) * horizontal * this.options.depthScale,
+        this.options.startScale + (this.options.endScale - this.options.startScale) * travel,
+        0,
+        0,
+        0,
+        enabled ? effectEdgeFade(progress, 0.06, 0.2) : 0,
+      )
+    }
   }
 
   getGpuData(): RadialBurstGpuData {

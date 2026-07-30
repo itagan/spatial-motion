@@ -1,4 +1,4 @@
-import type { Transform } from '../core/types.js'
+import type { TransformBuffer } from '../core/TransformBuffer.js'
 import {
   createEffectParameters,
   effectEdgeFade,
@@ -64,8 +64,10 @@ export class TunnelEffect implements StreamingEffect {
     if (this.preparedCount === count && this.preparedActiveCount === activeCount) return
     this.preparedCount = count
     this.preparedActiveCount = activeCount
-    this.paths = new Float32Array(count * 4)
-    this.speedFactors = new Float32Array(count)
+    if (this.speedFactors.length !== count) {
+      this.paths = new Float32Array(count * 4)
+      this.speedFactors = new Float32Array(count)
+    }
     for (let index = 0; index < count; index += 1) {
       const lane = index % this.options.directionCount
       const randomAngle = random(index * 3 + 1, this.options.seed)
@@ -76,16 +78,26 @@ export class TunnelEffect implements StreamingEffect {
       const offset = index < activeCount
         ? stableEffectPhase(index, this.options.seed)
         : 0
-      this.paths.set([angle, radius, offset, this.options.crossSection === 'square' ? 1 : 0], index * 4)
+      const pathIndex = index * 4
+      this.paths[pathIndex] = angle
+      this.paths[pathIndex + 1] = radius
+      this.paths[pathIndex + 2] = offset
+      this.paths[pathIndex + 3] = this.options.crossSection === 'square' ? 1 : 0
       this.speedFactors[index] = index < activeCount
         ? 0.88 + random(index + 8000, this.options.seed) * 0.24
         : -1
     }
   }
 
-  calculateTransforms(count: number, elapsedSeconds: number): Transform[] {
+  calculateInto(
+    count: number,
+    elapsedSeconds: number,
+    target: TransformBuffer,
+  ): void {
     if (this.preparedCount !== count) this.prepare(count)
-    return Array.from({ length: count }, (_, index) => {
+    target.resize(count)
+    const emission = emissionEnvelope(this.options.emission, elapsedSeconds)
+    for (let index = 0; index < count; index += 1) {
       const pathIndex = index * 4
       const angle = this.paths[pathIndex]
       const outerRadius = this.paths[pathIndex + 1]
@@ -96,18 +108,25 @@ export class TunnelEffect implements StreamingEffect {
       const spread = smoothstep(0, 1, travel)
       const currentAngle = angle + progress * this.options.twist
       const radius = this.options.innerRadius + (outerRadius - this.options.innerRadius) * spread
-      const point = crossSectionPoint(currentAngle, radius, this.options.crossSection)
-      return {
-        x: point.x,
-        y: point.y,
-        z: this.options.farZ + (this.options.nearZ - this.options.farZ) * travel,
-        scale: this.options.farScale + (this.options.nearScale - this.options.farScale) * travel,
-        rotationX: 0,
-        rotationY: 0,
-        rotationZ: 0,
-        opacity: enabled ? effectEdgeFade(progress, 0.08, 0.18) * emissionEnvelope(this.options.emission, elapsedSeconds) : 0,
+      let x = Math.cos(currentAngle)
+      let y = Math.sin(currentAngle)
+      if (this.options.crossSection === 'square') {
+        const divisor = Math.max(Math.abs(x), Math.abs(y), Number.EPSILON)
+        x /= divisor
+        y /= divisor
       }
-    })
+      target.setValues(
+        index,
+        x * radius,
+        y * radius,
+        this.options.farZ + (this.options.nearZ - this.options.farZ) * travel,
+        this.options.farScale + (this.options.nearScale - this.options.farScale) * travel,
+        0,
+        0,
+        0,
+        enabled ? effectEdgeFade(progress, 0.08, 0.18) * emission : 0,
+      )
+    }
   }
 
   getGpuData(): TunnelGpuData {
@@ -135,18 +154,6 @@ export class TunnelEffect implements StreamingEffect {
       },
     }
   }
-}
-
-function crossSectionPoint(
-  angle: number,
-  radius: number,
-  crossSection: NonNullable<TunnelOptions['crossSection']>,
-): { x: number; y: number } {
-  const x = Math.cos(angle)
-  const y = Math.sin(angle)
-  if (crossSection === 'circle') return { x: x * radius, y: y * radius }
-  const divisor = Math.max(Math.abs(x), Math.abs(y), Number.EPSILON)
-  return { x: x / divisor * radius, y: y / divisor * radius }
 }
 
 export const tunnel = (options: TunnelOptions = {}) => new TunnelEffect(options)

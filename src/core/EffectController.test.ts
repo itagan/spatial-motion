@@ -7,7 +7,7 @@ function effect(kind: string): StreamingEffect {
     name: kind,
     kind,
     prepare: vi.fn(),
-    calculateTransforms: () => [],
+    calculateInto: vi.fn(),
     getGpuData: () => ({
       kind,
       activeCount: 0,
@@ -17,6 +17,38 @@ function effect(kind: string): StreamingEffect {
 }
 
 describe('EffectController', () => {
+  it('reuses one SoA transform buffer for entry, active sampling, and reduced motion', async () => {
+    const renderer = {
+      enable: vi.fn(() => true),
+      disable: vi.fn(),
+      setTime: vi.fn(),
+    }
+    const controller = new EffectController(renderer)
+    const bufferEffect: StreamingEffect = {
+      name: 'buffer',
+      kind: 'buffer',
+      prepare: vi.fn(),
+      calculateInto(count, elapsedSeconds, target) {
+        target.resize(count)
+        for (let index = 0; index < count; index += 1) {
+          target.setValues(index, elapsedSeconds + index, 0, 0, 1, 0, 0, 0, 1)
+        }
+      },
+      getGpuData: () => ({ kind: 'buffer', activeCount: 2, payload: null }),
+    }
+
+    const entry = controller.prepare(bufferEffect, 2, 2)
+    const positions = entry.positions
+    expect(Array.from(entry.positions.slice(0, 6))).toEqual([0, 0, 0, 1, 0, 0])
+    await expect(controller.activate(bufferEffect, 0)).resolves.toBe(true)
+    const active = controller.resolveBuffer(2, 500, false)
+    expect(active).toBe(entry)
+    expect(active?.positions).toBe(positions)
+    expect(active?.positions[0]).toBe(0.5)
+    expect(controller.settleReducedMotion(2)).toBe(entry)
+    expect(entry.positions[0]).toBe(0)
+  })
+
   it('negotiates renderer-defined effect keys and falls back without activation', async () => {
     const enable = vi.fn()
     const renderer = {
