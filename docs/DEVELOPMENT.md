@@ -63,15 +63,20 @@ npm run pack:check
 
 ### `src/core`
 
-`MotionStage` 是主要运行时入口，负责场景生命周期、数据更新、布局/特效切换、拾取、聚焦、质量控制和资源释放。`Timeline` 负责编排串行步骤。公共契约放在 `types.ts`，通用插值放在 `math.ts`。
+`MotionStage` 是公共门面，负责生命周期、公开 API 和帧提交；`StageRenderHost`
+唯一拥有 WebGL 环境，`StageContentCoordinator` 管理数据，`StageMotionCoordinator`
+管理布局/特效/聚焦用例。精确拾取、聚焦布局、Effect 入场和 Extension Host 属于
+低频动态模块，不应重新进入 Core 基础 entry。`Timeline` 负责编排串行步骤。
+公共契约放在 `types.ts`，通用插值放在 `math.ts`。
 
 修改这里时重点检查：快速连续调用的竞态、中断旧动画、销毁后的行为、页面可见性、ResizeObserver 和事件监听器清理。
 
 ### `src/layouts`
 
 布局是无渲染依赖的计算模块：根据数量和 `LayoutContext` 返回 `Transform[]`，或通过
-`calculateInto()` 直接写入可复用的 SoA `TransformBuffer`。高频/大数量布局优先使用
-Buffer 路径。新增布局应：
+`calculateInto()` 直接写入可复用的 SoA `TransformBuffer`。八个内置布局全部直接
+使用 Buffer 路径；新增内置布局也必须如此。仅面向低频自定义布局的便利实现可以
+返回数组。新增布局应：
 
 1. 实现稳定的 `Layout` 契约。
 2. 对 `count = 0`、单个元素和常见大量元素提供有限数值。

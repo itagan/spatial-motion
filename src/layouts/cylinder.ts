@@ -1,4 +1,4 @@
-import type { Layout, Transform } from '../core/types.js'
+import type { Layout } from '../core/types.js'
 import { defineLayout } from './defineLayout.js'
 
 export interface CylinderOptions {
@@ -22,8 +22,8 @@ export function cylinder(options: CylinderOptions = {}): Layout {
   return defineLayout({
     name: 'cylinder',
     orientation,
-    calculate(count): Transform[] {
-      if (count <= 0) return []
+    calculateInto(count, _context, target): void {
+      if (count <= 0) return
       // A cylinder with height close to its diameter needs roughly π times
       // as many columns as rows to keep cards visually square and evenly dense.
       const requestedRows = positiveInteger(options.rows)
@@ -40,7 +40,7 @@ export function cylinder(options: CylinderOptions = {}): Layout {
         : horizontalUnits > 1 ? (arcAngle * radius) / (horizontalUnits - 1) : arcAngle * radius
       const spacing = positive(options.spacing, horizontalSpacing)
       const itemScale = Math.min(1, horizontalSpacing, spacing) * density
-      const transforms: Transform[] = []
+      let targetIndex = 0
 
       rowDistribution.forEach((rowItems, row) => {
         for (let column = 0; column < rowItems; column += 1) {
@@ -48,19 +48,20 @@ export function cylinder(options: CylinderOptions = {}): Layout {
             ? (column + (row % 2 === 1 ? 0.5 : 0)) / rowItems
             : rowItems === 1 ? 0.5 : column / (rowItems - 1)
           const angle = startAngle + progress * arcAngle
-          transforms.push({
-            x: Math.sin(angle) * radius,
-            y: (rows / 2 - row - 0.5) * spacing,
-            z: Math.cos(angle) * radius,
-            scale: itemScale,
-            rotationX: 0,
-            rotationY: orientation === 'surface' ? angle : 0,
-            rotationZ: 0,
-            opacity: 1,
-          })
+          target.setValues(
+            targetIndex,
+            Math.sin(angle) * radius,
+            (rows / 2 - row - 0.5) * spacing,
+            Math.cos(angle) * radius,
+            itemScale,
+            0,
+            orientation === 'surface' ? angle : 0,
+            0,
+            1,
+          )
+          targetIndex += 1
         }
       })
-      return transforms
     },
   })
 }

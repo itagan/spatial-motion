@@ -1,4 +1,5 @@
-import type { Layout, Transform } from '../core/types.js'
+import type { Layout } from '../core/types.js'
+import type { TransformBuffer } from '../core/TransformBuffer.js'
 import { distributeWeighted } from './distribution.js'
 import { defineLayout } from './defineLayout.js'
 
@@ -25,11 +26,13 @@ export function cone(options: ConeOptions = {}): Layout {
   return defineLayout({
     name: 'cone',
     orientation: orientation === 'camera' ? 'camera' : 'surface',
-    calculate(count): Transform[] {
-      if (count <= 0) return []
+    calculateInto(count, _context, target): void {
+      if (count <= 0) return
       if (count === 1) {
         const singleRadius = topRadius
-        return [createConeTransform(
+        writeConeTransform(
+          target,
+          0,
           Math.sin(startAngle) * singleRadius,
           height / 2,
           Math.cos(startAngle) * singleRadius,
@@ -39,7 +42,8 @@ export function cone(options: ConeOptions = {}): Layout {
           radius,
           topRadius,
           height,
-        )]
+        )
+        return
       }
 
       const radiusDelta = radius - topRadius
@@ -50,7 +54,7 @@ export function cone(options: ConeOptions = {}): Layout {
       const distribution = calculateConeRingDistribution(count, ringCount, topRadius, radius)
       const slantSpacing = slantHeight / (ringCount - 1)
       const density = Math.max(0, finite(options.density, 0.82))
-      const transforms: Transform[] = []
+      let targetIndex = 0
 
       for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
         const progress = ringIndex / (ringCount - 1)
@@ -66,7 +70,9 @@ export function cone(options: ConeOptions = {}): Layout {
           const angle = itemsInRing === 1
             ? startAngle
             : startAngle + offset + (2 * Math.PI * index) / itemsInRing
-          transforms.push(createConeTransform(
+          writeConeTransform(
+            target,
+            targetIndex,
             Math.sin(angle) * ringRadius,
             y,
             Math.cos(angle) * ringRadius,
@@ -76,11 +82,10 @@ export function cone(options: ConeOptions = {}): Layout {
             radius,
             topRadius,
             height,
-          ))
+          )
+          targetIndex += 1
         }
       }
-
-      return transforms
     },
   })
 }
@@ -102,7 +107,9 @@ export function calculateConeRingDistribution(
   return distributeWeighted(count, weights)
 }
 
-function createConeTransform(
+function writeConeTransform(
+  target: TransformBuffer,
+  index: number,
   x: number,
   y: number,
   z: number,
@@ -112,17 +119,18 @@ function createConeTransform(
   radius = 1,
   topRadius = 0,
   height = 1,
-): Transform {
-  return {
+): void {
+  target.setValues(
+    index,
     x,
     y,
     z,
     scale,
-    rotationX: orientation === 'surface' ? -Math.atan((radius - topRadius) / height) : 0,
-    rotationY: orientation === 'camera' ? 0 : angle,
-    rotationZ: 0,
-    opacity: 1,
-  }
+    orientation === 'surface' ? -Math.atan((radius - topRadius) / height) : 0,
+    orientation === 'camera' ? 0 : angle,
+    0,
+    1,
+  )
 }
 
 function finite(value: number | undefined, fallback: number): number {

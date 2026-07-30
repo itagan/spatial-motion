@@ -1,4 +1,4 @@
-import type { Layout, Transform } from '../core/types.js'
+import type { Layout } from '../core/types.js'
 import { distributeWeighted } from './distribution.js'
 import { defineLayout } from './defineLayout.js'
 
@@ -35,8 +35,8 @@ export function ring(options: RingOptions = {}): Layout {
   return defineLayout({
     name: 'ring',
     orientation: orientation === 'camera' ? 'camera' : 'surface',
-    calculate(count): Transform[] {
-      if (count <= 0) return []
+    calculateInto(count, _context, target): void {
+      if (count <= 0) return
       const ringCount = Math.max(
         1,
         Math.min(count, positiveInteger(options.rings) ?? Math.ceil(Math.sqrt(count / Math.PI))),
@@ -49,7 +49,7 @@ export function ring(options: RingOptions = {}): Layout {
         distributionMode,
       )
       const density = Math.max(0, finite(options.density, 0.78))
-      const transforms: Transform[] = []
+      let targetIndex = 0
 
       for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
         const radius = innerRadius + ringIndex * spacing
@@ -60,20 +60,20 @@ export function ring(options: RingOptions = {}): Layout {
 
         for (let index = 0; index < itemsInRing; index += 1) {
           const angle = startAngle + direction * (offset + (2 * Math.PI * index) / itemsInRing)
-          transforms.push({
-            x: Math.cos(angle) * radius,
-            y: Math.sin(angle) * radius,
-            z: 0,
-            scale: itemScale,
-            rotationX: 0,
-            rotationY: 0,
-            rotationZ: orientation === 'tangent' ? angle + Math.PI / 2 : 0,
-            opacity: 1,
-          })
+          target.setValues(
+            targetIndex,
+            Math.cos(angle) * radius,
+            Math.sin(angle) * radius,
+            0,
+            itemScale,
+            0,
+            0,
+            orientation === 'tangent' ? angle + Math.PI / 2 : 0,
+            1,
+          )
+          targetIndex += 1
         }
       }
-
-      return transforms
     },
   })
 }

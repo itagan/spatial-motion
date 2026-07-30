@@ -1246,12 +1246,24 @@ describe('MotionStage', () => {
       },
       dispose,
     })
+    await vi.waitFor(() => expect(context).not.toBeNull())
 
     stage.destroy()
     expect((context as StageExtensionContext | null)?.signal.aborted).toBe(true)
     mounted.resolve()
     await expect(adding).rejects.toThrow('destroyed or the extension was removed during mount')
     expect(dispose).toHaveBeenCalledOnce()
+  })
+
+  it('does not mount an extension when the Stage is destroyed during lazy Host loading', async () => {
+    const stage = createStage()
+    const mount = vi.fn()
+    const adding = stage.addExtension({ mount })
+
+    stage.destroy()
+
+    await expect(adding).rejects.toThrow('MotionStage has been destroyed')
+    expect(mount).not.toHaveBeenCalled()
   })
 
   it('cleans up and reports a failed extension mount', async () => {
@@ -1532,6 +1544,60 @@ describe('MotionStage', () => {
     stage.destroy()
   })
 
+  it('discards a lazy Effect entry when a newer layout wins', async () => {
+    const stage = createStage()
+    const cards = currentCards()
+    await stage.setItems([{ id: 'item' }])
+    const entering = stage.enterEffect(new TunnelEffect(), { duration: 0 })
+    const newerLayout = stage.to(
+      layout(() => [transform({ x: 7 })], 'newer-layout'),
+      { duration: 0 },
+    )
+
+    await expect(entering).resolves.toBe(false)
+    await expect(newerLayout).resolves.toBe(true)
+    expect(cards.enableEffect).not.toHaveBeenCalled()
+    expect(bufferTransforms(lastTransformBuffer(cards.setTransforms))[0].x).toBe(7)
+    stage.destroy()
+  })
+
+  it('discards a lazy Effect entry after content changes or destroy', async () => {
+    const stage = createStage()
+    const cards = currentCards()
+    await stage.setItems([{ id: 'old' }])
+    const staleEntry = stage.enterEffect(new TunnelEffect(), { duration: 0 })
+    await stage.setItems([{ id: 'new' }])
+
+    await expect(staleEntry).resolves.toBe(false)
+    expect(cards.enableEffect).not.toHaveBeenCalled()
+
+    const destroyedEntry = stage.enterEffect(new TunnelEffect(), { duration: 0 })
+    stage.destroy()
+    await expect(destroyedEntry).resolves.toBe(false)
+    expect(cards.enableEffect).not.toHaveBeenCalled()
+  })
+
+  it('does not let slow Effect activation overwrite a newer layout', async () => {
+    const activation = deferred<boolean>()
+    const stage = createStage()
+    const cards = currentCards()
+    cards.enableEffect.mockReturnValueOnce(activation.promise)
+    await stage.setItems([{ id: 'item' }])
+    const entering = stage.enterEffect(new TunnelEffect(), { duration: 0 })
+    await vi.waitFor(() => expect(cards.enableEffect).toHaveBeenCalledOnce())
+
+    await stage.to(
+      layout(() => [transform({ x: 9 })], 'latest-layout'),
+      { duration: 0 },
+    )
+    activation.resolve(true)
+
+    await expect(entering).resolves.toBe(false)
+    expect(stage.getPerformanceStats().effect).toBeNull()
+    expect(bufferTransforms(lastTransformBuffer(cards.setTransforms))[0].x).toBe(9)
+    stage.destroy()
+  })
+
   it('picks visible items and forwards pointer clicks', async () => {
     const onItemClick = vi.fn()
     const stage = createStage()
@@ -1557,12 +1623,14 @@ describe('MotionStage', () => {
     await stage.to(layout(() => [transform()]), { duration: 0 })
     const internals = stage as unknown as {
       contentState: { transforms: TransformBufferView }
-      resolveCurrentTransformBuffer(now: number): TransformBufferView
+      motionCoordinator: {
+        resolveTransformBuffer(now: number): TransformBufferView
+      }
     }
     const settled = internals.contentState.transforms
-    const first = internals.resolveCurrentTransformBuffer(performance.now())
+    const first = internals.motionCoordinator.resolveTransformBuffer(performance.now())
 
-    expect(internals.resolveCurrentTransformBuffer(performance.now())).toBe(first)
+    expect(internals.motionCoordinator.resolveTransformBuffer(performance.now())).toBe(first)
     await stage.pick(50, 50)
     expect(internals.contentState.transforms).toBe(settled)
     stage.destroy()
