@@ -595,7 +595,7 @@ export class MotionStage<TMeta = unknown> {
     clientX: number,
     clientY: number,
     options: number | PickOptions = {},
-  ): PickResult<TMeta> | null {
+  ): Promise<PickResult<TMeta> | null> {
     this.assertActive()
     return this.interaction.pick(clientX, clientY, options)
   }

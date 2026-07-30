@@ -478,13 +478,13 @@ stage.on('itemclick', ({ item }) => {
   void stage.focusItems([item.id])
 })
 
-const hit = stage.pick(pointerEvent.clientX, pointerEvent.clientY)
-const paddedHit = stage.pick(pointerEvent.clientX, pointerEvent.clientY, {
+const hit = await stage.pick(pointerEvent.clientX, pointerEvent.clientY)
+const paddedHit = await stage.pick(pointerEvent.clientX, pointerEvent.clientY, {
   padding: 6,
 })
 
 // 调试重叠卡片时，可按屏幕中心距离选择被遮挡卡片
-const includingOccluded = stage.pick(pointerEvent.clientX, pointerEvent.clientY, {
+const includingOccluded = await stage.pick(pointerEvent.clientX, pointerEvent.clientY, {
   includeOccluded: true,
 })
 
@@ -496,7 +496,7 @@ await stage.focusItems(['guest-1', 'guest-8'], {
 await stage.restoreLayout({ duration: 1000 })
 ```
 
-默认拾取按照卡片当前帧的投影四边形判断，多张卡片重叠时返回距离相机最近的一张；透明、休眠、质量降级隐藏、球体背面及背向相机的实例不会命中。计算仅发生在调用 `pick()` 或指针事件时，不进行 GPU readback，也不进入逐帧渲染路径。第三个参数传数字仍保留为旧版中心半径拾取兼容模式。
+默认拾取按照卡片当前帧的投影四边形判断，多张卡片重叠时返回距离相机最近的一张；透明、休眠、质量降级隐藏、球体背面及背向相机的实例不会命中。精确拾取内核在首次 `pick()` 或指针交互时加载并缓存，`pick()` 返回 Promise；非交互 Stage 不下载该模块。计算不进行 GPU readback，也不进入逐帧渲染路径。第三个参数传数字使用中心半径拾取模式。
 
 资源释放：
 

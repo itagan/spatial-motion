@@ -1477,14 +1477,15 @@ describe('MotionStage', () => {
     await stage.setItems([{ id: 'center' }])
     await stage.to(layout(() => [transform()]), { duration: 0 })
 
-    expect(stage.pick(50, 50)?.item.id).toBe('center')
-    expect(stage.pick(0, 0, 10)).toBeNull()
+    expect((await stage.pick(50, 50))?.item.id).toBe('center')
+    expect(await stage.pick(0, 0, 10)).toBeNull()
     const canvas = document.querySelector('canvas')
     canvas?.dispatchEvent(new PointerEvent('pointerup', { clientX: 50, clientY: 50 }))
+    await Promise.resolve()
     expect(onItemClick).toHaveBeenCalledWith({ id: 'center' }, 0)
 
     await stage.to(layout(() => [transform({ opacity: 0.01 })]), { duration: 0 })
-    expect(stage.pick(50, 50)).toBeNull()
+    expect(await stage.pick(50, 50)).toBeNull()
     stage.destroy()
   })
 
@@ -1499,9 +1500,23 @@ describe('MotionStage', () => {
     const settled = internals.contentState.transforms
 
     expect(internals.resolveCurrentTransforms(performance.now())).toBe(settled)
-    stage.pick(50, 50)
+    await stage.pick(50, 50)
     expect(internals.contentState.transforms).toBe(settled)
     stage.destroy()
+  })
+
+  it('does not publish a cold pointer result after destroy', async () => {
+    const onItemClick = vi.fn()
+    const stage = createStage()
+    stage.on('itemclick', ({ item, index }) => onItemClick(item, index))
+    const canvas = document.querySelector('canvas')
+
+    canvas?.dispatchEvent(new PointerEvent('pointerup', { clientX: 50, clientY: 50 }))
+    stage.destroy()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onItemClick).not.toHaveBeenCalled()
   })
 
   it('reports hover changes once and clears GPU highlighting on pointer leave', async () => {
@@ -1528,7 +1543,7 @@ describe('MotionStage', () => {
     expect(onItemHover).not.toHaveBeenCalled()
     expect(frame).not.toBeNull()
     ;(frame as unknown as FrameRequestCallback)(performance.now())
-    expect(onItemHover).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(onItemHover).toHaveBeenCalledTimes(1))
     expect(onItemHover).toHaveBeenCalledWith({ id: 'center' }, 0)
     expect(cards.setHoverIndex).toHaveBeenLastCalledWith(0)
 
@@ -1538,6 +1553,7 @@ describe('MotionStage', () => {
 
     stage.pause()
     canvas?.dispatchEvent(new PointerEvent('pointermove', { clientX: 50, clientY: 50 }))
+    await Promise.resolve()
     expect(onItemHover).toHaveBeenCalledTimes(3)
     expect(onItemHover).toHaveBeenLastCalledWith({ id: 'center' }, 0)
     stage.destroy()
@@ -1637,8 +1653,8 @@ describe('MotionStage', () => {
     await billboard.setItems([{ id: 'portrait' }])
     await billboard.to(layout(() => [transform()]), { duration: 0 })
 
-    expect(billboard.pick(52, 50)).toBeNull()
-    expect(billboard.pick(50, 52)?.item.id).toBe('portrait')
+    expect(await billboard.pick(52, 50)).toBeNull()
+    expect((await billboard.pick(50, 52))?.item.id).toBe('portrait')
     billboard.destroy()
 
     const surface = createStage({ renderer: cardsRenderer({ aspectRatio: 0.25 }) })
@@ -1648,8 +1664,8 @@ describe('MotionStage', () => {
       orientation: 'surface',
       calculate: () => [transform()],
     }, { duration: 0 })
-    expect(surface.pick(52, 50)).toBeNull()
-    expect(surface.pick(50, 52)?.item.id).toBe('portrait')
+    expect(await surface.pick(52, 50)).toBeNull()
+    expect((await surface.pick(50, 52))?.item.id).toBe('portrait')
     surface.destroy()
   })
 
@@ -1667,8 +1683,8 @@ describe('MotionStage', () => {
 
     expect(stageMocks.cards).toHaveLength(0)
     expect(renderer.capabilities.viewport?.resize).toHaveBeenCalled()
-    expect(stage.pick(52, 50)?.item.id).toBe('point')
-    expect(stage.pick(58, 50)).toBeNull()
+    expect((await stage.pick(52, 50))?.item.id).toBe('point')
+    expect(await stage.pick(58, 50)).toBeNull()
     stage.setRotation(0.25, 0.5)
     expect(root?.rotation.x).toBeCloseTo(0.25)
     expect(root?.rotation.y).toBeCloseTo(0.5)
@@ -1740,7 +1756,7 @@ describe('MotionStage', () => {
     expect(fixture.setTransforms).toHaveBeenLastCalledWith([
       expect.objectContaining({ x: 2 }),
     ])
-    expect(stage.pick(50, 50)).toBeNull()
+    expect(await stage.pick(50, 50)).toBeNull()
     expect(stage.focusItem('line')).toBe(true)
     stage.destroy()
     expect(fixture.disposeGeometry).toHaveBeenCalledOnce()
@@ -1772,7 +1788,7 @@ describe('MotionStage', () => {
     await expect(newer).resolves.toBe(true)
     first.resolve(true)
     await expect(older).resolves.toBe(false)
-    expect(stage.pick(50, 50)?.item.title).toBe('newer')
+    expect((await stage.pick(50, 50))?.item.title).toBe('newer')
     stage.destroy()
   })
 
@@ -1786,7 +1802,7 @@ describe('MotionStage', () => {
     await stage.updateItem('shape', { title: 'Updated' })
 
     expect(fixture.patch).toHaveBeenCalledOnce()
-    expect(stage.pick(50, 50)?.item.id).toBe('shape')
+    expect((await stage.pick(50, 50))?.item.id).toBe('shape')
     stage.focusItem('shape')
     expect(fixture.highlight).toHaveBeenLastCalledWith(0)
     container.querySelector('canvas')?.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
@@ -1898,9 +1914,9 @@ describe('MotionStage', () => {
     await stage.setItems([{ id: 'card' }])
     await stage.to(layout(() => [transform({ scale: 1 })]), { duration: 0 })
 
-    expect(stage.pick(58, 50)).toBeNull()
-    expect(stage.pick(58, 50, { padding: 5 })?.item.id).toBe('card')
-    expect(stage.pick(58, 50, 10)?.item.id).toBe('card')
+    expect(await stage.pick(58, 50)).toBeNull()
+    expect((await stage.pick(58, 50, { padding: 5 }))?.item.id).toBe('card')
+    expect((await stage.pick(58, 50, 10))?.item.id).toBe('card')
     stage.destroy()
   })
 
@@ -1913,8 +1929,8 @@ describe('MotionStage', () => {
       calculate: () => [transform({ scale: 4, rotationY: 1.2 })],
     }, { duration: 0 })
 
-    expect(stage.pick(50, 50)?.item.id).toBe('tilted')
-    expect(stage.pick(58, 50, { padding: 4 })?.item.id).toBe('tilted')
+    expect((await stage.pick(50, 50))?.item.id).toBe('tilted')
+    expect((await stage.pick(58, 50, { padding: 4 }))?.item.id).toBe('tilted')
     stage.destroy()
   })
 
@@ -1929,7 +1945,7 @@ describe('MotionStage', () => {
     )), { duration: 0 })
     const clone = vi.spyOn(Vector3.prototype, 'clone')
 
-    expect(stage.pick(50, 50)?.item.id).toBe('item-0')
+    expect((await stage.pick(50, 50))?.item.id).toBe('item-0')
     expect(clone).not.toHaveBeenCalled()
     stage.destroy()
   })
@@ -1942,8 +1958,8 @@ describe('MotionStage', () => {
       transform({ x: 0.3, z: 8, scale: 2 }),
     ]), { duration: 0 })
 
-    expect(stage.pick(50, 50)?.item.id).toBe('near')
-    expect(stage.pick(50, 50, { includeOccluded: true })?.item.id).toBe('far')
+    expect((await stage.pick(50, 50))?.item.id).toBe('near')
+    expect((await stage.pick(50, 50, { includeOccluded: true }))?.item.id).toBe('far')
     stage.destroy()
   })
 
@@ -1956,7 +1972,7 @@ describe('MotionStage', () => {
       calculate: () => [transform({ scale: 2, rotationY: Math.PI })],
     }, { duration: 0 })
 
-    expect(stage.pick(50, 50)).toBeNull()
+    expect(await stage.pick(50, 50)).toBeNull()
     stage.destroy()
   })
 
@@ -1973,7 +1989,7 @@ describe('MotionStage', () => {
     await stage.to(layout(() => [transform({ x: -2, scale: 2 })]), { duration: 0 })
     const moving = stage.to(layout(() => [transform({ x: 2, scale: 2 })]), { duration: 100 })
     now = 50
-    expect(stage.pick(50, 50)?.item.id).toBe('moving')
+    expect((await stage.pick(50, 50))?.item.id).toBe('moving')
     now = 100
     callbacks.at(-1)?.(100)
     await moving
@@ -1994,7 +2010,7 @@ describe('MotionStage', () => {
       }),
     }
     expect(await stage.enterEffect(fixedEffect, { duration: 0 })).toBe(true)
-    expect(stage.pick(50, 50)?.item.id).toBe('moving')
+    expect((await stage.pick(50, 50))?.item.id).toBe('moving')
     stage.destroy()
   })
 
@@ -2011,7 +2027,7 @@ describe('MotionStage', () => {
     )
 
     stage.setQuality('low')
-    expect(stage.pick(50, 50)).toBeNull()
+    expect(await stage.pick(50, 50)).toBeNull()
     stage.destroy()
   })
 
@@ -2042,8 +2058,10 @@ describe('MotionStage', () => {
 
     const canvas = Array.from(document.querySelectorAll('canvas')).at(-1)
     canvas?.dispatchEvent(new PointerEvent('pointerup', { clientX: 50, clientY: 50 }))
+    await vi.waitFor(() => expect(first).toHaveBeenCalledOnce())
     unsubscribe()
     canvas?.dispatchEvent(new PointerEvent('pointerup', { clientX: 50, clientY: 50 }))
+    await vi.waitFor(() => expect(second).toHaveBeenCalledTimes(2))
     await stage.to(layout(() => [transform()]), { duration: 0 })
 
     expect(first).toHaveBeenCalledOnce()

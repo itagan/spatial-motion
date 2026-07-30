@@ -2,7 +2,7 @@ import type {
   MotionRenderer,
   MotionRendererStats,
 } from '../renderers/MotionRenderer.js'
-import { visibilityRank } from './InteractionController.js'
+import { visibilityRank } from './Visibility.js'
 
 export interface NormalizedRendererStats {
   instanceCount: number

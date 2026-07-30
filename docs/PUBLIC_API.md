@@ -25,6 +25,9 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 - Renderer capability 在 Stage 构造期完成验证与编译；运行中修改 Renderer 方法不受
   支持。需要改变能力时创建新的 Renderer/Stage。
 - `descriptor.itemBounds` 支持 layout/camera quad、camera disc 或 `null`；`null` 关闭指针拾取但不影响布局与程序化 focus。
+- `stage.pick()` 返回精确命中的 Promise；投影拾取内核按需加载并在 Stage 内缓存。
+  DOM hover/click 在内核预热后走同步热路径，冷启动结果受 destroy 和最新 pointer
+  generation 保护。
 - `StagePerformanceStats` 明确报告 input、resident、submitted、visible 与 active effect 数量；`render` 报告场景 Draw Call/三角形，`renderer` 报告 GPU 字节和有限 metrics。
 - `QualityController` 独立拥有模式、档位、Profile 和自适应采样器；Stage 接受
   `qualityProfiles` 与 `adaptivePerformanceOptions`，覆盖值在 Renderer 创建前验证。
