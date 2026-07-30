@@ -81,6 +81,8 @@
   StageMotionCoordinator，MotionStage 收敛为公共门面、生命周期和帧提交。
 - [x] **Extension 按需运行时**：ExtensionHost 首次添加时加载并共享初始化，
   未使用 Extension 的 Core 消费者不携带扩展调度和诊断实现。
+- [x] **过渡工作区复用**：StageMotionCoordinator 固定复用 from/target Buffer，
+  连续布局中断、容量缩放和 Effect 静态回退不再重复分配或上传 Transform。
 
 - [x] 建立可比较的 steady、cold-start、atlas-update 与 transition-stress 基准。
 - [x] 暴露 P50/P95/P99、长帧、CPU/提交、图集和图片加载指标。

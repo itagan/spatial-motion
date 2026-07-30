@@ -1344,6 +1344,65 @@ describe('MotionStage', () => {
     stage.destroy()
   })
 
+  it('reuses the same transition Buffer workspaces across interruptions', async () => {
+    const stage = createStage()
+    const cards = currentCards()
+    await stage.setItems([{ id: 'a' }, { id: 'b' }])
+
+    const first = stage.to(
+      layout((count) =>
+        Array.from({ length: count }, (_, index) => transform({ x: index }))),
+      { duration: 100 },
+    )
+    const [firstFrom, firstTarget] = cards.prepareTransition.mock.calls.at(-1) as [
+      TransformBufferView,
+      TransformBufferView,
+    ]
+    const firstPositions = firstTarget.positions
+    const second = stage.to(
+      layout((count) =>
+        Array.from({ length: count }, (_, index) => transform({ x: -index }))),
+      { duration: 100 },
+    )
+    const [secondFrom, secondTarget] = cards.prepareTransition.mock.calls.at(-1) as [
+      TransformBufferView,
+      TransformBufferView,
+    ]
+
+    expect(secondFrom).toBe(firstFrom)
+    expect(secondTarget).toBe(firstTarget)
+    expect(secondTarget.positions).toBe(firstPositions)
+    await expect(first).resolves.toBe(false)
+    stage.destroy()
+    await expect(second).resolves.toBe(false)
+  })
+
+  it('retains grown transition Buffer capacity when item counts shrink', async () => {
+    const stage = createStage()
+    const cards = currentCards()
+    await stage.setItems([{ id: 'a' }])
+    await stage.to(layout(() => [transform()]), { duration: 0 })
+    const workspace = lastTransformBuffer(cards.setTransforms)
+
+    await stage.setItems(Array.from({ length: 8 }, (_, index) => ({ id: `${index}` })))
+    await stage.to(
+      layout((count) => Array.from({ length: count }, () => transform())),
+      { duration: 0 },
+    )
+    const grown = lastTransformBuffer(cards.setTransforms)
+    const grownPositions = grown.positions
+    await stage.setItems([{ id: 'next' }])
+    await stage.to(layout(() => [transform()]), { duration: 0 })
+    const shrunk = lastTransformBuffer(cards.setTransforms)
+
+    expect(grown).toBe(workspace)
+    expect(shrunk).toBe(workspace)
+    expect(shrunk.positions).toBe(grownPositions)
+    expect(shrunk.positions.length).toBe(24)
+    expect(shrunk.count).toBe(1)
+    stage.destroy()
+  })
+
   it('allows only the newest concurrent item update to mutate stage transforms', async () => {
     const stage = createStage()
     const cards = currentCards()
@@ -1533,6 +1592,7 @@ describe('MotionStage', () => {
     stage.on('effecterror', errors)
     await stage.setItems([{ id: 'fallback' }])
     cards.enableEffect.mockRejectedValueOnce(new Error('shader compile failed'))
+    cards.setTransforms.mockClear()
 
     await expect(stage.enterEffect(new TunnelEffect(), { duration: 0 })).resolves.toBe(true)
     expect(stage.getPerformanceStats().effect).toBeNull()
@@ -1540,7 +1600,7 @@ describe('MotionStage', () => {
       effect: 'tunnel',
       phase: 'activate',
     }))
-    expect(cards.setTransforms).toHaveBeenCalled()
+    expect(cards.setTransforms).toHaveBeenCalledOnce()
     stage.destroy()
   })
 
@@ -1745,6 +1805,37 @@ describe('MotionStage', () => {
     expect(await stage.enterEffect(radialBurst(), { duration: 1000 })).toBe(true)
     expect(cards.enableEffect).not.toHaveBeenCalled()
     stage.autoRotate({ y: 1 })
+    stage.destroy()
+  })
+
+  it('settles a slow Effect activation when Reduced Motion changes during prepare', async () => {
+    let motionListener: ((event: { matches: boolean }) => void) | null = null
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false,
+      addEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => {
+        motionListener = listener
+      },
+      removeEventListener: vi.fn(),
+    })))
+    const activation = deferred<boolean>()
+    const stage = createStage()
+    const cards = currentCards()
+    cards.enableEffect.mockReturnValueOnce(activation.promise)
+    await stage.setItems([{ id: 'a' }])
+    const entering = stage.enterEffect(radialBurst(), { duration: 0 })
+    await vi.waitFor(() => expect(cards.enableEffect).toHaveBeenCalledOnce())
+
+    ;(motionListener as ((event: { matches: boolean }) => void) | null)?.({
+      matches: true,
+    })
+    activation.resolve(true)
+
+    await expect(entering).resolves.toBe(true)
+    expect(cards.disableEffect).toHaveBeenCalledOnce()
+    expect(stage.getPerformanceStats()).toMatchObject({
+      effect: null,
+      activeEffectItems: 0,
+    })
     stage.destroy()
   })
 
