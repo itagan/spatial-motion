@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Euler, Quaternion, Vector3 } from 'three'
+import { TransformBuffer } from '../core/TransformBuffer'
 import {
   box,
   calculateBoxFaceDistribution,
@@ -23,6 +24,27 @@ describe('layouts', () => {
     const result = layout.calculate(500, context)
     expect(result).toHaveLength(500)
     expect(result.every((value) => Object.values(value).every(Number.isFinite))).toBe(true)
+  })
+
+  it('all built-in layouts write into caller-owned Buffer capacity without array adaptation', () => {
+    const copyFrom = vi.spyOn(TransformBuffer.prototype, 'copyFrom')
+    const target = new TransformBuffer(500)
+    const positions = target.positions
+    const scales = target.scales
+    const rotations = target.rotations
+    const opacities = target.opacities
+
+    for (const layout of [sphere(), cylinder(), grid(), ring(), helix(), cone(), box(), scatter()]) {
+      layout.calculateInto?.(500, context, target)
+      expect(target.count).toBe(500)
+      expect(target.positions).toBe(positions)
+      expect(target.scales).toBe(scales)
+      expect(target.rotations).toBe(rotations)
+      expect(target.opacities).toBe(opacities)
+    }
+
+    expect(copyFrom).not.toHaveBeenCalled()
+    copyFrom.mockRestore()
   })
 
   it('sphere keeps every item on the requested radius', () => {
@@ -107,8 +129,8 @@ describe('layouts', () => {
     }).calculate(120, context)
     const latitudes = result.map(({ y }) => Math.asin(y / 5))
 
-    expect(Math.min(...latitudes)).toBeGreaterThanOrEqual(-Math.PI / 4 - 1e-8)
-    expect(Math.max(...latitudes)).toBeLessThanOrEqual(Math.PI / 3 + 1e-8)
+    expect(Math.min(...latitudes)).toBeGreaterThanOrEqual(-Math.PI / 4 - 1e-6)
+    expect(Math.max(...latitudes)).toBeLessThanOrEqual(Math.PI / 3 + 1e-6)
     expect(result.every(({ y }) => Math.abs(y) < 5)).toBe(true)
   })
 
@@ -122,7 +144,7 @@ describe('layouts', () => {
     expect(first).toEqual(second)
     expect(Math.max(...normalizedY)).toBeLessThan(1)
     expect(Math.min(...normalizedY)).toBeGreaterThan(-1)
-    expect(Math.max(...steps) - Math.min(...steps)).toBeLessThan(1e-10)
+    expect(Math.max(...steps) - Math.min(...steps)).toBeLessThan(1e-6)
   })
 
   it.each(['latitude', 'fibonacci'] as const)(
@@ -158,7 +180,7 @@ describe('layouts', () => {
     const squareHalfDiagonal = Math.SQRT2 / 2
     expect(radius).toBeCloseTo(3.6 - squareHalfDiagonal)
     expect(radius + squareHalfDiagonal)
-      .toBeLessThanOrEqual(viewport.viewportHeight / 2 * (1 - padding * 2))
+      .toBeLessThanOrEqual(viewport.viewportHeight / 2 * (1 - padding * 2) + 1e-6)
     const portraitContext = {
       ...viewport,
       itemWidth: 0.5,
@@ -235,12 +257,15 @@ describe('layouts', () => {
 
   it('ring tangent orientation follows the orbit', () => {
     const result = ring({ rings: 1, orientation: 'tangent', startAngle: 0 }).calculate(4, context)
-    expect(result.map(({ rotationZ }) => rotationZ)).toEqual([
+    const expected = [
       Math.PI / 2,
       Math.PI,
       Math.PI * 1.5,
       Math.PI * 2,
-    ])
+    ]
+    result.forEach(({ rotationZ }, index) => {
+      expect(rotationZ).toBeCloseTo(expected[index], 6)
+    })
   })
 
   it('ring supports equal allocation, explicit staggering, and clockwise ordering', () => {

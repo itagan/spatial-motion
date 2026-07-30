@@ -1,4 +1,5 @@
-import type { Layout, Transform } from '../core/types.js'
+import type { Layout } from '../core/types.js'
+import type { TransformBuffer } from '../core/TransformBuffer.js'
 import { defineLayout } from './defineLayout.js'
 
 export interface ScatterOptions {
@@ -29,80 +30,88 @@ export function scatter(options: ScatterOptions = {}): Layout {
     // Surface orientation lets the transition interpolate the configured spin.
     // The cards are normally transparent at rest, so random final tilt is not exposed.
     orientation: 'surface',
-    calculate(count): Transform[] {
-      return Array.from({ length: Math.max(0, count) }, (_, index) => {
-        const position = scatterPosition(index, direction, distance, depth, seed, layers)
-        const rotations = scatterRotation(index, direction, spin, spinMode, seed)
-        return {
-          ...position,
+    calculateInto(count, _context, target): void {
+      for (let index = 0; index < count; index += 1) {
+        writeScatterTransform(
+          target,
+          index,
+          direction,
+          distance,
+          depth,
+          spin,
+          spinMode,
+          layers,
           scale,
-          ...rotations,
           opacity,
-        }
-      })
+          seed,
+        )
+      }
     },
   })
 }
 
-function scatterPosition(
+function writeScatterTransform(
+  target: TransformBuffer,
   index: number,
   direction: NonNullable<ScatterOptions['direction']>,
   distance: number,
   depth: number,
-  seed: number,
+  spin: number,
+  spinMode: NonNullable<ScatterOptions['spinMode']>,
   layers: number,
-): Pick<Transform, 'x' | 'y' | 'z'> {
+  scale: number,
+  opacity: number,
+  seed: number,
+): void {
   const layer = index % layers
   const layerJitter = random(index * 7 + 1, seed) * 0.45 + 0.275
   const distanceFactor = 0.68 + ((layer + layerJitter) / layers) * 0.32
+  let x: number
+  let y: number
+  let z: number
   if (direction === 'left' || direction === 'right') {
-    return {
-      x: (direction === 'left' ? -1 : 1) * distance * distanceFactor,
-      y: centeredRandom(index * 7 + 2, seed) * distance,
-      z: centeredRandom(index * 7 + 3, seed) * depth,
-    }
-  }
-
-  if (direction === 'radial') {
+    x = (direction === 'left' ? -1 : 1) * distance * distanceFactor
+    y = centeredRandom(index * 7 + 2, seed) * distance
+    z = centeredRandom(index * 7 + 3, seed) * depth
+  } else if (direction === 'radial') {
     const azimuth = random(index * 7 + 2, seed) * Math.PI * 2
     const elevation = Math.asin(random(index * 7 + 3, seed) * 2 - 1)
     const radius = distance * distanceFactor
     const horizontal = Math.cos(elevation) * radius
-    return {
-      x: Math.cos(azimuth) * horizontal,
-      y: Math.sin(elevation) * radius,
-      z: Math.sin(azimuth) * horizontal * Math.min(1, depth / distance),
-    }
+    x = Math.cos(azimuth) * horizontal
+    y = Math.sin(elevation) * radius
+    z = Math.sin(azimuth) * horizontal * Math.min(1, depth / distance)
+  } else {
+    x = centeredRandom(index * 7 + 1, seed) * distance * 2
+    y = centeredRandom(index * 7 + 2, seed) * distance * 2
+    z = centeredRandom(index * 7 + 3, seed) * depth * 2
   }
 
-  return {
-    x: centeredRandom(index * 7 + 1, seed) * distance * 2,
-    y: centeredRandom(index * 7 + 2, seed) * distance * 2,
-    z: centeredRandom(index * 7 + 3, seed) * depth * 2,
-  }
-}
-
-function scatterRotation(
-  index: number,
-  direction: NonNullable<ScatterOptions['direction']>,
-  spin: number,
-  spinMode: NonNullable<ScatterOptions['spinMode']>,
-  seed: number,
-): Pick<Transform, 'rotationX' | 'rotationY' | 'rotationZ'> {
+  let rotationX: number
+  let rotationY: number
+  let rotationZ: number
   if (spinMode === 'random') {
-    return {
-      rotationX: centeredRandom(index * 7 + 4, seed) * spin,
-      rotationY: centeredRandom(index * 7 + 5, seed) * spin,
-      rotationZ: centeredRandom(index * 7 + 6, seed) * spin,
-    }
+    rotationX = centeredRandom(index * 7 + 4, seed) * spin
+    rotationY = centeredRandom(index * 7 + 5, seed) * spin
+    rotationZ = centeredRandom(index * 7 + 6, seed) * spin
+  } else {
+    const directionSign = direction === 'left' ? -1 : 1
+    const magnitude = spin * (0.55 + random(index * 7 + 6, seed) * 0.45)
+    rotationX = centeredRandom(index * 7 + 4, seed) * spin * 0.25
+    rotationY = centeredRandom(index * 7 + 5, seed) * spin * 0.25
+    rotationZ = directionSign * magnitude
   }
-  const directionSign = direction === 'left' ? -1 : 1
-  const magnitude = spin * (0.55 + random(index * 7 + 6, seed) * 0.45)
-  return {
-    rotationX: centeredRandom(index * 7 + 4, seed) * spin * 0.25,
-    rotationY: centeredRandom(index * 7 + 5, seed) * spin * 0.25,
-    rotationZ: directionSign * magnitude,
-  }
+  target.setValues(
+    index,
+    x,
+    y,
+    z,
+    scale,
+    rotationX,
+    rotationY,
+    rotationZ,
+    opacity,
+  )
 }
 
 function centeredRandom(index: number, seed: number): number {

@@ -36,6 +36,8 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
   generation 保护。
 - `stage.focusItems()` 的布局构造实现同样按需加载；调用本身保持 Promise 契约，
   加载期间 items 发生替换或 Stage 销毁时旧结果不会提交。
+- Effect 入场编排与 Extension Host 也是按需模块。后发 Layout、数据替换或 destroy
+  会使尚未完成的 Effect 入口失效；首次 `addExtension()` 才加载扩展调度运行时。
 - `StagePerformanceStats` 明确报告 input、resident、submitted、visible 与 active effect 数量；`render` 报告场景 Draw Call/三角形，`renderer` 报告 GPU 字节和有限 metrics。
 - `QualityController` 独立拥有模式、档位、Profile 和自适应采样器；Stage 接受
   `qualityProfiles` 与 `adaptivePerformanceOptions`，覆盖值在 Renderer 创建前验证。
@@ -72,8 +74,8 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 
 - `defineLayout()` 创建并冻结自定义 Layout，验证名称、枚举、count、返回数量和所有 Transform 数值。
 - 高吞吐布局可以只实现 `calculateInto()`，从 `@itagan/spatial-motion/layouts`
-  导入 `TransformBuffer` 并通过 `setValues()` 直接写入 SoA 缓冲；内置 Grid/Helix
-  已采用此路径。普通布局继续实现 `calculate()`。
+  导入 `TransformBuffer` 并通过 `setValues()` 直接写入 SoA 缓冲；八个内置布局
+  全部采用此路径。普通自定义布局继续可以实现 `calculate()`。
 - `LayoutContext<TMeta>` 提供通用 `itemWidth/itemHeight`、当前可见 `items` 和质量档位，
   自定义布局可以按业务字段分组、排序或加权。
 - `LayoutConfig` 当前格式版本为 `1`；`parseLayoutConfig()` 严格解析外部配置，`createLayout()` 创建内置布局。

@@ -1,4 +1,5 @@
-import type { Layout, Transform } from '../core/types.js'
+import type { Layout } from '../core/types.js'
+import type { TransformBuffer } from '../core/TransformBuffer.js'
 import { defineLayout } from './defineLayout.js'
 
 export interface BoxOptions {
@@ -22,8 +23,14 @@ interface FaceDefinition {
   name: BoxFace
   width: number
   height: number
-  position(u: number, v: number): Pick<Transform, 'x' | 'y' | 'z'>
-  rotation: Pick<Transform, 'rotationX' | 'rotationY' | 'rotationZ'>
+  write(
+    target: TransformBuffer,
+    index: number,
+    u: number,
+    v: number,
+    scale: number,
+    surfaceOrientation: boolean,
+  ): void
 }
 
 export function box(options: BoxOptions = {}): Layout {
@@ -40,8 +47,8 @@ export function box(options: BoxOptions = {}): Layout {
   return defineLayout({
     name: 'box',
     orientation,
-    calculate(count): Transform[] {
-      if (count <= 0) return []
+    calculateInto(count, _context, target): void {
+      if (count <= 0) return
       const distribution = calculateBoxFaceDistribution(
         count,
         width,
@@ -51,12 +58,23 @@ export function box(options: BoxOptions = {}): Layout {
         weights,
       )
       const plans = faces.map((face, index) => createFacePlan(face, distribution[index], edgePadding))
-      const occupiedPlans = plans.filter(({ count }) => count > 0)
-      const sharedScale = Math.min(
-        1,
-        ...occupiedPlans.flatMap(({ cellWidth, cellHeight }) => [cellWidth, cellHeight]),
-      ) * density
-      return plans.flatMap((plan) => createFaceTransforms(plan, sharedScale, orientation))
+      let sharedScale = 1
+      for (const plan of plans) {
+        if (plan.count > 0) {
+          sharedScale = Math.min(sharedScale, plan.cellWidth, plan.cellHeight)
+        }
+      }
+      sharedScale *= density
+      let targetIndex = 0
+      for (const plan of plans) {
+        targetIndex = writeFaceTransformsInto(
+          target,
+          targetIndex,
+          plan,
+          sharedScale,
+          orientation === 'surface',
+        )
+      }
     },
   })
 }
@@ -111,33 +129,39 @@ function createFaces(width: number, height: number, depth: number): FaceDefiniti
   return [
     {
       name: 'front', width, height,
-      position: (x, y) => ({ x, y, z: depth / 2 }),
-      rotation: { rotationX: 0, rotationY: 0, rotationZ: 0 },
+      write: (target, index, x, y, scale) => {
+        target.setValues(index, x, y, depth / 2, scale, 0, 0, 0, 1)
+      },
     },
     {
       name: 'back', width, height,
-      position: (x, y) => ({ x: -x, y, z: -depth / 2 }),
-      rotation: { rotationX: 0, rotationY: Math.PI, rotationZ: 0 },
+      write: (target, index, x, y, scale, surface) => {
+        target.setValues(index, -x, y, -depth / 2, scale, 0, surface ? Math.PI : 0, 0, 1)
+      },
     },
     {
       name: 'right', width: depth, height,
-      position: (z, y) => ({ x: width / 2, y, z: -z }),
-      rotation: { rotationX: 0, rotationY: Math.PI / 2, rotationZ: 0 },
+      write: (target, index, z, y, scale, surface) => {
+        target.setValues(index, width / 2, y, -z, scale, 0, surface ? Math.PI / 2 : 0, 0, 1)
+      },
     },
     {
       name: 'left', width: depth, height,
-      position: (z, y) => ({ x: -width / 2, y, z }),
-      rotation: { rotationX: 0, rotationY: -Math.PI / 2, rotationZ: 0 },
+      write: (target, index, z, y, scale, surface) => {
+        target.setValues(index, -width / 2, y, z, scale, 0, surface ? -Math.PI / 2 : 0, 0, 1)
+      },
     },
     {
       name: 'top', width, height: depth,
-      position: (x, z) => ({ x, y: height / 2, z }),
-      rotation: { rotationX: -Math.PI / 2, rotationY: 0, rotationZ: 0 },
+      write: (target, index, x, z, scale, surface) => {
+        target.setValues(index, x, height / 2, z, scale, surface ? -Math.PI / 2 : 0, 0, 0, 1)
+      },
     },
     {
       name: 'bottom', width, height: depth,
-      position: (x, z) => ({ x, y: -height / 2, z: -z }),
-      rotation: { rotationX: Math.PI / 2, rotationY: 0, rotationZ: 0 },
+      write: (target, index, x, z, scale, surface) => {
+        target.setValues(index, x, -height / 2, -z, scale, surface ? Math.PI / 2 : 0, 0, 0, 1)
+      },
     },
   ]
 }
@@ -170,29 +194,23 @@ function createFacePlan(face: FaceDefinition, count: number, edgePadding = 0): F
   }
 }
 
-function createFaceTransforms(
+function writeFaceTransformsInto(
+  target: TransformBuffer,
+  targetOffset: number,
   plan: FacePlan,
   scale: number,
-  orientation: NonNullable<BoxOptions['orientation']>,
-): Transform[] {
+  surfaceOrientation: boolean,
+): number {
   const { face, count, columns, rows, cellWidth, cellHeight } = plan
-  if (count <= 0) return []
-
-  return Array.from({ length: count }, (_, index) => {
+  for (let index = 0; index < count; index += 1) {
     const row = Math.floor(index / columns)
     const rowItems = Math.min(columns, count - row * columns)
     const column = index % columns
     const u = (column - (rowItems - 1) / 2) * cellWidth
     const v = ((rows - 1) / 2 - row) * cellHeight
-    return {
-      ...face.position(u, v),
-      scale,
-      ...(orientation === 'surface'
-        ? face.rotation
-        : { rotationX: 0, rotationY: 0, rotationZ: 0 }),
-      opacity: 1,
-    }
-  })
+    face.write(target, targetOffset + index, u, v, scale, surfaceOrientation)
+  }
+  return targetOffset + count
 }
 
 function positive(value: number | undefined, fallback: number): number {

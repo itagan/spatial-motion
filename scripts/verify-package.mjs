@@ -539,6 +539,16 @@ try {
       contents.includes(projectedPickerMarker)),
     'Core consumer is missing the lazy precise projected picker chunk',
   )
+  const extensionHostMarker = 'SpatialMotionExtension:'
+  assert(
+    !coreOnlyConsumer.contents.includes(extensionHostMarker),
+    'Core-only entry eagerly contains the optional Extension Host',
+  )
+  assert(
+    coreOnlyConsumer.lazyChunks.some((contents) =>
+      contents.includes(extensionHostMarker)),
+    'Core consumer is missing the lazy Extension Host chunk',
+  )
   assert(
     cardsOnlyConsumer.gzipBytes <= cardsRendererGzipBudget,
     `Cards-only consumer JS gzip budget exceeded: ${cardsOnlyConsumer.gzipBytes} > ${cardsRendererGzipBudget}`,

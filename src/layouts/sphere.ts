@@ -1,4 +1,5 @@
-import type { Layout, Transform } from '../core/types.js'
+import type { Layout } from '../core/types.js'
+import type { TransformBuffer } from '../core/TransformBuffer.js'
 import { defineLayout } from './defineLayout.js'
 
 export interface SphereOptions {
@@ -51,11 +52,12 @@ export function sphere(options: SphereOptions = {}): Layout {
     orientation: orientation === 'camera' ? 'camera' : 'surface',
     hideBackHemisphere: orientation === 'camera',
     hemisphereEdgeFade: edgeFade,
-    calculate(count, context): Transform[] {
-      if (count <= 0) return []
+    calculateInto(count, context, target): void {
+      if (count <= 0) return
       const radius = resolveRadius(fallbackRadius, fit, viewportPadding, context)
       if (distributionMode === 'fibonacci') {
-        return calculateFibonacciSphere(
+        calculateFibonacciSphereInto(
+          target,
           count,
           radius,
           minLatitude,
@@ -64,13 +66,33 @@ export function sphere(options: SphereOptions = {}): Layout {
           orientation,
           startAngle,
         )
+        return
       }
       if (count === 1) {
         const latitude = poleMode === 'include' ? maxLatitude : (minLatitude + maxLatitude) / 2
         if (approximately(latitude, Math.PI / 2)) {
-          return [createTransform(0, 1, 0, radius, Math.max(0, finite(options.density, 0.86)), orientation)]
+          writeSphereTransform(
+            target,
+            0,
+            0,
+            1,
+            0,
+            radius,
+            Math.max(0, finite(options.density, 0.86)),
+            orientation,
+          )
+          return
         }
-        return [createLatitudeTransform(latitude, startAngle, radius, options.density ?? 0.86, orientation)]
+        writeLatitudeTransform(
+          target,
+          0,
+          latitude,
+          startAngle,
+          radius,
+          options.density ?? 0.86,
+          orientation,
+        )
+        return
       }
 
       const rings = Math.max(2, Math.min(count, positiveInteger(options.rings) ?? calculateRingCount(count)))
@@ -84,7 +106,7 @@ export function sphere(options: SphereOptions = {}): Layout {
       const lowerLatitude = minLatitude + southInset
       const angularStep = (upperLatitude - lowerLatitude) / Math.max(1, rings - 1)
       const density = Math.max(0, finite(options.density, 0.86))
-      const transforms: Transform[] = []
+      let targetIndex = 0
 
       for (let ring = 0; ring < rings; ring += 1) {
         const phi = legacyLatitudeRange ? (Math.PI * ring) / (rings - 1) : null
@@ -115,16 +137,25 @@ export function sphere(options: SphereOptions = {}): Layout {
             : (2 * Math.PI * index) / itemsInRing + offset + startAngle
           const x = ringRadius * Math.cos(theta)
           const z = ringRadius * Math.sin(theta)
-          transforms.push(createTransform(x, y, z, radius, itemScale, orientation))
+          writeSphereTransform(
+            target,
+            targetIndex,
+            x,
+            y,
+            z,
+            radius,
+            itemScale,
+            orientation,
+          )
+          targetIndex += 1
         }
       }
-
-      return transforms
     },
   })
 }
 
-function calculateFibonacciSphere(
+function calculateFibonacciSphereInto(
+  target: TransformBuffer,
   count: number,
   radius: number,
   minLatitude: number,
@@ -132,8 +163,8 @@ function calculateFibonacciSphere(
   densityOption: number | undefined,
   orientation: NonNullable<SphereOptions['orientation']>,
   startAngle: number,
-): Transform[] {
-  if (count <= 0) return []
+): void {
+  if (count <= 0) return
   const density = Math.max(0, finite(densityOption, 0.86))
   const minY = Math.sin(minLatitude)
   const maxY = Math.sin(maxLatitude)
@@ -141,12 +172,14 @@ function calculateFibonacciSphere(
   const itemScale = Math.min(1, Math.sqrt(surfaceArea / Math.max(1, count))) * density
   const goldenAngle = Math.PI * (3 - Math.sqrt(5))
 
-  return Array.from({ length: count }, (_, index) => {
+  for (let index = 0; index < count; index += 1) {
     const progress = (index + 0.5) / count
     const y = maxY + (minY - maxY) * progress
     const ringRadius = Math.sqrt(Math.max(0, 1 - y * y))
     const theta = startAngle + index * goldenAngle
-    return createTransform(
+    writeSphereTransform(
+      target,
+      index,
       ringRadius * Math.cos(theta),
       y,
       ringRadius * Math.sin(theta),
@@ -154,7 +187,7 @@ function calculateFibonacciSphere(
       itemScale,
       orientation,
     )
-  })
+  }
 }
 
 function resolveRadius(
@@ -178,16 +211,20 @@ function resolveRadius(
   return Math.max(0.1, availableDiameter / 2 - halfDiagonal)
 }
 
-function createLatitudeTransform(
+function writeLatitudeTransform(
+  target: TransformBuffer,
+  index: number,
   latitude: number,
   theta: number,
   radius: number,
   scale: number,
   orientation: NonNullable<SphereOptions['orientation']>,
-): Transform {
+): void {
   const y = Math.sin(latitude)
   const ringRadius = Math.cos(latitude)
-  return createTransform(
+  writeSphereTransform(
+    target,
+    index,
     ringRadius * Math.cos(theta),
     y,
     ringRadius * Math.sin(theta),
@@ -237,28 +274,31 @@ export function calculateRingDistribution(count: number, rings: number): number[
   return distribution
 }
 
-function createTransform(
+function writeSphereTransform(
+  target: TransformBuffer,
+  index: number,
   x: number,
   y: number,
   z: number,
   radius: number,
   scale: number,
   orientation: NonNullable<SphereOptions['orientation']>,
-): Transform {
+): void {
   // InstancedCardRenderer converts these XYZ Euler angles to a quaternion.
   // Solving the transformed local +Z normal against the radial direction keeps
   // every card plane tangent to the sphere. The Z roll then aligns local +Y
   // with world-up projected onto that tangent plane, so images share one north.
-  return {
-    x: x * radius,
-    y: y * radius,
-    z: z * radius,
+  target.setValues(
+    index,
+    x * radius,
+    y * radius,
+    z * radius,
     scale,
-    rotationX: orientation === 'surface' ? Math.atan2(-y, z) : 0,
-    rotationY: orientation === 'surface' ? Math.asin(x) : Math.atan2(x, z),
-    rotationZ: orientation === 'surface' ? Math.atan2(x * y, z) : 0,
-    opacity: 1,
-  }
+    orientation === 'surface' ? Math.atan2(-y, z) : 0,
+    orientation === 'surface' ? Math.asin(x) : Math.atan2(x, z),
+    orientation === 'surface' ? Math.atan2(x * y, z) : 0,
+    1,
+  )
 }
 
 function latitudeRange(minimum: number | undefined, maximum: number | undefined): [number, number] {

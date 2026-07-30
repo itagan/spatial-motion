@@ -1,6 +1,28 @@
-import type { TransformBufferView } from './TransformBuffer.js'
+import {
+  TransformBuffer,
+  type TransformBufferView,
+} from './TransformBuffer.js'
 import type { FocusItemsOptions } from './MotionStage.js'
+import type { StageMotionCoordinator } from './StageMotionCoordinator.js'
+import type { StageContentState } from './StageContentState.js'
 import type { Layout, MotionItem } from './types.js'
+
+export function focusItems<TMeta>(
+  items: readonly MotionItem<TMeta>[],
+  state: StageContentState<TMeta>,
+  ids: string[],
+  options: FocusItemsOptions,
+  isDestroyed: () => boolean,
+  motion: StageMotionCoordinator<TMeta>,
+): Promise<boolean> {
+  const selected = new Set(ids)
+  if (!items.some((item) => selected.has(item.id))) return Promise.resolve(false)
+  if (isDestroyed() || items !== state.items) return Promise.resolve(false)
+  const current = new TransformBuffer().copyFromBuffer(
+    motion.resolveTransformBuffer(performance.now()),
+  )
+  return motion.transition(createFocusLayout(items, ids, current, options), options)
+}
 
 export function createFocusLayout<TMeta>(
   items: readonly MotionItem<TMeta>[],

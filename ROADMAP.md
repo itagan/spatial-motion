@@ -75,6 +75,12 @@
   拾取统一消费 Buffer；Renderer 使用强制 BufferView 契约，聚焦布局按需加载。
 - [x] **Effect CPU Buffer**：StreamingEffect 直接写入复用 TransformBuffer，内置
   特效消除逐项 Transform/路径临时数组，质量重配复用 GPU payload 容量。
+- [x] **全布局 Buffer-native**：八个内置 Layout 全部直接写入调用方 SoA Buffer，
+  不再通过逐项 Transform 数组适配。
+- [x] **Stage 用例协调器**：Layout、Effect、Focus 与恢复编排下沉到
+  StageMotionCoordinator，MotionStage 收敛为公共门面、生命周期和帧提交。
+- [x] **Extension 按需运行时**：ExtensionHost 首次添加时加载并共享初始化，
+  未使用 Extension 的 Core 消费者不携带扩展调度和诊断实现。
 
 - [x] 建立可比较的 steady、cold-start、atlas-update 与 transition-stress 基准。
 - [x] 暴露 P50/P95/P99、长帧、CPU/提交、图集和图片加载指标。

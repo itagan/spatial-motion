@@ -20,6 +20,7 @@ MotionStage facade
 ├── StageRenderHost       Scene、Camera、WebGLRenderer、Canvas 和能力
 ├── StageContentCoordinator 数据、Patch、质量扩容和特效恢复
 ├── StageContentState     items、Transform、Layout 与视觉状态
+├── StageMotionCoordinator Layout、Effect、Focus 和恢复用例编排
 ├── StageClock / Rotation Stage 时间等待与主体旋转
 ├── RendererStateCoordinator setItems 后的渲染状态统一恢复
 ├── QualityController     档位、Profile 和自适应性能状态
@@ -29,12 +30,15 @@ MotionStage facade
 ├── InteractionController Hover 合帧、键盘焦点和拾取竞态
 ├── ProjectedItemPicker   按需加载的精确投影拾取内核
 ├── FocusLayout           按需加载的聚焦布局构造
-├── ExtensionHost         隔离的外部 Three.js 内容
+├── StageEffectEntry      按需加载的 Effect 入场编排
+├── ExtensionHost         按需创建的外部 Three.js 扩展运行时
 ├── CompiledRendererRuntime 一次校验后的稳定 Renderer 方法表
 └── MotionRenderer        批量渲染能力协议
 ```
 
-`MotionStage` 是面向使用者的门面，不应重新承载以上控制器已经拥有的状态。
+`MotionStage` 是面向使用者的门面，只保留公共 API、生命周期和帧提交；
+`StageMotionCoordinator` 负责需要 Motion、Effect、Quality 与 Renderer 协作的用例，
+不应重新把这些分支放回 Stage。
 新增能力优先成为控制器、Renderer capability 或 Extension 生命周期，而不是继续
 增加 Stage 内部条件分支。
 
@@ -109,15 +113,16 @@ Cards entry；传入自定义 backend 时不会下载默认实现。Backend 不�
 ### Transform Buffer
 
 Layout 可实现 `calculateInto(count, context, target)`，直接写入按容量增长的 SoA
-`TransformBuffer`。内置 Grid 与 Helix 已使用该路径，避免生成中间 Transform
+`TransformBuffer`。八个内置 Layout 全部直接使用该路径，避免生成中间 Transform
 对象；`calculate()` 仍是同一 v2 契约的便利形式。Stage 状态、稳定 id 重排、
 MotionController 插值、Cards/Points Renderer 和精确拾取都直接消费同一 SoA
 契约，不再经过公共 Transform 快照。过渡 scratch、Effect CPU Buffer 和 Renderer
 Attribute 按容量复用，不在稳态帧循环分配 Transform 对象。
 
 `defineLayout()` 在定义边界验证 count 与有限值；Stage 信任已定义 Layout，避免每次
-切换重复扫描同一 Buffer。低频 `focusItems()` 的布局构造位于独立动态 chunk，首次
-调用加载并缓存，不占用非聚焦消费者的 Core 基础体积。
+切换重复扫描同一 Buffer。低频 `focusItems()` 的布局构造和 Effect 入场编排位于
+独立动态 chunk；请求 generation 确保后发 Layout、数据更新或 destroy 能使尚未完成
+的旧入口失效。
 
 ### Interaction
 
@@ -130,6 +135,10 @@ Attribute 按容量复用，不在稳态帧循环分配 Transform 对象。
 会使尚未完成的冷启动结果失效。
 
 ### Extension Render Pass
+
+`ExtensionHost` 不随基础 Stage 构造，首次 `addExtension()` 才加载并缓存。未使用
+Extension 的消费者不下载扩展调度、诊断和节流实现；加载期间 destroy 不会挂载
+Extension，多个并发添加共享同一 Host 初始化。
 
 Extension 的 `beforeRender()` / `afterRender()` 在唯一 Stage scene submission 两侧
 按 `order` 和挂载顺序执行，不获得 WebGLRenderer。`updateBudgetMs` 连续三帧超限时

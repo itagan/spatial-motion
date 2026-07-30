@@ -430,3 +430,38 @@ Effect Program 均完成首次按需加载并保持活动池 300、主体 1 Draw
 Radial Burst 激活态 interaction-stress 为 60.01 FPS、P95/P99 17.50/17.60ms，
 751 次输入合并为 180 次拾取，累计 157.9ms。所有场景均为 0 个 24/33/50ms
 长帧，WebGL READY，浏览器控制台无 warning/error。
+
+## 全布局 Buffer-native、Stage 用例协调与 Extension 按需化
+
+Sphere、Cylinder、Ring、Cone、Box 和 Scatter 与既有 Grid、Helix 一致，全部通过
+`calculateInto()` 直接向调用方 `TransformBuffer` 标量写入。测试会监视
+`TransformBuffer.copyFrom()`，确保八个内置 Layout 不再落回 `Transform[]` 适配路径。
+按布局切换只保留与环、面等几何分组规模相关的少量结构，不创建 O(item count) 的
+Transform、position 或 rotation 临时对象。
+
+新增内部 `StageMotionCoordinator`，统一拥有 Layout 过渡、Effect 入场、Focus、
+恢复、resize 重算、Reduced Motion 收敛和布局计算指标。`MotionStage.ts` 由上一阶段
+约 870 行收敛为 717 行，只保留公共门面、生命周期、帧提交、Host 和 Extension
+协调。低频 Effect 入场移入独立动态 chunk，并通过跨模块 generation 保证后发 Layout、
+数据替换或 destroy 不会被慢加载或慢 Program 激活覆盖。
+
+`ExtensionHost` 改为首次 `addExtension()` 时动态加载并缓存；未使用外部 Three.js/GSAP
+能力的 Stage 不下载约 2.24 KB gzip 的扩展调度、节流和诊断模块。并发添加共享同一
+初始化 Promise，加载前 destroy 不执行 mount，已进入异步 mount 后 destroy 仍会
+abort、dispose 并拒绝旧操作。包验证同时断言 Extension marker 不得出现在 Core
+基础 entry 且必须存在于 lazy chunk。
+
+完整 `npm run verify` 为 32 个测试文件、367 项测试，类型、库/Demo/Examples 构建、
+真实 tarball 安装、Node ESM、严格消费者类型、公开边界与浏览器消费者全部通过。
+root/Core/Cards-only 为 36,610/14,610/10,052 bytes gzip，Core 相对本阶段起点
+16,278 bytes 减少 1,668 bytes，并在 16 KB 上限下保留 1,774 bytes 余量；
+layout-only 为 7,956 bytes，tarball 为 127,019 bytes。
+
+2026-07-30 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2,000 Cards/high
+3 秒回归：steady 为 60.00 FPS、P95/P99 17.60/17.70ms；transition-stress 为
+60.00 FPS、P95/P99 17.60/17.60ms并完成 4 次操作；interaction-stress 为
+60.00 FPS、P95/P99 17.60/17.70ms，751 次输入合并为 180 次拾取，累计
+119.1ms。三组均保持主体 1 Draw Call、0 个 24/33/50ms 长帧和 WebGL READY。
+首次启用 Native + GSAP 后两个 Extension 继续由 Stage RAF 驱动，平均扩展更新
+合计约 0.05ms，60.00 FPS、P95/P99 17.70/17.70ms；其自有 3D 对象使场景总
+Draw Call 增至预期的 4，但没有第二个 RAF 或第二次 scene submission。
