@@ -282,6 +282,7 @@ try {
       type MotionItem,
       type MotionItemUpdate,
       type MotionPreference,
+      type PickResult,
       type MotionStage,
       type MotionStageEventMap,
       type MotionStageOptions,
@@ -440,6 +441,7 @@ try {
     const updates: MotionItemUpdate<Meta>[] = [{ id: 'one', patch: { title: 'updated' } }]
     declare const benchmark: BenchmarkResult
     const environment: StagePerformanceEnvironment | undefined = stage?.getPerformanceEnvironment()
+    const pickResult: Promise<PickResult<Meta> | null> | undefined = stage?.pick(0, 0)
     const comparison = compareBenchmarkResults(benchmark, benchmark)
     const thresholds: BenchmarkRegressionThresholds = { averageFps: { maxRegressionPercent: 8 } }
     const regression = evaluateBenchmarkRegression(benchmark, benchmark, thresholds)
@@ -474,7 +476,7 @@ try {
     stage?.updateItem('one', { title: 'winner' })
     stage?.updateItemsById(updates)
     declare const rendererFrame: MotionRendererFrameCapability
-    void [items, stage, cardsRenderer, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, rendererGpuBytes, rendererMetrics, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions, rendererCapabilities, rendererVisualState, rendererPickShape, rendererDescriptor, rendererViewport, rendererStats, rendererFactory, rendererFrame, pointStageOptions, layoutReport, rendererReport, debugVisualization]
+    void [items, stage, cardsRenderer, sphere(), box(), ring(), scatter({ layers: 4, spinMode: 'directional' }), configuredLayouts, advancedLayouts.map(createLayout), extensionHandle, extensionStats, rendererGpuBytes, rendererMetrics, transitionHandle, transitionResult, stage?.getTransitionState(), stage?.getFocusedItem(), pickResult, vortex(), BenchmarkSession, comparison, regression, parsedBenchmark, environment, emission, motion, cardStyle, titleStyle, resolveCardStyle, cardContent, templateStyle, stageOptions, rendererCapabilities, rendererVisualState, rendererPickShape, rendererDescriptor, rendererViewport, rendererStats, rendererFactory, rendererFrame, pointStageOptions, layoutReport, rendererReport, debugVisualization]
   `)
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
@@ -509,6 +511,16 @@ try {
   assert(
     coreOnlyConsumer.gzipBytes <= coreConsumerGzipBudget,
     `Core-only consumer JS gzip budget exceeded: ${coreOnlyConsumer.gzipBytes} > ${coreConsumerGzipBudget}`,
+  )
+  const projectedPickerMarker = 'spatial-motion-projected-picker'
+  assert(
+    !coreOnlyConsumer.contents.includes(projectedPickerMarker),
+    'Core-only entry eagerly contains the precise projected picker',
+  )
+  assert(
+    coreOnlyConsumer.lazyChunks.some((contents) =>
+      contents.includes(projectedPickerMarker)),
+    'Core consumer is missing the lazy precise projected picker chunk',
   )
   assert(
     cardsOnlyConsumer.gzipBytes <= cardsRendererGzipBudget,

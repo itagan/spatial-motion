@@ -26,7 +26,8 @@ MotionStage facade
 ├── MotionController      可中断布局过渡
 ├── EffectController      特效准备、Renderer 协商和时钟
 ├── ItemCoordinator       稳定 id、Patch 合并和异步 revision
-├── InteractionController 拾取、Hover 和键盘焦点
+├── InteractionController Hover 合帧、键盘焦点和拾取竞态
+├── ProjectedItemPicker   按需加载的精确投影拾取内核
 ├── ExtensionHost         隔离的外部 Three.js 内容
 ├── CompiledRendererRuntime 一次校验后的稳定 Renderer 方法表
 └── MotionRenderer        批量渲染能力协议
@@ -101,6 +102,15 @@ Layout 可实现 `calculateInto(count, context, target)`，直接写入按容量
 对象；旧式 `calculate()` 仍是同一 v2 契约的便利形式。Stage 当前在状态变化时把
 Buffer 转为公共 Transform 快照，因此该路径先优化生成器内存，并为后续 Renderer
 直接消费结构化缓冲保留边界；它不会进入稳态帧循环。
+
+### Interaction
+
+`InteractionController` 常驻 Core，只负责事件监听、每帧最新 pointer 合并、稳定 id
+焦点索引和异步 generation。投影四边形、遮挡深度与 surface 正反面计算位于
+`ProjectedItemPicker` 动态 chunk；首次显式 `pick()` 或 pointer 交互加载并等待
+同一个缓存 Promise，非交互 Stage 不下载。加载完成后 pointer hover/click 直接同步调用已缓存内核，
+不在稳态交互路径创建 Promise，也不增加 RAF 或 GPU readback。销毁和 pointerleave
+会使尚未完成的冷启动结果失效。
 
 ### Extension Render Pass
 

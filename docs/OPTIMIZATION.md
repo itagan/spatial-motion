@@ -189,7 +189,7 @@ Atlas patch 会按纹理行合并相邻卡片范围，模板实例保留最多 2
 
 布局已经稳定且没有流式特效时，Stage 直接把内部只读 Transform 快照用于拾取、聚焦和数据协调，不再为每次读取复制全部 Transform 对象。活动布局过渡和流式特效仍生成独立快照，保持中断时的帧连续性；公开只读契约和 Renderer 输入没有变化。Stage 时钟 wait 同时改为直接遍历现有 Set，完成项在遍历中安全删除，不再为每个动画帧创建临时数组。
 
-启用 hover 后，高频 `pointermove` 只记录最新事件，并在 Stage 下一渲染帧执行一次拾取；暂停或 RAF 尚未启动时仍立即处理，`pointerup` 与公开 `pick()` 继续保持同步。Benchmark Demo 增加约 240Hz 合成输入的 `interaction-stress` 场景，结果中的 `operations` 与 `pickOperations` 可直接验证事件合并比例。
+启用 hover 后，高频 `pointermove` 只记录最新事件，并在 Stage 下一渲染帧执行一次拾取；暂停或 RAF 尚未启动时仍立即处理。Benchmark Demo 增加约 240Hz 合成输入的 `interaction-stress` 场景，结果中的 `operations` 与 `pickOperations` 可直接验证事件合并比例。
 
 自动化增加稳态快照引用回归，确保 2000 项 hover/pick 不会重新引入整组 Transform 克隆。该改动不增加 Renderer、Draw Call、纹理或公开 API，主库仍受原 40,960 bytes gzip 门禁约束。
 
@@ -360,3 +360,25 @@ Attribute、容量桶和上传范围保持不变。
 真实 root/Core/Cards-only 消费体积由上一轮的 39,539/16,351/10,165 bytes gzip
 降为 39,294/16,258/10,038 bytes，基础 Cards 获得 202 bytes 余量；layout-only
 保持 8,166 bytes，tarball 为 123,961 bytes。
+
+## 精确拾取按需加载与热态同步
+
+`InteractionController` 只常驻事件合帧、稳定 id 焦点索引和异步失效状态；
+投影四边形、surface 正反面、遮挡深度和 padding 计算移入独立
+`ProjectedItemPicker` chunk。首次显式或 pointer 拾取加载并复用同一个 Promise，
+非交互 Stage 不下载；公开 `pick()` 改为异步精确查询，冷启动 pointer 结果受最新 generation 和 destroy
+保护。内核就绪后 hover/click 直接同步调用缓存实例，不在每帧交互热路径创建
+Promise。键盘方向导航同时改为循环扫描可见项，不再为每次按键构造索引数组。
+
+包验证要求精确拾取 marker 不得出现在 Core 基础 entry，且必须存在于 lazy chunk。
+真实 root/Core/Cards-only 为 38,222/15,662/10,038 bytes gzip，相对上一轮分别减少
+1,072/596/0 bytes；layout-only 保持 8,166 bytes，tarball 为 124,713 bytes。
+
+2026-07-30 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2,000 Cards/high
+3 秒回归：steady 为 60.02 FPS、P95/P99 18.40/18.60ms；transition-stress 为
+60.00 FPS、P95/P99 18.50/18.65ms并完成 4 次操作。interaction-stress 三轮均执行
+180 次拾取，累计 142.2/168.2/153.6ms，中位约 0.853ms/次；P95 为
+18.15–18.50ms。全部场景保持主体 1 Draw Call、0 个 24/33/50ms 长帧，浏览器
+控制台无 warning/error。刷新页面后从未加载 picker 的冷态 interaction-stress
+同样为 60.00 FPS、P95/P99 18.25/18.60ms，首次加载计入后 180 次累计
+picking 151.5ms，未产生长帧。
