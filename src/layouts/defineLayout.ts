@@ -6,7 +6,6 @@ import type {
 } from '../core/types.js'
 import {
   TransformBuffer,
-  validateTransformBuffer,
 } from '../core/TransformBuffer.js'
 
 const transformKeys = [
@@ -65,7 +64,7 @@ export function defineLayout<TMeta = unknown>(
         definition.calculateInto!(count, context, scratch)
         validateBufferCount(scratch, count, name)
         validateTransformBuffer(scratch, name)
-        return scratch.toTransforms()
+        return materializeBuffer(scratch)
       }
       const transforms = definition.calculate(count, context)
       if (!Array.isArray(transforms)) {
@@ -95,6 +94,42 @@ export function defineLayout<TMeta = unknown>(
     },
   }
   return Object.freeze(layout)
+}
+
+function materializeBuffer(buffer: TransformBuffer): Transform[] {
+  return Array.from({ length: buffer.count }, (_, index) => {
+    const offset = index * 3
+    return {
+      x: buffer.positions[offset],
+      y: buffer.positions[offset + 1],
+      z: buffer.positions[offset + 2],
+      scale: buffer.scales[index],
+      rotationX: buffer.rotations[offset],
+      rotationY: buffer.rotations[offset + 1],
+      rotationZ: buffer.rotations[offset + 2],
+      opacity: buffer.opacities[index],
+    }
+  })
+}
+
+function validateTransformBuffer(buffer: TransformBuffer, layoutName: string): void {
+  for (let index = 0; index < buffer.count; index += 1) {
+    const offset = index * 3
+    for (const value of [
+      buffer.positions[offset],
+      buffer.positions[offset + 1],
+      buffer.positions[offset + 2],
+      buffer.scales[index],
+      buffer.rotations[offset],
+      buffer.rotations[offset + 1],
+      buffer.rotations[offset + 2],
+      buffer.opacities[index],
+    ]) {
+      if (!Number.isFinite(value)) {
+        throw new RangeError(`Layout "${layoutName}" transform ${index} must be finite`)
+      }
+    }
+  }
 }
 
 function validateBufferCount(

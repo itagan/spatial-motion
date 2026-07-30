@@ -1,6 +1,10 @@
 import type { MotionRendererVisualState } from '../renderers/MotionRenderer.js'
-import type { Layout, Transform } from './types.js'
-import { identityTransform, interpolateTransform } from './math.js'
+import type { Layout } from './types.js'
+import { interpolateAngle } from './math.js'
+import {
+  TransformBuffer,
+  type TransformBufferView,
+} from './TransformBuffer.js'
 
 export type MotionTransitionStatus =
   | 'running'
@@ -15,8 +19,8 @@ export interface MotionTransitionResult {
 }
 
 interface ActiveMotionTransition {
-  from: Transform[]
-  to: Transform[]
+  from: TransformBuffer
+  to: TransformBuffer
   elapsedMs: number
   lastUpdatedAt: number
   duration: number
@@ -30,8 +34,8 @@ interface ActiveMotionTransition {
 }
 
 interface StartTransitionOptions {
-  from: Transform[]
-  to: Transform[]
+  from: TransformBuffer
+  to: TransformBuffer
   fromVisual: MotionRendererVisualState
   toVisual: MotionRendererVisualState
   targetLayout: Layout
@@ -42,8 +46,8 @@ interface StartTransitionOptions {
 }
 
 export interface MotionTransitionSnapshot {
-  from: readonly Transform[]
-  to: readonly Transform[]
+  from: TransformBufferView
+  to: TransformBufferView
   fromVisual: MotionRendererVisualState
   toVisual: MotionRendererVisualState
   progress: number
@@ -54,6 +58,7 @@ export class MotionController {
   private activeTransition: ActiveMotionTransition | null = null
   private lastStatus: MotionTransitionStatus | null = null
   private lastLayout: string | null = null
+  private readonly resolvedBuffer = new TransformBuffer()
 
   hasActiveTransition(): boolean {
     return this.activeTransition !== null
@@ -130,7 +135,7 @@ export class MotionController {
     transition.resolve(result)
   }
 
-  advance(now: number, setProgress: (progress: number) => void): Transform[] | null {
+  advance(now: number, setProgress: (progress: number) => void): TransformBuffer | null {
     const transition = this.activeTransition
     if (!transition) return null
     transition.elapsedMs += Math.max(0, now - transition.lastUpdatedAt)
@@ -149,16 +154,19 @@ export class MotionController {
     if (this.activeTransition) this.activeTransition.lastUpdatedAt = now
   }
 
-  resolveTransforms(
-    settled: Transform[],
+  resolveBuffer(
+    settled: TransformBufferView,
     now: number,
     paused: boolean,
-  ): Transform[] {
+  ): TransformBufferView {
     const transition = this.activeTransition
     if (!transition) return settled
     const progress = transition.easing(this.progress(transition, now, paused))
-    return transition.to.map((transform, index) =>
-      interpolateTransform(transition.from[index] ?? identityTransform(), transform, progress),
+    return interpolateBuffers(
+      transition.from,
+      transition.to,
+      progress,
+      this.resolvedBuffer,
     )
   }
 
@@ -203,6 +211,47 @@ export class MotionController {
     this.lastLayout = layout
     return { completed: status === 'completed', status }
   }
+}
+
+function interpolateBuffers(
+  from: TransformBufferView,
+  to: TransformBufferView,
+  progress: number,
+  target: TransformBuffer,
+): TransformBuffer {
+  target.resize(to.count)
+  for (let index = 0; index < to.count; index += 1) {
+    const offset = index * 3
+    const hasFrom = index < from.count
+    for (let axis = 0; axis < 3; axis += 1) {
+      const component = offset + axis
+      target.positions[component] = lerp(
+        hasFrom ? from.positions[component] : 0,
+        to.positions[component],
+        progress,
+      )
+      target.rotations[component] = interpolateAngle(
+        hasFrom ? from.rotations[component] : 0,
+        to.rotations[component],
+        progress,
+      )
+    }
+    target.scales[index] = lerp(
+      hasFrom ? from.scales[index] : 0.01,
+      to.scales[index],
+      progress,
+    )
+    target.opacities[index] = lerp(
+      hasFrom ? from.opacities[index] : 1,
+      to.opacities[index],
+      progress,
+    )
+  }
+  return target
+}
+
+function lerp(from: number, to: number, progress: number): number {
+  return from + (to - from) * progress
 }
 
 function interpolateVisualState(

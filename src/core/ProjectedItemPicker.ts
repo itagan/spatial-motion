@@ -4,7 +4,8 @@ import {
   type PerspectiveCamera,
 } from 'three'
 import type { MotionRendererPickShape } from '../renderers/MotionRenderer.js'
-import type { MotionItem, Transform } from './types.js'
+import type { MotionItem } from './types.js'
+import type { TransformBufferView } from './TransformBuffer.js'
 import { visibilityRank } from './Visibility.js'
 
 export interface ProjectedPickState<TMeta> {
@@ -33,7 +34,7 @@ export interface ProjectedItemPickerOptions<TMeta> {
   camera: PerspectiveCamera
   itemBounds: MotionRendererPickShape
   getState: () => ProjectedPickState<TMeta>
-  resolveTransforms: (now: number) => readonly Transform[]
+  resolveTransformBuffer: (now: number) => TransformBufferView
 }
 
 export class ProjectedItemPicker<TMeta> {
@@ -71,7 +72,14 @@ export class ProjectedItemPicker<TMeta> {
     const rect = element.getBoundingClientRect()
     if (!rect.width || !rect.height) return null
     const state = this.options.getState()
-    const transforms = this.options.resolveTransforms(performance.now())
+    const transforms = this.options.resolveTransformBuffer(performance.now())
+    const {
+      positions,
+      scales,
+      rotations,
+      opacities,
+      count,
+    } = transforms
     camera.updateMatrixWorld()
     this.groupEuler.set(state.rotationX, state.rotationY, 0, 'XYZ')
     this.cameraRight.set(1, 0, 0).applyQuaternion(camera.quaternion)
@@ -97,12 +105,17 @@ export class ProjectedItemPicker<TMeta> {
     let bestDistance = Number.POSITIVE_INFINITY
     let bestDepth = Number.POSITIVE_INFINITY
 
-    for (let index = 0; index < transforms.length; index += 1) {
-      const transform = transforms[index]
+    for (let index = 0; index < count; index += 1) {
+      const offset = index * 3
+      const opacity = opacities[index]
       const item = state.items[index]
-      if (!item || transform.opacity < 0.05 || visibilityRank(index) > state.visibleRatio) continue
+      if (!item || opacity < 0.05 || visibilityRank(index) > state.visibleRatio) continue
       const center = this.center
-        .set(transform.x, transform.y, transform.z)
+        .set(
+          positions[offset],
+          positions[offset + 1],
+          positions[offset + 2],
+        )
         .applyEuler(this.groupEuler)
       const centerViewZ = this.viewCenter
         .copy(center)
@@ -119,8 +132,9 @@ export class ProjectedItemPicker<TMeta> {
       if (legacyRadius !== null) {
         hit = distance <= legacyRadius
       } else {
-        const halfWidth = Math.max(0, transform.scale) * itemWidth / 2
-        const halfHeight = Math.max(0, transform.scale) * itemHeight / 2
+        const scale = Math.max(0, scales[index])
+        const halfWidth = scale * itemWidth / 2
+        const halfHeight = scale * itemHeight / 2
         if (itemBounds.kind === 'disc') {
           this.edgeA.copy(center).addScaledVector(this.cameraRight, halfWidth)
           if (!this.projectToScreen(this.edgeA, rect, this.edgeScreen)) continue
@@ -140,7 +154,14 @@ export class ProjectedItemPicker<TMeta> {
           if (billboard) {
             this.setBillboardCorners(center, halfWidth, halfHeight)
           } else {
-            this.setSurfaceCorners(center, halfWidth, halfHeight, transform)
+            this.setSurfaceCorners(
+              center,
+              halfWidth,
+              halfHeight,
+              rotations[offset],
+              rotations[offset + 1],
+              rotations[offset + 2],
+            )
             if (!this.isFrontFacing(center, camera.position)) continue
           }
           let projected = true
@@ -219,12 +240,14 @@ export class ProjectedItemPicker<TMeta> {
     center: Vector3,
     halfWidth: number,
     halfHeight: number,
-    transform: Transform,
+    rotationX: number,
+    rotationY: number,
+    rotationZ: number,
   ): void {
     this.itemEuler.set(
-      transform.rotationX,
-      transform.rotationY,
-      transform.rotationZ,
+      rotationX,
+      rotationY,
+      rotationZ,
       'XYZ',
     )
     this.corners[0].set(-halfWidth, -halfHeight, 0)

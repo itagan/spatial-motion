@@ -19,15 +19,23 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 
 - `MotionStage<TMeta>` 强制接收 `renderer: MotionRendererFactory<TMeta>`，Core 不隐式创建 Cards。
 - 构造参数提供 `items` 时通过 `stage.ready` 等待初始 Renderer 数据准备；后续数据使用 `setItems()` / `updateItem(s)`。
-- `MotionItem<TMeta>`、`Transform`、Renderer/Layout 输入及更新索引使用只读契约；Stage、Cards/Points Resolver 和 item 回调共享同一泛型 meta。
+- `MotionItem<TMeta>`、Renderer/Layout 输入及更新索引使用只读契约；Stage、Cards/Points Resolver 和 item 回调共享同一泛型 meta。
 - Factory 只获得隔离内容 `Group`、GPU 限制（含 `maxTextureSize`、`maxTextureLayers`）、受限纹理准备函数和 destroy `AbortSignal`，不能接管 Scene、Camera、WebGLRenderer 或 RAF。
-- 核心协议负责数据、Transform、GPU 过渡进度、质量可见比例、统计和销毁；patch、visual、highlight、viewport、resource recovery、streaming effects 与逐帧 `frame.update()` 是可选能力。
+- 核心协议负责数据、Transform Buffer、GPU 过渡进度、质量可见比例、统计和销毁；patch、visual、highlight、viewport、resource recovery、streaming effects 与逐帧 `frame.update()` 是可选能力。
+- `setTransforms(buffer)` 与 `prepareTransition(from, to)` 强制接收
+  `TransformBufferView`。视图包含 position/rotation 的三分量 Float32Array、
+  scale/opacity 的单分量 Float32Array 和有效 `count`；Renderer 必须同步读取或复制，
+  不得跨下一次 Stage 提交保存可变视图。需要自有持久状态时按容量复用 TypedArray。
+- `TransformBuffer` 从 Core 与 Layouts 入口导出，供自定义 Renderer 测试、内部快照
+  和 `calculateInto()` 使用；逐项写入使用 `setValues()`，容量从 TypedArray 长度读取。
 - Renderer capability 在 Stage 构造期完成验证与编译；运行中修改 Renderer 方法不受
   支持。需要改变能力时创建新的 Renderer/Stage。
 - `descriptor.itemBounds` 支持 layout/camera quad、camera disc 或 `null`；`null` 关闭指针拾取但不影响布局与程序化 focus。
 - `stage.pick()` 返回精确命中的 Promise；投影拾取内核按需加载并在 Stage 内缓存。
   DOM hover/click 在内核预热后走同步热路径，冷启动结果受 destroy 和最新 pointer
   generation 保护。
+- `stage.focusItems()` 的布局构造实现同样按需加载；调用本身保持 Promise 契约，
+  加载期间 items 发生替换或 Stage 销毁时旧结果不会提交。
 - `StagePerformanceStats` 明确报告 input、resident、submitted、visible 与 active effect 数量；`render` 报告场景 Draw Call/三角形，`renderer` 报告 GPU 字节和有限 metrics。
 - `QualityController` 独立拥有模式、档位、Profile 和自适应采样器；Stage 接受
   `qualityProfiles` 与 `adaptivePerformanceOptions`，覆盖值在 Renderer 创建前验证。

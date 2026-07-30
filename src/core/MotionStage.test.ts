@@ -18,6 +18,7 @@ import {
 } from 'three'
 import type { Layout, LayoutContext, MotionItem, Transform } from './types'
 import type { StageExtensionContext } from './extensions'
+import type { TransformBufferView } from './TransformBuffer'
 import { MotionStage } from './MotionStage'
 import { TunnelEffect } from '../effects/TunnelEffect'
 import { radialBurst } from '../effects/RadialBurstEffect'
@@ -182,6 +183,30 @@ function transform(overrides: Partial<Transform> = {}): Transform {
   }
 }
 
+function bufferTransforms(buffer: TransformBufferView): Transform[] {
+  return Array.from({ length: buffer.count }, (_, index) => {
+    const offset = index * 3
+    return transform({
+      x: buffer.positions[offset],
+      y: buffer.positions[offset + 1],
+      z: buffer.positions[offset + 2],
+      scale: buffer.scales[index],
+      rotationX: buffer.rotations[offset],
+      rotationY: buffer.rotations[offset + 1],
+      rotationZ: buffer.rotations[offset + 2],
+      opacity: buffer.opacities[index],
+    })
+  })
+}
+
+function lastTransformBuffer(
+  spy: ReturnType<typeof vi.fn>,
+): TransformBufferView {
+  const buffer = spy.mock.calls.at(-1)?.[0] as TransformBufferView | undefined
+  if (!buffer) throw new Error('Expected a transform buffer submission')
+  return buffer
+}
+
 function layout(calculate: (count: number) => Transform[], name = 'test'): Layout {
   return { name, orientation: 'camera', calculate }
 }
@@ -281,12 +306,23 @@ function lineRendererFixture() {
     geometry.setAttribute('position', new Float32BufferAttribute(new Float32Array(count * 6), 3))
     return true
   })
-  const setTransforms = vi.fn((transforms: Transform[]) => {
+  const setTransforms = vi.fn((transforms: TransformBufferView) => {
     const positions = geometry.getAttribute('position')
-    transforms.forEach((item, index) => {
-      positions.setXYZ(index * 2, item.x - 0.25, item.y, item.z)
-      positions.setXYZ(index * 2 + 1, item.x + 0.25, item.y, item.z)
-    })
+    for (let index = 0; index < transforms.count; index += 1) {
+      const offset = index * 3
+      positions.setXYZ(
+        index * 2,
+        transforms.positions[offset] - 0.25,
+        transforms.positions[offset + 1],
+        transforms.positions[offset + 2],
+      )
+      positions.setXYZ(
+        index * 2 + 1,
+        transforms.positions[offset] + 0.25,
+        transforms.positions[offset + 1],
+        transforms.positions[offset + 2],
+      )
+    }
     positions.needsUpdate = true
   })
   const factory: MotionRendererFactory = ({ root }) => {
@@ -347,11 +383,20 @@ function shapeRendererFixture() {
         return true
       },
       setTransforms(transforms) {
-        transforms.forEach((item, index) => {
-          matrix.makeScale(item.scale, item.scale, item.scale)
-          matrix.setPosition(item.x, item.y, item.z)
+        for (let index = 0; index < transforms.count; index += 1) {
+          const offset = index * 3
+          matrix.makeScale(
+            transforms.scales[index],
+            transforms.scales[index],
+            transforms.scales[index],
+          )
+          matrix.setPosition(
+            transforms.positions[offset],
+            transforms.positions[offset + 1],
+            transforms.positions[offset + 2],
+          )
           shapes.setMatrixAt(index, matrix)
-        })
+        }
         shapes.instanceMatrix.needsUpdate = true
       },
       prepareTransition: vi.fn(),
@@ -554,7 +599,7 @@ describe('MotionStage', () => {
     high.resolve(true)
     await vi.waitFor(() =>
       expect(cards.setTransforms.mock.calls.length).toBe(transformsBeforeReconcile + 2))
-    expect((cards.setTransforms.mock.calls.at(-1)?.[0] as Transform[])).toHaveLength(2000)
+    expect(lastTransformBuffer(cards.setTransforms).count).toBe(2000)
     stage.destroy()
   })
 
@@ -1280,7 +1325,9 @@ describe('MotionStage', () => {
     cards.prepareTransition.mockClear()
 
     expect(await stage.to(layout(() => [transform({ x: 5 })]))).toBe(true)
-    expect(cards.setTransforms).toHaveBeenLastCalledWith([transform({ x: 5 })])
+    expect(bufferTransforms(lastTransformBuffer(cards.setTransforms))).toEqual([
+      transform({ x: 5 }),
+    ])
     expect(cards.prepareTransition).not.toHaveBeenCalled()
     stage.destroy()
   })
@@ -1300,7 +1347,7 @@ describe('MotionStage', () => {
     await firstUpdate
 
     expect(cards.setTransforms).toHaveBeenCalledTimes(1)
-    expect(cards.setTransforms.mock.calls[0][0]).toHaveLength(2)
+    expect((cards.setTransforms.mock.calls[0][0] as TransformBufferView).count).toBe(2)
     stage.destroy()
   })
 
@@ -1315,13 +1362,14 @@ describe('MotionStage', () => {
     cards.setTransforms.mockClear()
 
     await stage.updateItems([{ id: 'b' }, { id: 'a' }, { id: 'c' }], { duration: 0 })
-    const inherited = cards.setTransforms.mock.calls[1][0] as Transform[]
+    const inherited = bufferTransforms(
+      cards.setTransforms.mock.calls[1][0] as TransformBufferView,
+    )
 
-    expect(inherited.map(({ x, scale }) => ({ x, scale }))).toEqual([
-      { x: 11, scale: 1 },
-      { x: 10, scale: 1 },
-      { x: 0, scale: 0.01 },
-    ])
+    expect(inherited.map(({ x }) => x)).toEqual([11, 10, 0])
+    expect(inherited[0].scale).toBeCloseTo(1)
+    expect(inherited[1].scale).toBeCloseTo(1)
+    expect(inherited[2].scale).toBeCloseTo(0.01)
     stage.destroy()
   })
 
@@ -1378,14 +1426,28 @@ describe('MotionStage', () => {
 
     expect(await stage.focusItems(['missing'], { duration: 0 })).toBe(false)
     expect(await stage.focusItems(['b'], { duration: 0 })).toBe(true)
-    const focused = cards.setTransforms.mock.calls.at(-1)?.[0] as Transform[]
-    expect(focused[0].opacity).toBe(0.08)
-    expect(focused[1]).toMatchObject({ x: 0, y: 0, z: 8, scale: 1.45, opacity: 1 })
+    const focused = bufferTransforms(lastTransformBuffer(cards.setTransforms))
+    expect(focused[0].opacity).toBeCloseTo(0.08)
+    expect(focused[1]).toMatchObject({ x: 0, y: 0, z: 8, opacity: 1 })
+    expect(focused[1].scale).toBeCloseTo(1.45)
 
     expect(await stage.restoreLayout({ duration: 0 })).toBe(true)
-    const restored = cards.setTransforms.mock.calls.at(-1)?.[0] as Transform[]
+    const restored = bufferTransforms(lastTransformBuffer(cards.setTransforms))
     expect(restored.map(({ x }) => x)).toEqual([-0.5, 0.5])
     stage.destroy()
+  })
+
+  it('discards a lazy focus layout after items change or the stage is destroyed', async () => {
+    const stage = createStage()
+    await stage.setItems([{ id: 'a' }, { id: 'b' }])
+
+    const staleFocus = stage.focusItems(['b'], { duration: 0 })
+    await stage.setItems([{ id: 'next' }])
+    await expect(staleFocus).resolves.toBe(false)
+
+    const destroyedFocus = stage.focusItems(['next'], { duration: 0 })
+    stage.destroy()
+    await expect(destroyedFocus).resolves.toBe(false)
   })
 
   it('cancels an interrupted layout transition and keeps the newer layout', async () => {
@@ -1410,7 +1472,7 @@ describe('MotionStage', () => {
 
     expect(await firstTransition).toBe(false)
     expect(await secondTransition).toBe(true)
-    const finalTransforms = cards.setTransforms.mock.calls.at(-1)?.[0] as Transform[]
+    const finalTransforms = bufferTransforms(lastTransformBuffer(cards.setTransforms))
     expect(finalTransforms[0].x).toBe(5)
     stage.destroy()
   })
@@ -1430,7 +1492,7 @@ describe('MotionStage', () => {
     expect(cards.enableEffect).toHaveBeenCalledOnce()
     expect(await stage.to(baseLayout, { duration: 0 })).toBe(true)
     expect(cards.disableEffect).toHaveBeenCalledOnce()
-    const restored = cards.setTransforms.mock.calls.at(-1)?.[0] as Transform[]
+    const restored = bufferTransforms(lastTransformBuffer(cards.setTransforms))
     expect(restored.map(({ x }) => x)).toEqual([0, 1])
     stage.destroy()
   })
@@ -1494,12 +1556,13 @@ describe('MotionStage', () => {
     await stage.setItems([{ id: 'center' }])
     await stage.to(layout(() => [transform()]), { duration: 0 })
     const internals = stage as unknown as {
-      contentState: { transforms: Transform[] }
-      resolveCurrentTransforms(now: number): Transform[]
+      contentState: { transforms: TransformBufferView }
+      resolveCurrentTransformBuffer(now: number): TransformBufferView
     }
     const settled = internals.contentState.transforms
+    const first = internals.resolveCurrentTransformBuffer(performance.now())
 
-    expect(internals.resolveCurrentTransforms(performance.now())).toBe(settled)
+    expect(internals.resolveCurrentTransformBuffer(performance.now())).toBe(first)
     await stage.pick(50, 50)
     expect(internals.contentState.transforms).toBe(settled)
     stage.destroy()
@@ -1610,7 +1673,7 @@ describe('MotionStage', () => {
     await stage.setItems([{ id: 'a' }])
 
     expect(await stage.to(layout(() => [transform({ x: 4 })]), { duration: 1000 })).toBe(true)
-    expect((cards.setTransforms.mock.calls.at(-1)?.[0] as Transform[])[0].x).toBe(4)
+    expect(lastTransformBuffer(cards.setTransforms).positions[0]).toBe(4)
     expect(await stage.enterEffect(radialBurst(), { duration: 1000 })).toBe(true)
     expect(cards.enableEffect).not.toHaveBeenCalled()
     stage.autoRotate({ y: 1 })
@@ -1753,9 +1816,7 @@ describe('MotionStage', () => {
     await expect(stage.updateItem('line', { title: 'after' })).resolves.toBe(true)
 
     expect(fixture.setItems).toHaveBeenCalledTimes(2)
-    expect(fixture.setTransforms).toHaveBeenLastCalledWith([
-      expect.objectContaining({ x: 2 }),
-    ])
+    expect(bufferTransforms(lastTransformBuffer(fixture.setTransforms))[0].x).toBe(2)
     expect(await stage.pick(50, 50)).toBeNull()
     expect(stage.focusItem('line')).toBe(true)
     stage.destroy()

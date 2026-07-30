@@ -4,44 +4,37 @@ import type {
   Transform,
 } from './types.js'
 
-export class TransformBuffer {
+export interface TransformBufferView {
+  readonly positions: Float32Array
+  readonly scales: Float32Array
+  readonly rotations: Float32Array
+  readonly opacities: Float32Array
+  readonly count: number
+}
+
+export class TransformBuffer implements TransformBufferView {
   positions: Float32Array
   scales: Float32Array
   rotations: Float32Array
   opacities: Float32Array
   count = 0
-  capacity: number
 
   constructor(count = 0) {
-    this.capacity = nextCapacity(count)
-    this.positions = new Float32Array(this.capacity * 3)
-    this.scales = new Float32Array(this.capacity)
-    this.rotations = new Float32Array(this.capacity * 3)
-    this.opacities = new Float32Array(this.capacity)
+    const capacity = nextCapacity(count)
+    this.positions = new Float32Array(capacity * 3)
+    this.scales = new Float32Array(capacity)
+    this.rotations = new Float32Array(capacity * 3)
+    this.opacities = new Float32Array(capacity)
     this.resize(count)
   }
 
   resize(count: number): this {
-    if (!Number.isInteger(count) || count < 0) {
-      throw new RangeError('Transform count must be a non-negative integer')
+    if ((count >>> 0) !== count) {
+      throw new RangeError('Invalid transform count')
     }
-    if (count > this.capacity) this.grow(nextCapacity(count))
+    if (count > this.scales.length) this.grow(nextCapacity(count))
     this.count = count
     return this
-  }
-
-  set(index: number, transform: Transform): this {
-    return this.setValues(
-      index,
-      transform.x,
-      transform.y,
-      transform.z,
-      transform.scale,
-      transform.rotationX,
-      transform.rotationY,
-      transform.rotationZ,
-      transform.opacity,
-    )
   }
 
   setValues(
@@ -55,7 +48,6 @@ export class TransformBuffer {
     rotationZ: number,
     opacity: number,
   ): this {
-    this.assertIndex(index)
     const offset = index * 3
     this.positions[offset] = x
     this.positions[offset + 1] = y
@@ -68,39 +60,41 @@ export class TransformBuffer {
     return this
   }
 
-  get(index: number, target: WritableTransform = createWritableTransform()): Transform {
-    this.assertIndex(index)
-    const offset = index * 3
-    target.x = this.positions[offset]
-    target.y = this.positions[offset + 1]
-    target.z = this.positions[offset + 2]
-    target.scale = this.scales[index]
-    target.rotationX = this.rotations[offset]
-    target.rotationY = this.rotations[offset + 1]
-    target.rotationZ = this.rotations[offset + 2]
-    target.opacity = this.opacities[index]
-    return target
-  }
-
   copyFrom(transforms: readonly Transform[]): this {
     this.resize(transforms.length)
-    transforms.forEach((transform, index) => this.set(index, transform))
+    transforms.forEach((transform, index) => this.setValues(
+      index,
+      transform.x,
+      transform.y,
+      transform.z,
+      transform.scale,
+      transform.rotationX,
+      transform.rotationY,
+      transform.rotationZ,
+      transform.opacity,
+    ))
     return this
   }
 
-  toTransforms(target: WritableTransform[] = []): Transform[] {
-    target.length = this.count
-    for (let index = 0; index < this.count; index += 1) {
-      target[index] = this.get(index, target[index])
-    }
-    return target
+  copyFromBuffer(source: TransformBufferView): this {
+    this.resize(source.count)
+    this.positions.set(source.positions.subarray(0, source.count * 3))
+    this.scales.set(source.scales.subarray(0, source.count))
+    this.rotations.set(source.rotations.subarray(0, source.count * 3))
+    this.opacities.set(source.opacities.subarray(0, source.count))
+    return this
   }
 
-  byteLength(): number {
-    return this.positions.byteLength
-      + this.scales.byteLength
-      + this.rotations.byteLength
-      + this.opacities.byteLength
+  setFromBuffer(index: number, source: TransformBufferView, sourceIndex: number): this {
+    const offset = index * 3
+    const sourceOffset = sourceIndex * 3
+    for (let axis = 0; axis < 3; axis += 1) {
+      this.positions[offset + axis] = source.positions[sourceOffset + axis]
+      this.rotations[offset + axis] = source.rotations[sourceOffset + axis]
+    }
+    this.scales[index] = source.scales[sourceIndex]
+    this.opacities[index] = source.opacities[sourceIndex]
+    return this
   }
 
   private grow(capacity: number): void {
@@ -108,14 +102,8 @@ export class TransformBuffer {
     this.scales = growArray(this.scales, capacity)
     this.rotations = growArray(this.rotations, capacity * 3)
     this.opacities = growArray(this.opacities, capacity)
-    this.capacity = capacity
   }
 
-  private assertIndex(index: number): void {
-    if (!Number.isInteger(index) || index < 0 || index >= this.count) {
-      throw new RangeError(`Transform index ${index} is outside count ${this.count}`)
-    }
-  }
 }
 
 export function calculateLayoutInto<TMeta>(
@@ -130,53 +118,11 @@ export function calculateLayoutInto<TMeta>(
   } else {
     target.copyFrom(layout.calculate(count, context))
   }
-  if (target.count !== count) {
-    throw new RangeError(
-      `Layout "${layout.name}" wrote ${target.count}/${count} transforms`,
-    )
-  }
-  validateTransformBuffer(target, layout.name)
   return target
 }
 
-export function validateTransformBuffer(buffer: TransformBuffer, layoutName: string): void {
-  for (let index = 0; index < buffer.count; index += 1) {
-    const offset = index * 3
-    for (const value of [
-      buffer.positions[offset],
-      buffer.positions[offset + 1],
-      buffer.positions[offset + 2],
-      buffer.scales[index],
-      buffer.rotations[offset],
-      buffer.rotations[offset + 1],
-      buffer.rotations[offset + 2],
-      buffer.opacities[index],
-    ]) {
-      if (!Number.isFinite(value)) {
-        throw new RangeError(`Layout "${layoutName}" transform ${index} must be finite`)
-      }
-    }
-  }
-}
-
-type WritableTransform = { -readonly [TKey in keyof Transform]: Transform[TKey] }
-
-function createWritableTransform(): WritableTransform {
-  return {
-    x: 0,
-    y: 0,
-    z: 0,
-    scale: 1,
-    rotationX: 0,
-    rotationY: 0,
-    rotationZ: 0,
-    opacity: 1,
-  }
-}
-
 function nextCapacity(count: number): number {
-  if (count <= 0) return 0
-  return 2 ** Math.ceil(Math.log2(count))
+  return count > 0 ? 2 ** Math.ceil(Math.log2(count)) : 0
 }
 
 function growArray(array: Float32Array, length: number): Float32Array {

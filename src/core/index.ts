@@ -21,6 +21,8 @@ export type { QualityControllerOptions } from './QualityController.js'
 export type { StageEventListener } from './StageEventHub.js'
 export { Timeline } from './Timeline.js'
 export type { TimelineStep, TimelineWaitHandle, TimelineWaiter } from './Timeline.js'
+export { TransformBuffer } from './TransformBuffer.js'
+export type { TransformBufferView } from './TransformBuffer.js'
 export type {
   StageExtension,
   StageExtensionContext,

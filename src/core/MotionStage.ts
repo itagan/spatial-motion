@@ -4,7 +4,6 @@ import type {
   QualityLevel,
   QualityMode,
   QualityProfile,
-  Transform,
   TransitionOptions,
 } from './types.js'
 import { easing } from './math.js'
@@ -47,6 +46,11 @@ import {
   type CompiledRendererRuntime,
 } from './CompiledRendererRuntime.js'
 import { StageContentCoordinator } from './StageContentCoordinator.js'
+import {
+  calculateLayoutInto,
+  TransformBuffer,
+  type TransformBufferView,
+} from './TransformBuffer.js'
 
 export interface MotionStageOptions<TMeta = unknown> {
   container: HTMLElement
@@ -197,6 +201,7 @@ export class MotionStage<TMeta = unknown> {
   private readonly rendererState: RendererStateCoordinator<TMeta>
   private readonly stageClock = new StageClock()
   private readonly contentState = new StageContentState<TMeta>()
+  private readonly effectTransformBuffer = new TransformBuffer()
   private readonly rotation: StageRotationController
   private readonly events = new StageEventHub<MotionStageEventMap<TMeta>>()
   private readonly itemWidth: number
@@ -309,7 +314,7 @@ export class MotionStage<TMeta = unknown> {
         hideBackHemisphere: this.contentState.hideBackHemisphere,
         effectActive: this.effectController.hasActive(),
       }),
-      resolveTransforms: (now) => this.resolveCurrentTransforms(now),
+      resolveTransformBuffer: (now) => this.resolveCurrentTransformBuffer(now),
       hasScheduledFrame: () => this.runtime.hasScheduledFrame(),
       isDestroyed: () => this.destroyed,
       setHighlightIndex: (index) =>
@@ -332,7 +337,7 @@ export class MotionStage<TMeta = unknown> {
       interaction: this.interaction,
       quality: this.qualityController,
       rendererState: this.rendererState,
-      resolveTransforms: (now) => this.resolveCurrentTransforms(now),
+      resolveTransformBuffer: (now) => this.resolveCurrentTransformBuffer(now),
       getLayoutContext: () => this.context(),
       transitionTo: (layout, transitionOptions) =>
         this.transitionTo(layout, transitionOptions),
@@ -415,12 +420,19 @@ export class MotionStage<TMeta = unknown> {
     this.events.emit('transitionstart', { layout: layout.name })
     const now = performance.now()
     const visualState = this.resolveCurrentVisualState(now)
-    this.contentState.transforms = this.resolveCurrentTransforms(now)
+    this.contentState.transforms = new TransformBuffer().copyFromBuffer(
+      this.resolveCurrentTransformBuffer(now),
+    )
     this.effectController.deactivate()
     this.motionController.cancel('interrupted')
     const from = this.contentState.transforms
     const calculationStartedAt = performance.now()
-    const target = [...layout.calculate(this.contentState.items.length, this.context())]
+    const target = calculateLayoutInto(
+      layout,
+      this.contentState.items.length,
+      this.context(),
+      new TransformBuffer(),
+    )
     this.transformCalculationMs += performance.now() - calculationStartedAt
     this.transformCalculations += 1
     const targetOrientation = layout.orientation ?? 'surface'
@@ -496,18 +508,21 @@ export class MotionStage<TMeta = unknown> {
         hideBackHemisphere: false,
         hemisphereEdgeFade: 0,
         calculate: () => target,
+        calculateInto: (_count, _context, buffer) => {
+          buffer.copyFrom(target)
+        },
       },
       options,
     )
     if (!entered) return false
     if (this.reducedMotion) {
-      this.contentState.transforms = target
-      this.contentRenderer.setTransforms(target)
+      this.contentState.transforms = new TransformBuffer().copyFrom(target)
+      this.contentRenderer.setTransforms(this.contentState.transforms)
       return true
     }
     if (!await this.effectController.activate(effect, performance.now())) {
-      this.contentState.transforms = target
-      this.contentRenderer.setTransforms(target)
+      this.contentState.transforms = new TransformBuffer().copyFrom(target)
+      this.contentRenderer.setTransforms(this.contentState.transforms)
       return true
     }
     return true
@@ -546,43 +561,14 @@ export class MotionStage<TMeta = unknown> {
 
   private async focusItemsInternal(ids: string[], options: FocusItemsOptions): Promise<boolean> {
     const selected = new Set(ids)
-    const selectedIndices = this.contentState.items
-      .map((item, index) => (selected.has(item.id) ? index : -1))
-      .filter((index) => index >= 0)
-    if (!selectedIndices.length) return false
-
-    const current = this.resolveCurrentTransforms(performance.now())
-    const selectedOrder = new Map(selectedIndices.map((index, order) => [index, order]))
-    const columns = Math.max(1, options.columns ?? Math.ceil(Math.sqrt(selectedIndices.length)))
-    const rows = Math.ceil(selectedIndices.length / columns)
-    const gap = options.gap ?? 1.7
-    const focusScale = options.scale ?? 1.45
-    const z = options.z ?? 8
-    const dimOpacity = options.dimOpacity ?? 0.08
-
-    return this.transitionTo(
-      {
-        name: 'focus',
-        orientation: 'camera',
-        calculate: () => current.map((transform, index) => {
-          const order = selectedOrder.get(index)
-          if (order === undefined) {
-            return { ...transform, scale: Math.min(transform.scale, 0.35), opacity: dimOpacity }
-          }
-          return {
-            x: (order % columns - (columns - 1) / 2) * gap,
-            y: ((rows - 1) / 2 - Math.floor(order / columns)) * gap,
-            z,
-            scale: focusScale,
-            rotationX: 0,
-            rotationY: 0,
-            rotationZ: 0,
-            opacity: 1,
-          }
-        }),
-      },
-      options,
+    const items = this.contentState.items
+    if (!items.some((item) => selected.has(item.id))) return false
+    const { createFocusLayout } = await import('./FocusLayout.js')
+    if (this.destroyed || items !== this.contentState.items) return false
+    const current = new TransformBuffer().copyFromBuffer(
+      this.resolveCurrentTransformBuffer(performance.now()),
     )
+    return this.transitionTo(createFocusLayout(items, ids, current, options), options)
   }
 
   restoreLayout(options: TransitionOptions = {}): Promise<boolean> {
@@ -671,10 +657,12 @@ export class MotionStage<TMeta = unknown> {
       && !this.motionController.hasActiveTransition()
       && !this.effectController.hasActive()
     ) {
-      this.contentState.transforms = [...this.contentState.lastLayout.calculate(
+      this.contentState.transforms = calculateLayoutInto(
+        this.contentState.lastLayout,
         this.contentState.items.length,
         this.context(),
-      )]
+        new TransformBuffer(),
+      )
       this.contentRenderer.setTransforms(this.contentState.transforms)
     }
     const viewport = this.extensionViewport()
@@ -769,14 +757,14 @@ export class MotionStage<TMeta = unknown> {
     }
   }
 
-  private resolveCurrentTransforms(now: number): Transform[] {
+  private resolveCurrentTransformBuffer(now: number): TransformBufferView {
     const effectTransforms = this.effectController.resolveTransforms(
       this.contentState.items.length,
       now,
       this.runtime.isPaused(),
     )
-    if (effectTransforms) return effectTransforms
-    return this.motionController.resolveTransforms(
+    if (effectTransforms) return this.effectTransformBuffer.copyFrom(effectTransforms)
+    return this.motionController.resolveBuffer(
       this.contentState.transforms,
       now,
       this.runtime.isPaused(),
@@ -872,7 +860,7 @@ export class MotionStage<TMeta = unknown> {
     this.stopRotation()
     const transforms = this.effectController.settleReducedMotion(this.contentState.items.length)
     if (!transforms) return
-    this.contentState.transforms = transforms
+    this.contentState.transforms = new TransformBuffer().copyFrom(transforms)
     this.contentRenderer.setTransforms(this.contentState.transforms)
   }
 

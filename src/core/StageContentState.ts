@@ -1,14 +1,14 @@
 import type {
   Layout,
   MotionItem,
-  Transform,
 } from './types.js'
 import type { MotionRendererVisualState } from '../renderers/MotionRenderer.js'
+import { TransformBuffer } from './TransformBuffer.js'
 
 export class StageContentState<TMeta = unknown> {
   items: MotionItem<TMeta>[] = []
   sourceItems: MotionItem<TMeta>[] = []
-  transforms: Transform[] = []
+  transforms = new TransformBuffer()
   lastLayout: Layout<TMeta> | null = null
   visibleRatio = 1
   inputItemCount = 0

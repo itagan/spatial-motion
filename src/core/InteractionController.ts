@@ -1,5 +1,6 @@
 import type { PerspectiveCamera } from 'three'
-import type { MotionItem, Transform } from './types.js'
+import type { MotionItem } from './types.js'
+import type { TransformBufferView } from './TransformBuffer.js'
 import type { MotionRendererPickShape } from '../renderers/MotionRenderer.js'
 import type {
   ProjectedItemPicker,
@@ -21,7 +22,7 @@ interface InteractionControllerOptions<TMeta> {
   keyboardNavigation: boolean
   ariaLabel: string
   getState: () => ProjectedPickState<TMeta>
-  resolveTransforms: (now: number) => readonly Transform[]
+  resolveTransformBuffer: (now: number) => TransformBufferView
   hasScheduledFrame: () => boolean
   isDestroyed: () => boolean
   setHighlightIndex: (index: number | null) => void
@@ -178,7 +179,7 @@ export class InteractionController<TMeta> {
           camera: this.options.camera,
           itemBounds: this.options.itemBounds!,
           getState: this.options.getState,
-          resolveTransforms: this.options.resolveTransforms,
+          resolveTransformBuffer: this.options.resolveTransformBuffer,
         })
         if (this.disposed) return picker
         this.picker = picker

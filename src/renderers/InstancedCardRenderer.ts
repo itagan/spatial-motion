@@ -8,7 +8,8 @@ import {
   ShaderMaterial,
 } from 'three'
 import type { Texture } from 'three'
-import type { MotionItem, Transform } from '../core/types.js'
+import type { MotionItem } from '../core/types.js'
+import type { TransformBufferView } from '../core/TransformBuffer.js'
 import type { StreamingEffectGpuData } from '../effects/types.js'
 import type {
   CardEffectProgram,
@@ -256,17 +257,17 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     return result.status === 'committed' && result.value
   }
 
-  setTransforms(transforms: readonly Transform[]): void {
-    this.prepareTransition(transforms, transforms)
+  setTransforms(buffer: TransformBufferView): void {
+    this.prepareTransition(buffer, buffer)
     this.setProgress(1)
   }
 
   prepareTransition(
-    from: readonly Transform[],
-    to: readonly Transform[],
+    from: TransformBufferView,
+    to: TransformBufferView,
   ): void {
     if (!this.mesh) return
-    const count = Math.min(from.length, to.length, this.itemCount)
+    const count = Math.min(from.count, to.count, this.itemCount)
     const geometry = this.mesh.geometry
     const fromPosition = geometry.getAttribute('fromPosition') as InstancedBufferAttribute
     const toPosition = geometry.getAttribute('toPosition') as InstancedBufferAttribute
@@ -278,16 +279,16 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     const toOpacity = geometry.getAttribute('toOpacity') as InstancedBufferAttribute
 
     for (let index = 0; index < count; index += 1) {
-      this.writeTransform(
-        from[index],
+      this.writeBufferTransform(
+        from,
         index,
         fromPosition.array as Float32Array,
         fromQuaternion.array as Float32Array,
         fromScale.array as Float32Array,
         fromOpacity.array as Float32Array,
       )
-      this.writeTransform(
-        to[index],
+      this.writeBufferTransform(
+        to,
         index,
         toPosition.array as Float32Array,
         toQuaternion.array as Float32Array,
@@ -576,8 +577,8 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     return this.atlasBackendReady
   }
 
-  private writeTransform(
-    transform: Transform,
+  private writeBufferTransform(
+    buffer: TransformBufferView,
     index: number,
     positions: Float32Array,
     quaternions: Float32Array,
@@ -585,18 +586,23 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     opacities: Float32Array,
   ): void {
     const positionOffset = index * 3
-    positions[positionOffset] = transform.x
-    positions[positionOffset + 1] = transform.y
-    positions[positionOffset + 2] = transform.z
-    this.euler.set(transform.rotationX, transform.rotationY, transform.rotationZ, 'XYZ')
+    positions[positionOffset] = buffer.positions[positionOffset]
+    positions[positionOffset + 1] = buffer.positions[positionOffset + 1]
+    positions[positionOffset + 2] = buffer.positions[positionOffset + 2]
+    this.euler.set(
+      buffer.rotations[positionOffset],
+      buffer.rotations[positionOffset + 1],
+      buffer.rotations[positionOffset + 2],
+      'XYZ',
+    )
     this.quaternion.setFromEuler(this.euler)
     const quaternionOffset = index * 4
     quaternions[quaternionOffset] = this.quaternion.x
     quaternions[quaternionOffset + 1] = this.quaternion.y
     quaternions[quaternionOffset + 2] = this.quaternion.z
     quaternions[quaternionOffset + 3] = this.quaternion.w
-    scales[index] = transform.scale
-    opacities[index] = transform.opacity
+    scales[index] = buffer.scales[index]
+    opacities[index] = buffer.opacities[index]
   }
 }
 

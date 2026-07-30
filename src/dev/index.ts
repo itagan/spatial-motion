@@ -13,6 +13,7 @@ import {
   type Texture,
 } from 'three'
 import { identityTransform } from '../core/math.js'
+import { TransformBuffer } from '../core/TransformBuffer.js'
 import type {
   Layout,
   LayoutContext,
@@ -232,6 +233,7 @@ export async function validateMotionRenderer<TMeta = unknown>(
         ? [...items, { id: '__diagnostic_capacity_item__' } as MotionItem<TMeta>]
         : items
       const cycleTransforms = fitTransforms(transforms, cycleItems.length)
+      const cycleBuffer = new TransformBuffer().copyFrom(cycleTransforms)
       const applied = await renderer.setItems(cycleItems)
       if (!applied) {
         addDiagnostic(errors, {
@@ -241,8 +243,8 @@ export async function validateMotionRenderer<TMeta = unknown>(
         })
         break
       }
-      renderer.setTransforms(cycleTransforms)
-      renderer.prepareTransition(cycleTransforms, cycleTransforms)
+      renderer.setTransforms(cycleBuffer)
+      renderer.prepareTransition(cycleBuffer, cycleBuffer)
       renderer.setProgress(0.5)
       renderer.setVisibleRatio(0.75)
       renderer.capabilities.visual?.prepareVisualTransition(
@@ -283,7 +285,7 @@ export async function validateMotionRenderer<TMeta = unknown>(
     }
     if (renderer.getStats().instanceCount !== items.length) {
       await renderer.setItems(items)
-      renderer.setTransforms(transforms)
+      renderer.setTransforms(new TransformBuffer().copyFrom(transforms))
       finalStats = renderer.getStats()
     }
   } catch (error) {
