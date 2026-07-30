@@ -566,13 +566,13 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 
 | 项目 | 预算 | 当前基线 |
 | --- | ---: | ---: |
-| 根入口真实消费者 gzip | ≤ 40 KB | 35.8 KB（36,610 bytes） |
-| Core-only 真实消费者 gzip | ≤ 16 KB | 14.3 KB（14,610 bytes） |
+| 根入口真实消费者 gzip | ≤ 40 KB | 35.8 KB（36,632 bytes） |
+| Core-only 真实消费者 gzip | ≤ 16 KB | 14.3 KB（14,636 bytes） |
 | Cards-only 真实消费者 gzip | ≤ 10 KB | 9.8 KB（10,052 bytes） |
 | 按需 card-template gzip | ≤ 12 KB | 6.0 KB（6,194 bytes） |
 | 按需 Points Renderer gzip | ≤ 12 KB | 2.8 KB（2,859 bytes） |
 | 按需开发诊断 gzip | ≤ 12 KB | 3.9 KB（3,951 bytes） |
-| npm tarball | ≤ 150 KB | 约 124.0 KiB（127,019 bytes） |
+| npm tarball | ≤ 150 KB | 约 124.0 KiB（127,022 bytes） |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 7.8 KB（7,956 bytes） |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。根入口、Core-only 与 Cards-only 的预算按真实 Vite/Terser 消费产物计算，并保持 Three.js external；各输出模块 gzip 相加只保留为诊断值，不作为用户下载体积门禁。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

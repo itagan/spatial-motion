@@ -70,6 +70,9 @@ npm run pack:check
 公共契约放在 `types.ts`，通用插值放在 `math.ts`。
 
 修改这里时重点检查：快速连续调用的竞态、中断旧动画、销毁后的行为、页面可见性、ResizeObserver 和事件监听器清理。
+布局过渡的 `from` / `target` Buffer 由 `StageMotionCoordinator` 长期持有；修改
+切换顺序时必须保证先同步解析当前帧、再取消旧 Motion、最后覆盖目标工作区。
+Renderer 仍必须同步消费传入视图，不能跨下一次 Stage 提交保存可变 Buffer。
 
 ### `src/layouts`
 

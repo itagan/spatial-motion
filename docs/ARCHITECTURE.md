@@ -119,6 +119,12 @@ MotionController 插值、Cards/Points Renderer 和精确拾取都直接消费�
 契约，不再经过公共 Transform 快照。过渡 scratch、Effect CPU Buffer 和 Renderer
 Attribute 按容量复用，不在稳态帧循环分配 Transform 对象。
 
+`StageMotionCoordinator` 固定持有一对 `from` / `target` 过渡工作区。新过渡先把
+当前帧同步快照到 `from`，取消旧 Motion 后再原位计算 `target`；Renderer 必须按
+同步消费契约立即上传或复制，因此后续中断可以安全复用同一对象和已增长容量。
+Effect 入场失败或 Reduced Motion 时已经提交的 `target` 就是确定性静态首帧，
+不再复制 Buffer 或重复调用 `setTransforms()`。
+
 `defineLayout()` 在定义边界验证 count 与有限值；Stage 信任已定义 Layout，避免每次
 切换重复扫描同一 Buffer。低频 `focusItems()` 的布局构造和 Effect 入场编排位于
 独立动态 chunk；请求 generation 确保后发 Layout、数据更新或 destroy 能使尚未完成

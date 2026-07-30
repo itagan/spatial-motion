@@ -465,3 +465,28 @@ layout-only 为 7,956 bytes，tarball 为 127,019 bytes。
 首次启用 Native + GSAP 后两个 Extension 继续由 Stage RAF 驱动，平均扩展更新
 合计约 0.05ms，60.00 FPS、P95/P99 17.70/17.70ms；其自有 3D 对象使场景总
 Draw Call 增至预期的 4，但没有第二个 RAF 或第二次 scene submission。
+
+## Layout 过渡工作区复用
+
+`StageMotionCoordinator` 固定持有一对按容量增长的 `fromTransforms` 与
+`targetTransforms`。每次切换先同步解析当前帧到 `from`，随后取消旧 Motion，
+再让 Layout 直接覆盖 `target`；连续中断不再创建两个新 `TransformBuffer` 或为相同
+容量分配新 TypedArray。容量从 1 增至 8 后再缩回 1 的测试确认 Buffer 对象保持
+同一引用，已增长的 position 容量保持 24 个 float，不随 count 下降重新分配。
+
+Effect 入场 Layout 已经把确定性时间 0 首帧复制进相同 `target` 工作区。Reduced
+Motion 或 Program 激活失败时直接保留该已提交状态，不再额外创建 Buffer、复制四组
+TypedArray 或第二次调用 `setTransforms()`；后发 Layout、内容变更与 destroy 的
+generation 保护保持不变。
+
+完整 `npm run verify` 为 32 个测试文件、370 项测试。root/Core/Cards-only 为
+36,632/14,636/10,052 bytes gzip，layout-only 为 7,956 bytes，tarball 为
+127,022 bytes；仍满足 40/16/10 KB gzip、8 KB layout 与 150 KB tarball 预算。
+
+2026-07-31 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2,000 Cards/high
+transition-stress 三轮均完成 4 次切换并保持 60.00–60.02 FPS、主体 1 Draw Call、
+0 个 24/33/50ms 长帧。P95/P99 分别为 17.9/18.6、18.6/18.7、
+18.5/18.7ms；平均 Stage CPU 为 0.050/0.025/0.012ms，平均提交为
+0.088/0.075/0.088ms。页面无 warning/error。由于每轮只有四次布局计算，浏览器
+帧分位变化不作为分配收益证明；Buffer 身份、容量与单次 Effect fallback 提交由
+确定性单元测试直接验证。

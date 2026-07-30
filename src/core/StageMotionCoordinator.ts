@@ -49,6 +49,8 @@ export class StageMotionCoordinator<TMeta = unknown> {
   transformCalculationMs = 0
   transformCalculations = 0
   private lazyEntryGeneration = 0
+  private readonly fromTransforms = new TransformBuffer()
+  private readonly targetTransforms = new TransformBuffer()
 
   constructor(private readonly options: StageMotionCoordinatorOptions<TMeta>) {}
 
@@ -92,7 +94,7 @@ export class StageMotionCoordinator<TMeta = unknown> {
     this.options.onTransitionStart(layout.name)
     const now = performance.now()
     const visualState = this.resolveVisualState(now)
-    state.transforms = new TransformBuffer().copyFromBuffer(
+    state.transforms = this.fromTransforms.copyFromBuffer(
       this.resolveTransformBuffer(now),
     )
     effects.deactivate()
@@ -103,7 +105,7 @@ export class StageMotionCoordinator<TMeta = unknown> {
       layout,
       state.items.length,
       this.options.getLayoutContext(),
-      new TransformBuffer(),
+      this.targetTransforms,
     )
     this.transformCalculationMs += performance.now() - calculationStartedAt
     this.transformCalculations += 1
@@ -167,12 +169,11 @@ export class StageMotionCoordinator<TMeta = unknown> {
       generation !== this.lazyEntryGeneration
       || this.options.isDestroyed()
     ) return false
-    const { state, renderer, effects, quality } = this.options
+    const { state, effects, quality } = this.options
     return enterEffect(
       effect,
       options,
-      state,
-      renderer,
+      state.items.length,
       effects,
       quality,
       this.options.isReducedMotion,
@@ -231,7 +232,7 @@ export class StageMotionCoordinator<TMeta = unknown> {
       state.lastLayout,
       state.items.length,
       this.options.getLayoutContext(),
-      new TransformBuffer(),
+      this.targetTransforms,
     )
     renderer.setTransforms(state.transforms)
   }
@@ -240,7 +241,7 @@ export class StageMotionCoordinator<TMeta = unknown> {
     const { state, renderer, effects } = this.options
     const transforms = effects.settleReducedMotion(state.items.length)
     if (!transforms) return false
-    state.transforms = new TransformBuffer().copyFromBuffer(transforms)
+    state.transforms = this.targetTransforms.copyFromBuffer(transforms)
     renderer.setTransforms(state.transforms)
     return true
   }
