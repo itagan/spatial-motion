@@ -26,6 +26,7 @@ npm run dev
 | `npm run dev` | 启动 Vite 开发服务器 |
 | `npm run typecheck` | 对源码、测试配置、demo 和 examples 执行严格类型检查 |
 | `npm test` | 使用 Vitest 运行全部单元测试 |
+| `npm run test:browser` | 使用 Playwright Chromium 运行真实 WebGL 冷启动与性能门禁 |
 | `npm run test:watch` | 监听模式运行测试 |
 | `npm run benchmark:compare -- baseline.json current.json` | 严格解析并按阈值判定性能回归 |
 | `npm run build:lib` | 构建 ESM 库与类型声明到 `dist/` |
@@ -45,13 +46,14 @@ CI 对 pull request 以及 `main` 分支的 push 执行以下流程：
 npm ci
 npm run typecheck
 npm test
+npm run test:browser
 npm run build:lib
 npm run build:demo
 npm run build:examples
 npm run pack:check
 ```
 
-代码、构建配置或包配置发生变化时，本地应执行同等检查。纯文档变更至少检查 Markdown 链接、命令和描述是否对应当前文件及脚本。
+代码、构建配置或包配置发生变化时，本地应执行同等检查。首次运行浏览器测试前执行 `npx playwright install chromium`。纯文档变更至少检查 Markdown 链接、命令和描述是否对应当前文件及脚本。
 
 ## 模块职责
 

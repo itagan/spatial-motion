@@ -180,7 +180,8 @@ Stage 统一使用类型化多订阅事件。框架适配器、调试面板和�
 - Renderer capability 只在构造期编译一次；Stage 热路径使用稳定方法表。
 - Layout `calculateInto()` 使用 SoA 容量缓冲复用生成阶段内存。
 - 图集构建必须支持取消；失效结果不得覆盖新 revision。
-- 质量下降先减少提交和可见数量，资源压缩不得阻塞当前帧。
+- 质量下降先减少 shader-visible 数量和流式特效提交量，布局 resident/submitted pool
+  保持稳定，资源压缩不得阻塞当前帧。
 - 生产入口不加载 Dev 诊断，Three.js 始终由应用提供。
 
 `StagePerformanceStats` 明确报告 input、resident、submitted、visible 和

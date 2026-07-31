@@ -134,8 +134,8 @@ export async function createTextureAtlas<TMeta = unknown>(
   const height = rows * strideY
   const useArrayAtlas = options.atlasMode === 'array'
     || (
-      options.atlasMode === 'auto'
-      && options.mipmaps === false
+      (options.atlasMode === undefined || options.atlasMode === 'auto')
+      && options.mipmaps !== true
       && width * height * 4 >= 16 * 1024 * 1024
     )
 

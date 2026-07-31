@@ -162,6 +162,8 @@ export interface StagePerformanceEnvironment {
   pixelRatio: number
   maxTextureSize: number
   webglVersion: string
+  /** Actual antialias state of the Stage WebGL context. */
+  antialias: boolean
   gpuVendor: string | null
   gpuRenderer: string | null
 }

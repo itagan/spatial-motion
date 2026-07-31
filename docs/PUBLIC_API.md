@@ -68,7 +68,7 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
   prepare/build/patch/apply/advance/clear/dispose 契约；Renderer 继续负责 latest-wins
   调度、GPU 状态切换和幂等销毁。提供自定义 backend 时默认 Canvas/Worker backend
   不会下载；未提供时默认实现会在首次图集请求时加载。
-- `atlasMode` 支持 `'single' | 'array' | 'auto'`，默认 `single`。`array` 使用无 mipmap 的 Texture2DArray 自适应分页与渐进上传；`auto` 仅在 `mipmaps: false` 且完整图集像素不小于 16 MiB 时选择 array。
+- `atlasMode` 支持 `'single' | 'array' | 'auto'`，默认 `auto`。`array` 使用无 mipmap 的 Texture2DArray 自适应分页与渐进上传；`auto` 在未显式要求 `mipmaps: true` 且完整图集像素不小于 16 MiB 时选择 array。高频局部更新可显式选择 `single`。
 - `content` 与 `draw` 互斥；卡片比例限制为 `0.25–4`，最长边归一为一个世界单位。
 - `defineCardTemplate<TMeta>()` 返回 `CardContentRenderer<TMeta>`；模板只生成 Canvas 绘制树，不创建 DOM 或执行脚本。
 - 产品、人物和指标卡是 Vanilla 源码配方，不是官方预设或单独公共入口。
@@ -91,8 +91,11 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
   destroy 路径都会归还租约，不把可复用缓冲暴露给 Renderer 异步边界之外。
 - 同一同步观察周期的 `getPerformanceStats()` 共享一个规范化只读快照；帧提交和
   Stage 状态变更会使其失效。WebGL 环境能力缓存到 resize 或 pixel ratio 改变。
-- 质量下降保留已有 resident pool，只立即降低 submitted/visible 比例，避免设备已经
-  承压时重建 Atlas；从较低初始档位升级时才扩展 resident pool。
+- 质量下降保留已有 resident/submitted pool，通过稳定 rank 立即降低 shader-visible
+  数量，避免设备已经承压时重建 Atlas；流式特效会同时降低实际 submitted 数量。
+  从较低初始档位升级时才扩展 resident pool。`QualityProfile.antialias` 只在 Stage
+  创建 WebGL context 时读取，运行时切档不会改变 context 的实际抗锯齿状态；该状态
+  由 `getPerformanceEnvironment().antialias` 报告。
 - `dev` 导出 Renderer/Layout 验证报告和可挂载到 StageExtension 的布局方向可视化；error 不自动修正，重叠等启发式结果为 warning。
 - 主库 40 KB、Core 16 KB、Cards 10 KB gzip，模板/Points/Dev 各 12 KB、
   150 KB tarball 和 8 KB layout-only 是自动化硬预算。
