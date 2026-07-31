@@ -72,7 +72,7 @@ Tunnel circle/square、Linear Shooter、Vortex in/out、Radial Burst in/out 分�
 - [ ] 模板模式 500/1000/2000 输入保持主体 1 Draw Call，局部数据更新只增加对应 Atlas patch，模板资源不会随更新持续增长。
 - [ ] 同容量档快速布局切换时 `geometryBuilds` 不增长，`attributeReuses` 持续增加；跨容量档只保留一个活动 Geometry/Material。
 - [ ] 相邻卡片 patch 的 `atlasUploadRanges` 少于逐卡逐行范围，离散 patch 不上传无关大块。
-- [ ] `atlasMode=single`、`array` 与 `auto` 画面一致，array 渐进上传期间未完成层透明且不显示垃圾像素。
+- [x] `atlasMode=single`、`array` 与 `auto` 画面一致，array 渐进上传期间未完成层透明且不显示垃圾像素。（2026-07-31：2000/high/cold-start 默认 auto→array 复验）
 - [ ] `auto + mipmaps:true` 使用 single；`auto + mipmaps:false` 只在图集不小于 16 MiB 时使用 array。
 - [ ] Array context restore 从首层恢复，上传过程中保持主体 1 Draw Call，完成后 `pendingLayers` 归零。
 

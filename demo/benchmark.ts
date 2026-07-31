@@ -57,12 +57,17 @@ if (!container) throw new Error('Benchmark stage container not found')
 
 const benchmarkParameters = new URLSearchParams(window.location.search)
 const requestedResolution = resolveBenchmarkResolution(benchmarkParameters.get('resolution'))
-const requestedMipmaps = benchmarkParameters.get('mipmaps') !== '0'
+const mipmapsParameter = benchmarkParameters.get('mipmaps')
+const requestedMipmaps = mipmapsParameter === '1'
+  ? true
+  : mipmapsParameter === '0' ? false : undefined
 const requestedTexturePrewarm = resolveTexturePrewarm(benchmarkParameters.get('prewarm'))
 const atlasParameter = benchmarkParameters.get('atlas')
-const requestedAtlasMode = atlasParameter === 'array' || atlasParameter === 'auto'
+const requestedAtlasMode = atlasParameter === 'single'
+  || atlasParameter === 'array'
+  || atlasParameter === 'auto'
   ? atlasParameter
-  : 'single'
+  : 'auto'
 const stage = new MotionStage({
   container,
   renderer: cardsRenderer({

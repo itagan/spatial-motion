@@ -153,7 +153,7 @@ describe('texture atlas card rendering', () => {
     capped.texture.dispose()
   })
 
-  it('selects an array atlas automatically only for large non-mipmapped uploads', async () => {
+  it('selects an array atlas automatically for large uploads unless mipmaps are explicit', async () => {
     const smallItems = Array.from({ length: 500 }, (_value, index) => ({ id: String(index) }))
     const small = await createTextureAtlas(smallItems, 64, {
       atlasMode: 'auto',
@@ -171,6 +171,13 @@ describe('texture atlas card rendering', () => {
     })
     expect(mipmapped.mode).toBe('single')
     mipmapped.texture.dispose()
+
+    const automatic = await createTextureAtlas(largeItems, 64, {
+      atlasMode: 'auto',
+      maxTextureLayers: 256,
+    })
+    expect(automatic.mode).toBe('array')
+    automatic.texture.dispose()
 
     const uploadSensitive = await createTextureAtlas(largeItems, 64, {
       atlasMode: 'auto',

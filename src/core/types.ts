@@ -140,6 +140,10 @@ export interface QualityProfile {
   maxPixelRatio: number
   maxVisibleItems: number
   maxActiveEffectItems: number
+  /**
+   * WebGL context creation preference. Unlike the other profile fields, this is
+   * selected from the Stage's initial quality and cannot change at runtime.
+   */
   antialias: boolean
   targetFps: number
 }

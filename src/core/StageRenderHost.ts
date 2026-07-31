@@ -18,6 +18,7 @@ export class StageRenderHost {
   readonly contentRoot = new Group()
   readonly canvas: HTMLCanvasElement
   private readonly abortController = new AbortController()
+  private readonly initialAntialias: boolean
   private disposed = false
   private environmentSnapshot: ReturnType<StageRenderHost['createEnvironmentSnapshot']> | null = null
 
@@ -26,6 +27,7 @@ export class StageRenderHost {
     profile: QualityProfile,
     cameraZ = 18,
   ) {
+    this.initialAntialias = profile.antialias
     this.camera = new PerspectiveCamera(45, 1, 0.1, 100)
     this.camera.position.z = cameraZ
     this.renderer = new WebGLRenderer({
@@ -132,6 +134,7 @@ export class StageRenderHost {
     pixelRatio: number
     maxTextureSize: number
     webglVersion: string
+    antialias: boolean
     gpuVendor: string | null
     gpuRenderer: string | null
   } {
@@ -149,6 +152,7 @@ export class StageRenderHost {
     pixelRatio: number
     maxTextureSize: number
     webglVersion: string
+    antialias: boolean
     gpuVendor: string | null
     gpuRenderer: string | null
   } {
@@ -172,6 +176,9 @@ export class StageRenderHost {
       pixelRatio: viewport.pixelRatio,
       maxTextureSize: this.renderer.capabilities.maxTextureSize,
       webglVersion: String(context.getParameter(context.VERSION) ?? ''),
+      antialias: typeof context.getContextAttributes === 'function'
+        ? Boolean(context.getContextAttributes()?.antialias)
+        : this.initialAntialias,
       gpuVendor: debugInfo ? String(context.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) ?? '') : null,
       gpuRenderer: debugInfo ? String(context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) ?? '') : null,
     })

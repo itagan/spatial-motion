@@ -118,6 +118,22 @@ describe('InstancedCardRenderer item loading', () => {
     atlasMock.clearPatchQueue.mockReset()
   })
 
+  it('reports a complete zero atlas snapshot before the lazy backend is prepared', () => {
+    const renderer = new InstancedCardRenderer(new Scene())
+
+    expect(renderer.getStats().metrics).toMatchObject({
+      textureBytes: 0,
+      atlasBuilds: 0,
+      atlasPatches: 0,
+      atlasDiscardedBuilds: 0,
+      atlasDiscardedPatches: 0,
+      atlasCellsUpdated: 0,
+      estimatedTextureUploadBytes: 0,
+      atlasUploadRanges: 0,
+    })
+    renderer.dispose()
+  })
+
   it('keeps only the newest asynchronous atlas result', async () => {
     const first = deferred<TextureAtlasResult>()
     const second = deferred<TextureAtlasResult>()

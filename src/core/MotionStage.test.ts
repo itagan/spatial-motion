@@ -546,6 +546,7 @@ describe('MotionStage', () => {
       pixelRatio: 1.5,
       maxTextureSize: 4096,
       webglVersion: 'WebGL 2.0 Test',
+      antialias: expect.any(Boolean),
       gpuVendor: 'Test Vendor',
       gpuRenderer: 'Test Renderer',
     })
@@ -575,7 +576,7 @@ describe('MotionStage', () => {
     stage.destroy()
   })
 
-  it('retains the resident item pool while quality reduces submitted visibility', async () => {
+  it('retains submitted instances while quality reduces shader-visible items', async () => {
     const stage = createStage({ quality: 'high' })
     const cards = currentCards()
     const items = Array.from({ length: 3000 }, (_, index) => ({ id: `item-${index}` }))

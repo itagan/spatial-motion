@@ -39,6 +39,7 @@ vi.mock('three', async (importOriginal) => {
       MAX_ARRAY_TEXTURE_LAYERS: 0x88ff,
       getExtension: vi.fn(() => null),
       getParameter: vi.fn((parameter: number) => parameter === 0x88ff ? 128 : 'WebGL 2'),
+      getContextAttributes: vi.fn(() => ({ antialias: true })),
     }))
     dispose = vi.fn()
     compile = vi.fn()
@@ -116,6 +117,7 @@ describe('StageRenderHost', () => {
     renderer.getContext.mockClear()
 
     const first = host.getEnvironment()
+    expect(first.antialias).toBe(true)
     const second = host.getEnvironment()
     expect(second).toBe(first)
     expect(renderer.getContext).toHaveBeenCalledOnce()

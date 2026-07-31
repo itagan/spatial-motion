@@ -5,7 +5,8 @@
 ## v2 resident / submitted / visible 模型
 
 运行中从高档降到中、低档时，Stage 保留已经创建的 Renderer resident pool，并立即
-降低 Shader visible ratio 和实际特效提交量。降级不再在性能已经承压的时间点重建
+降低 Shader visible ratio 和实际特效提交量；布局卡片的 submitted pool 保持不变，
+避免非连续 rank 裁剪破坏空间分布、拾取索引和自定义 Program 数据顺序。降级不再在性能已经承压的时间点重建
 Atlas、Geometry 或 Attribute。局部 item patch 继续更新 resident pool，不会把质量
 裁剪误写成数据裁剪。
 
@@ -225,7 +226,14 @@ Atlas 局部更新的内容指纹改为逐项保存。完整 `setItems()` 仍扫
 
 ## Texture2DArray 分页与渐进首传
 
-Cards 增加显式 `single`、`array` 和保守 `auto` 策略。默认 `single` 保留 mipmap、细粒度行 patch 与既有视觉；`array` 把 Atlas 拆成自适应二维页面并装入单个 `DataArrayTexture`，页面层编码在既有 Atlas rect 数据中，不增加实例 Attribute、Mesh 或 Draw Call。页尺寸会在设备层数限制内选择最小平衡方案，并额外限制为 256 层。
+Cards 增加显式 `single`、`array` 和 `auto` 策略。最初默认 `single` 保留 mipmap、细粒度行 patch 与既有视觉；冷启动基准确认大型 single 首传仍可产生 33ms 长帧后，默认改为 `auto`：大于等于 16 MiB 且未显式要求 mipmap 时选择 array。`array` 把 Atlas 拆成自适应二维页面并装入单个 `DataArrayTexture`，页面层编码在既有 Atlas rect 数据中，不增加实例 Attribute、Mesh 或 Draw Call。页尺寸会在设备层数限制内选择最小平衡方案，并额外限制为 256 层。
+
+2026-07-31 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2000/high/cold-start
+默认策略复验命中 auto→array：60.00 FPS、P95/P99 17.60/17.70ms，0 个
+24/33/50ms 长帧、1 Draw Call；首次 render submit 由同机 single 的 28.4ms 降至
+2.3ms，纹理由约 32.3 MiB 降至 23.93 MiB。Atlas build/readback 为 49.2/28.0ms，
+但 Worker 构建未阻塞 Stage 帧；250 层在 64 个 Stage 帧批次内上传完成。画面完整，
+浏览器控制台无 warning/error。
 
 Array 首帧上传预算约 3 MiB，后续每个 Stage RAF 约 768 KiB。新的 Renderer `frame.update()` 可选能力只负责协调该上传队列；默认 Cards 以外的 Renderer 不需要空实现。context restore 会从首层重新上传，局部 patch 则重传受影响的整页，因此 array 面向大型、相对静态的内容，single 仍是高频稀疏 patch 的合理默认。
 
@@ -519,3 +527,25 @@ chunk，所有硬预算通过。
 4 次操作并为 60.00 FPS、P95/P99 18.60/18.70ms；interaction-stress 为 59.98 FPS、
 P95/P99 18.60/18.70ms，751 次输入合并为 180 次拾取。三组均保持主体 1 Draw Call、
 0 个 24/33/50ms 长帧、WebGL READY，控制台无 warning/error。
+
+## 默认 Array 冷启动、浏览器门禁与 Cards 拆分
+
+Cards 的未配置 `atlasMode` 现在按 `auto` 处理：像素达到 16 MiB 且未显式要求 mipmap
+时选择渐进 Array Atlas；显式 `mipmaps: true` 仍确定性保留 Single Atlas。Benchmark
+页面也不再把未配置参数改写成旧的 Single/mipmap 组合。2000/high/cold-start 实测为
+60.0 FPS、P95/P99 17.6/17.7ms、0 个 24/33/50ms 长帧和主体 1 Draw Call；默认
+auto 选择 250 层 Array，全部层在 64 帧内上传，首次提交 2.3ms，纹理约 23.93 MiB。
+
+Stage 环境快照新增实际 WebGL context 的 antialias 状态，质量档位文档明确 antialias
+只在创建 context 时生效；运行时降级继续通过 pixel ratio 和 shader-visible ratio 调整，
+不会虚报 context 能力或缩减已提交实例池。Playwright 在真实 Chromium/WebGL 中固定
+执行 2000 卡冷启动，检查 WebGL/antialias、完整上传、1 Draw Call、实例数量、首次提交、
+FPS、P95、长帧与 CPU/提交预算；GitHub CI 独立安装 Chromium、运行门禁并保留失败制品。
+
+Atlas 统计实现改为随首次 backend 准备动态加载，同时保留首次 `setItems()` 前完整的零值
+统计契约。Renderer 配置/指纹策略和默认 backend 懒代理分别拆到独立模块，
+`InstancedCardRenderer.ts` 从 784 行降到 652 行，并新增 5 个配置边界单测。
+最终 `npm run verify` 为 35 个测试文件、392 项测试，类型、Library/Demo/Examples、真实
+tarball 消费与公开边界全部通过；Chromium WebGL 门禁随后通过。root/Core/Cards-only
+为 36,992/15,251/9,813 bytes gzip，Cards 在 10 KiB 硬上限下保留 427 bytes 余量；
+layout-only 为 7,956 bytes，tarball 为 131,206 bytes。

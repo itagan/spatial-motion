@@ -22,7 +22,7 @@ Spatial Motion 的 `MotionStage` 面向支持 WebGL2、ES2022、Canvas 2D、Resi
 - 自定义绘制回调接收 Canvas 2D 上下文，不接收 HTML；异步回调应自行处理业务请求的超时和取消。
 - 图集默认使用 64px 单元，内置默认卡片超过 1024 项时自动使用 48px，并继续受设备最大纹理尺寸约束；它适合大量缩略卡片，不是高清近景图片管线。
 - 图片 Worker 路径依赖 `Worker`、`OffscreenCanvas` 和 `createImageBitmap`；缺少能力、CORS/解码失败或任务中止时回退主线程，不影响正确性。
-- Cards 默认使用单图集；可选 Texture2DArray 模式依赖 WebGL2 的数组纹理能力，关闭 mipmap，并受设备 `MAX_ARRAY_TEXTURE_LAYERS` 限制。`auto` 在条件不满足时确定性回退 single。
+- Cards 默认使用 `auto` 图集策略；大型图集会使用依赖 WebGL2 的 Texture2DArray，关闭 mipmap，并受设备 `MAX_ARRAY_TEXTURE_LAYERS` 限制。小图集、显式 `mipmaps: true` 或条件不满足时确定性回退 single。
 
 ## 已知限制
 

@@ -22,11 +22,13 @@ export interface CardsRendererOptions<TMeta = unknown> {
   content?: CardContentRenderer<TMeta>
   aspectRatio?: number
   resolution?: number | 'auto'
+  /** Explicit true keeps a mipmapped single Atlas even when atlasMode is auto. */
   mipmaps?: boolean
   imageTimeout?: number
   imageConcurrency?: number
   imageCacheSize?: number
   texturePrewarm?: boolean
+  /** Defaults to auto: large Atlases use progressive array upload unless mipmaps is true. */
   atlasMode?: 'single' | 'array' | 'auto'
   motionProgram?: CardMotionProgram<TMeta>
   effectPrograms?: Readonly<Record<string, CardEffectProgramLoader>>
