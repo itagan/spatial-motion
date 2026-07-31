@@ -30,6 +30,8 @@ export interface CardsRendererOptions<TMeta = unknown> {
   atlasMode?: 'single' | 'array' | 'auto'
   motionProgram?: CardMotionProgram<TMeta>
   effectPrograms?: Readonly<Record<string, CardEffectProgramLoader>>
+  /** Stable content revision used to skip default meta/style serialization during updates. */
+  resolveContentKey?: (item: import('../../core/types.js').MotionItem<TMeta>) => string | number
   /** Advanced raster/storage/upload backend; the default remains lazy and worker-aware. */
   atlasBackend?: CardAtlasBackend<TMeta>
 }
@@ -56,6 +58,7 @@ export function cardsRenderer<TMeta = unknown>(
     atlasMode: options.atlasMode,
     motionProgram: options.motionProgram,
     effectPrograms: options.effectPrograms,
+    resolveContentKey: options.resolveContentKey,
     atlasBackend: options.atlasBackend,
   }
   return ({
@@ -65,6 +68,7 @@ export function cardsRenderer<TMeta = unknown>(
     maxAnisotropy,
     prepareTexture,
     prepareProgram,
+    signal,
   }) => new InstancedCardRenderer(root, {
     ...atlasOptions,
     maxTextureSize,
@@ -72,16 +76,14 @@ export function cardsRenderer<TMeta = unknown>(
     anisotropy: Math.min(4, maxAnisotropy),
     prepareTexture,
     prepareProgram,
+    signal,
   })
 }
 
 function validateEffectPrograms(
   programs: Readonly<Record<string, CardEffectProgramLoader>> | undefined,
 ): void {
-  const kinds = new Set<string>()
   for (const [kind, loader] of Object.entries(programs ?? {})) {
-    if (kinds.has(kind)) throw new TypeError(`Duplicate Cards effect program kind "${kind}"`)
-    kinds.add(kind)
     if (typeof loader !== 'function' && loader.kind !== kind) {
       throw new TypeError(`Cards effect program "${kind}" has mismatched kind "${loader.kind}"`)
     }

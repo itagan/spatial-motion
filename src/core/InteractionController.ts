@@ -22,6 +22,7 @@ interface InteractionControllerOptions<TMeta> {
   keyboardNavigation: boolean
   ariaLabel: string
   getState: () => ProjectedPickState<TMeta>
+  getItemIndex: (id: string) => number | undefined
   resolveTransformBuffer: (now: number) => TransformBufferView
   hasScheduledFrame: () => boolean
   isDestroyed: () => boolean
@@ -34,8 +35,6 @@ interface InteractionControllerOptions<TMeta> {
 export class InteractionController<TMeta> {
   private picker: ProjectedItemPicker<TMeta> | null = null
   private pickerPromise: Promise<ProjectedItemPicker<TMeta>> | null = null
-  private indexedItems: readonly MotionItem<TMeta>[] | null = null
-  private readonly itemIndexById = new Map<string, number>()
   private hoveredIndex: number | null = null
   private focusedItemId: string | null = null
   private pendingPointerMove = false
@@ -89,8 +88,7 @@ export class InteractionController<TMeta> {
 
   focusItem(id: string): boolean {
     const state = this.options.getState()
-    this.ensureItemIndex(state.items)
-    const index = this.itemIndexById.get(id)
+    const index = this.options.getItemIndex(id)
     if (index === undefined || visibilityRank(index) > state.visibleRatio) return false
     this.setFocusedIndex(index)
     this.options.element.focus()
@@ -99,14 +97,13 @@ export class InteractionController<TMeta> {
 
   getFocusedItem(): MotionItem<TMeta> | null {
     const state = this.options.getState()
-    const index = this.focusedIndex(state.items)
+    const index = this.focusedIndex()
     return index === null ? null : state.items[index] ?? null
   }
 
   syncItems(): void {
     const state = this.options.getState()
-    this.rebuildItemIndex(state.items)
-    const index = this.focusedIndex(state.items)
+    const index = this.focusedIndex()
     if (
       this.focusedItemId !== null
       && (index === null || visibilityRank(index) > state.visibleRatio)
@@ -164,8 +161,6 @@ export class InteractionController<TMeta> {
     element.removeEventListener('blur', this.handleCanvasBlur)
     this.picker = null
     this.pickerPromise = null
-    this.indexedItems = null
-    this.itemIndexById.clear()
   }
 
   private preparePicker(): Promise<ProjectedItemPicker<TMeta> | null> {
@@ -277,7 +272,7 @@ export class InteractionController<TMeta> {
   private readonly handleCanvasFocus = () => {
     if (this.options.isDestroyed()) return
     const state = this.options.getState()
-    if (this.focusedIndex(state.items) !== null) return
+    if (this.focusedIndex() !== null) return
     const first = this.findVisibleItem(state.items.length, state.visibleRatio, 0, 1)
     if (first !== null) this.setFocusedIndex(first)
   }
@@ -291,7 +286,7 @@ export class InteractionController<TMeta> {
     const state = this.options.getState()
     const count = state.items.length
     if (!count) return
-    const current = this.focusedIndex(state.items)
+    const current = this.focusedIndex()
     let next: number | null = null
     switch (event.key) {
       case 'ArrowRight':
@@ -336,10 +331,9 @@ export class InteractionController<TMeta> {
     return null
   }
 
-  private focusedIndex(items: readonly MotionItem<TMeta>[]): number | null {
+  private focusedIndex(): number | null {
     if (this.focusedItemId === null) return null
-    this.ensureItemIndex(items)
-    return this.itemIndexById.get(this.focusedItemId) ?? null
+    return this.options.getItemIndex(this.focusedItemId) ?? null
   }
 
   private setFocusedIndex(index: number | null): void {
@@ -355,8 +349,7 @@ export class InteractionController<TMeta> {
   }
 
   private updateHighlight(): void {
-    const state = this.options.getState()
-    const focusedIndex = this.focusedIndex(state.items)
+    const focusedIndex = this.focusedIndex()
     const index = (this.options.hoverEffect === 'highlight' ? this.hoveredIndex : null)
       ?? focusedIndex
     this.options.setHighlightIndex(index)
@@ -374,15 +367,4 @@ export class InteractionController<TMeta> {
     this.options.element.setAttribute('aria-label', `${this.options.ariaLabel}${detail}`)
   }
 
-  private ensureItemIndex(items: readonly MotionItem<TMeta>[]): void {
-    if (items !== this.indexedItems) this.rebuildItemIndex(items)
-  }
-
-  private rebuildItemIndex(items: readonly MotionItem<TMeta>[]): void {
-    this.indexedItems = items
-    this.itemIndexById.clear()
-    for (let index = 0; index < items.length; index += 1) {
-      this.itemIndexById.set(items[index].id, index)
-    }
-  }
 }

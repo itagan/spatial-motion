@@ -15,6 +15,19 @@ export class StageContentState<TMeta = unknown> {
   orientation: 'surface' | 'camera' = 'surface'
   hideBackHemisphere = false
   hemisphereEdgeFade = 0
+  private readonly itemIndexById = new Map<string, number>()
+
+  setItems(items: MotionItem<TMeta>[]): void {
+    this.items = items
+    this.itemIndexById.clear()
+    for (let index = 0; index < items.length; index += 1) {
+      this.itemIndexById.set(items[index].id, index)
+    }
+  }
+
+  getItemIndex(id: string): number | undefined {
+    return this.itemIndexById.get(id)
+  }
 
   setVisual(
     orientation: 'surface' | 'camera',

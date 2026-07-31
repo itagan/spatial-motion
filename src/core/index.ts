@@ -57,6 +57,8 @@ export type {
   MotionRendererPatchCapability,
   MotionRendererPickShape,
   MotionRendererResourceRecoveryCapability,
+  MotionRendererResourcePreparationCapability,
+  MotionRendererPrewarmRequest,
   MotionRendererStats,
   MotionRendererStreamingEffectsCapability,
   MotionRendererViewport,

@@ -221,7 +221,7 @@ Atlas 指标拆分为 prepare、图片加载墙钟、单元绘制和整图像素
 
 同环境关闭 2000 项 Atlas mipmap 后，纹理内存由约 33.9MB 降为 24.2MB，但首次 render submit 仍为 30.9ms，P95 17.60ms；这说明 mipmap 能节省显存，却不是首传延迟的主要来源，默认继续保留远距采样质量。直接使用 ImageBitmap 纹理也会失去当前 DataTexture 的按行 patch，第一次内容更新需要整图回读和再次完整上传，因此没有作为低风险默认路径；后续 Texture2DArray/分页层上传应独立验证。
 
-Atlas 局部更新的内容指纹改为逐项保存。完整 `setItems()` 仍扫描全部输入以识别完全相同的数据，而 `updateItem(s)` 只对去重、校验后的变化索引序列化 `meta` 和解析样式。2000 项单卡更新自动化确认只调用一次样式解析；Renderer metrics 记录 full/patch 扫描次数及累计扫描项目数。Chromium 的 2000/high/atlas-update 3 秒复验完成 17 次单元 patch，保持 60 FPS、P95 17.50ms、0 个 33ms 长帧和 1 Draw Call。
+Atlas 局部更新的内容指纹改为逐项保存。完整 `setItems()` 仍扫描全部输入以识别完全相同的数据，而 `updateItem(s)` 只对去重、校验后的变化索引序列化 `meta` 和解析样式。2000 项单卡更新自动化确认只调用一次样式解析。Chromium 的 2000/high/atlas-update 3 秒复验完成 17 次单元 patch，保持 60 FPS、P95 17.50ms、0 个 33ms 长帧和 1 Draw Call。
 
 ## Texture2DArray 分页与渐进首传
 
@@ -490,3 +490,32 @@ transition-stress 三轮均完成 4 次切换并保持 60.00–60.02 FPS、主�
 0.088/0.075/0.088ms。页面无 warning/error。由于每轮只有四次布局计算，浏览器
 帧分位变化不作为分配收益证明；Buffer 身份、容量与单次 Effect fallback 提交由
 确定性单元测试直接验证。
+
+## 内容事务、显式预热与观测快照
+
+Stage 现在只维护一份稳定 id → resident index，Interaction 与内容更新共享查询，
+不再分别重建 Map。完整内容更新的当前帧快照和目标状态来自并发安全、最多保留四个
+空闲项的 `ContentTransformPool`；顺序更新复用两份已增长容量，并发、失败、过期和
+destroy 均有确定性归还测试。
+
+Cards 局部 patch 的去重索引和指纹改为有界 Workspace 租约，移除 Set、映射对象和
+每次 patch 的数组链式分配。`resolveContentKey` 允许大数据业务以稳定修订号绕过
+meta JSON 与样式解析；默认路径继续保持自动内容正确性。Workspace 自身的分配、
+复用与保留上限由独立确定性测试覆盖，不增加公共 Renderer 指标面。
+
+新增通用 `resourcePreparation` capability 与 `stage.prewarm()`。Cards 可在业务空闲
+期强制准备当前 Atlas 纹理并加载、编译指定 Effect Program，但不切换活动 Material；
+慢编译在 Renderer/Stage 销毁后只释放临时资源并返回 false。同步性能观察者共享一次
+规范化快照，WebGL 环境能力查询缓存到 viewport 或 pixel ratio 变化，降低诊断面板
+重复读取开销。
+
+最终 `npm run verify` 为 34 个测试文件、386 项测试。root/Core/Cards-only 为
+37,415/15,210/10,240 bytes gzip，layout-only 为 7,956 bytes，tarball 约为
+129.6 KB；Patch Workspace 及索引规范化位于首次局部更新才加载的 0.45 KB gzip
+chunk，所有硬预算通过。
+
+2026-07-31 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2,000 Cards/high
+3 秒回归：steady 为 59.98 FPS、P95/P99 18.60/18.65ms；transition-stress 完成
+4 次操作并为 60.00 FPS、P95/P99 18.60/18.70ms；interaction-stress 为 59.98 FPS、
+P95/P99 18.60/18.70ms，751 次输入合并为 180 次拾取。三组均保持主体 1 Draw Call、
+0 个 24/33/50ms 长帧、WebGL READY，控制台无 warning/error。

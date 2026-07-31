@@ -559,6 +559,22 @@ describe('MotionStage', () => {
     stage.destroy()
   })
 
+  it('shares one normalized performance snapshot among synchronous observers', async () => {
+    const stage = createStage()
+    const cards = currentCards()
+    cards.getStats.mockClear()
+
+    const first = stage.getPerformanceStats()
+    const second = stage.getPerformanceStats()
+    expect(second).toBe(first)
+    expect(cards.getStats).toHaveBeenCalledOnce()
+
+    await Promise.resolve()
+    expect(stage.getPerformanceStats()).not.toBe(first)
+    expect(cards.getStats).toHaveBeenCalledTimes(2)
+    stage.destroy()
+  })
+
   it('retains the resident item pool while quality reduces submitted visibility', async () => {
     const stage = createStage({ quality: 'high' })
     const cards = currentCards()
@@ -1419,6 +1435,61 @@ describe('MotionStage', () => {
 
     expect(cards.setTransforms).toHaveBeenCalledTimes(1)
     expect((cards.setTransforms.mock.calls[0][0] as TransformBufferView).count).toBe(2)
+    expect((stage as unknown as {
+      contentCoordinator: { getTransformPoolStats(): { available: number } }
+    }).contentCoordinator.getTransformPoolStats().available).toBe(1)
+    stage.destroy()
+  })
+
+  it('reuses content update Buffer leases across sequential full updates', async () => {
+    const stage = createStage()
+    const coordinator = (stage as unknown as {
+      contentCoordinator: {
+        getTransformPoolStats(): {
+          allocations: number
+          reuses: number
+          available: number
+        }
+      }
+    }).contentCoordinator
+    await stage.setItems([{ id: 'a' }])
+    await stage.updateItems([{ id: 'a' }, { id: 'b' }], { duration: 0 })
+    const first = coordinator.getTransformPoolStats()
+    await stage.updateItems([{ id: 'b' }, { id: 'a' }], { duration: 0 })
+    const second = coordinator.getTransformPoolStats()
+
+    expect(first).toEqual({ allocations: 2, reuses: 1, available: 1 })
+    expect(second).toEqual({ allocations: 2, reuses: 3, available: 1 })
+    stage.destroy()
+  })
+
+  it('returns a failed content Buffer lease for the next update', async () => {
+    const failure = new Error('content failed')
+    const stage = createStage()
+    const cards = currentCards()
+    const coordinator = (stage as unknown as {
+      contentCoordinator: {
+        getTransformPoolStats(): {
+          allocations: number
+          reuses: number
+          available: number
+        }
+      }
+    }).contentCoordinator
+    cards.setItems.mockRejectedValueOnce(failure)
+
+    await expect(stage.setItems([{ id: 'failed' }])).rejects.toThrow('content failed')
+    expect(coordinator.getTransformPoolStats()).toEqual({
+      allocations: 1,
+      reuses: 0,
+      available: 1,
+    })
+    await stage.setItems([{ id: 'recovered' }])
+    expect(coordinator.getTransformPoolStats()).toEqual({
+      allocations: 1,
+      reuses: 1,
+      available: 0,
+    })
     stage.destroy()
   })
 
@@ -2035,6 +2106,23 @@ describe('MotionStage', () => {
     expect(fixture.disposeMaterial).toHaveBeenCalledOnce()
   })
 
+  it('does not publish an explicit renderer prewarm after Stage destruction', async () => {
+    const pending = deferred<boolean>()
+    const prewarm = vi.fn(() => pending.promise)
+    const renderer = mockMotionRenderer({
+      capabilities: { resourcePreparation: { prewarm } },
+    })
+    const { stage } = createCustomStage(() => renderer)
+
+    const result = stage.prewarm({ textures: true, programs: ['custom'] })
+    expect(prewarm).toHaveBeenCalledWith({ textures: true, programs: ['custom'] })
+    stage.destroy()
+    pending.resolve(true)
+
+    await expect(result).resolves.toBe(false)
+    await expect(stage.prewarm()).rejects.toThrow('destroyed')
+  })
+
   it('normalizes renderer metrics and rejects incomplete optional capabilities', () => {
     const metrics = Object.fromEntries(
       Array.from({ length: 70 }, (_value, index) => [
@@ -2080,6 +2168,7 @@ describe('MotionStage', () => {
     ['highlight', {}, 'setHighlightIndex'],
     ['viewport', {}, 'resize'],
     ['resourceRecovery', {}, 'refreshResources'],
+    ['resourcePreparation', {}, 'prewarm'],
     ['streamingEffects', { enable: vi.fn(), disable: vi.fn() }, 'setTime'],
     ['frame', {}, 'update'],
   ] as const)('rejects an incomplete %s renderer capability', (name, capability, missing) => {

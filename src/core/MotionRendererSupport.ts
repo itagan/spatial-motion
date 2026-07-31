@@ -35,6 +35,7 @@ export function assertMotionRenderer(value: unknown): asserts value is MotionRen
   validateCapability(renderer.capabilities.highlight, 'highlight', ['setHighlightIndex'])
   validateCapability(renderer.capabilities.viewport, 'viewport', ['resize'])
   validateCapability(renderer.capabilities.resourceRecovery, 'resourceRecovery', ['refreshResources'])
+  validateCapability(renderer.capabilities.resourcePreparation, 'resourcePreparation', ['prewarm'])
   validateCapability(renderer.capabilities.streamingEffects, 'streamingEffects', [
     'enable', 'disable', 'setTime',
   ])

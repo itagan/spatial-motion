@@ -3,6 +3,7 @@ import type {
   MotionRendererDescriptor,
   MotionRendererStats,
   MotionRendererStreamingEffectsCapability,
+  MotionRendererPrewarmRequest,
   MotionRendererViewport,
   MotionRendererVisualState,
 } from '../renderers/MotionRenderer.js'
@@ -31,6 +32,7 @@ export interface CompiledRendererRuntime<TMeta = unknown> {
   setHighlightIndex(index: number | null): void
   resize(viewport: MotionRendererViewport): void
   refreshResources(): void
+  prewarm(request: MotionRendererPrewarmRequest): Promise<boolean>
   updateFrame(deltaSeconds: number): void
   getStats(): MotionRendererStats
   dispose(): void
@@ -52,6 +54,7 @@ export function compileRendererRuntime<TMeta = unknown>(
     highlight,
     viewport,
     resourceRecovery,
+    resourcePreparation,
     streamingEffects,
     frame,
   } = renderer.capabilities
@@ -86,6 +89,9 @@ export function compileRendererRuntime<TMeta = unknown>(
     refreshResources: resourceRecovery
       ? () => resourceRecovery.refreshResources()
       : noop,
+    prewarm: resourcePreparation
+      ? async (request) => (await resourcePreparation.prewarm(request)) !== false
+      : async () => false,
     updateFrame: frame
       ? (deltaSeconds) => frame.update(deltaSeconds)
       : noop,

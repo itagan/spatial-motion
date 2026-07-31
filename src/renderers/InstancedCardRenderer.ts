@@ -27,6 +27,7 @@ import {
 } from './cards/CardGeometry.js'
 import { CardAtlasMetrics } from './cards/CardAtlasMetrics.js'
 import { CardMaterialRuntime } from './cards/CardMaterialRuntime.js'
+import type { CardPatchWorkspacePool } from './cards/CardPatchWorkspacePool.js'
 import {
   type CardAtlasBackend,
   type PreparedCardAtlas,
@@ -57,6 +58,7 @@ export interface CardRendererOptions<TMeta = unknown> extends TextureAtlasOption
   motionProgram?: CardMotionProgram<TMeta>
   effectPrograms?: Readonly<Record<string, CardEffectProgramLoader>>
   atlasBackend?: CardAtlasBackend<TMeta>
+  resolveContentKey?: (item: MotionItem<TMeta>) => string | number
 }
 
 const INITIAL_ARRAY_UPLOAD_BYTES = 3 * 1024 * 1024
@@ -73,14 +75,12 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private readonly atlasBackend: CardAtlasBackend<TMeta>
   private atlasBackendReady: Promise<void> | null = null
   private itemFingerprints: string[] = []
-  private fingerprintFullScans = 0
-  private fingerprintPatchScans = 0
-  private fingerprintItemsScanned = 0
   private nextLayer = 0
   private skipUploadFrames = 0
   private layerUploadFrames = 0
   private atlas: TextureAtlasResult | null = null
   private readonly atlasMetrics = new CardAtlasMetrics()
+  private patchWorkspacePool: Promise<CardPatchWorkspacePool> | null = null
   private geometryBuilds = 0
   private attributeReuses = 0
   private readonly euler = new Euler()
@@ -118,6 +118,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       highlight: { setHighlightIndex: (index) => this.setHoverIndex(index) },
       viewport: { resize: (viewport) => this.resize(viewport) },
       resourceRecovery: { refreshResources: () => this.refreshResources() },
+      resourcePreparation: { prewarm: (request) => this.prewarm(request) },
       frame: { update: () => this.advanceAtlasUploads() },
       streamingEffects: {
         enable: (data) => this.enableEffect(data),
@@ -131,8 +132,6 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     await this.prepareAtlasBackend()
     if (this.disposed) return false
     const fingerprints = createItemFingerprints(items, this.atlasOptions)
-    this.fingerprintFullScans += 1
-    this.fingerprintItemsScanned += items.length
     if (
       this.mesh
       && equalFingerprints(fingerprints, this.itemFingerprints)
@@ -222,39 +221,47 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     if (!this.mesh || !this.atlas || items.length !== this.itemCount) {
       return this.setItems(items)
     }
-    const indices = normalizeChangedIndices(changedIndices, items.length)
-    const fingerprints = indices.map((index) => ({
-      index,
-      value: createItemFingerprint(items[index], this.atlasOptions),
-    }))
-    this.fingerprintPatchScans += 1
-    this.fingerprintItemsScanned += fingerprints.length
-    if (
-      fingerprints.every(({ index, value }) => this.itemFingerprints[index] === value)
-      && !this.resourceScheduler.isPending('cards-content')
-    ) return true
-    const baseAtlas = this.atlas
-    await this.prepareAtlasBackend()
+    const patchWorkspacePool = await this.preparePatchWorkspacePool()
     if (this.disposed) return false
-    const result = await this.resourceScheduler.scheduleLatest('cards-content', {
-      prepare: (signal) => this.atlasBackend.patch(items, indices, baseAtlas, signal),
-      commit: (patch) => {
-        if (this.disposed || this.atlas !== baseAtlas) return false
-        const applyMs = this.atlasBackend.applyPatch(
-          baseAtlas,
-          patch,
-          baseAtlas.mode === 'array' ? this.nextLayer : undefined,
-        )
-        this.atlasMetrics.recordPatch(patch.metrics, applyMs)
-        fingerprints.forEach(({ index, value }) => {
-          this.itemFingerprints[index] = value
-        })
-        this.materialRuntime.uploadMotion(items)
-        return true
-      },
-      discard: () => this.atlasMetrics.discardPatch(),
-    })
-    return result.status === 'committed' && result.value
+    const workspace = patchWorkspacePool.acquire(changedIndices, items.length)
+    const { indices, fingerprints } = workspace
+    try {
+      for (let offset = 0; offset < indices.length; offset += 1) {
+        fingerprints.push(createItemFingerprint(items[indices[offset]], this.atlasOptions))
+      }
+      let contentChanged = false
+      for (let offset = 0; offset < indices.length; offset += 1) {
+        if (this.itemFingerprints[indices[offset]] !== fingerprints[offset]) {
+          contentChanged = true
+          break
+        }
+      }
+      if (!contentChanged && !this.resourceScheduler.isPending('cards-content')) return true
+      const baseAtlas = this.atlas
+      await this.prepareAtlasBackend()
+      if (this.disposed) return false
+      const result = await this.resourceScheduler.scheduleLatest('cards-content', {
+        prepare: (signal) => this.atlasBackend.patch(items, indices, baseAtlas, signal),
+        commit: (patch) => {
+          if (this.disposed || this.atlas !== baseAtlas) return false
+          const applyMs = this.atlasBackend.applyPatch(
+            baseAtlas,
+            patch,
+            baseAtlas.mode === 'array' ? this.nextLayer : undefined,
+          )
+          this.atlasMetrics.recordPatch(patch.metrics, applyMs)
+          for (let offset = 0; offset < indices.length; offset += 1) {
+            this.itemFingerprints[indices[offset]] = fingerprints[offset]
+          }
+          this.materialRuntime.uploadMotion(items)
+          return true
+        },
+        discard: () => this.atlasMetrics.discardPatch(),
+      })
+      return result.status === 'committed' && result.value
+    } finally {
+      patchWorkspacePool.release(workspace)
+    }
   }
 
   setTransforms(buffer: TransformBufferView): void {
@@ -369,6 +376,12 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     }
   }
 
+  async prewarm(request: import('./MotionRenderer.js').MotionRendererPrewarmRequest): Promise<boolean> {
+    if (!this.atlas) return false
+    if (request.textures) this.prewarmAtlas(this.atlas, true)
+    return await this.materialRuntime.prewarm(request.programs ?? []) && !this.disposed
+  }
+
   getStats(): MotionRendererStats {
     const resourceStats = this.resourceScheduler.getStats()
     return {
@@ -385,9 +398,6 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
           ? Math.max(0, this.atlas.depth - this.nextLayer)
           : 0,
         layerUploadFrames: this.layerUploadFrames,
-        fingerprintFullScans: this.fingerprintFullScans,
-        fingerprintPatchScans: this.fingerprintPatchScans,
-        fingerprintItemsScanned: this.fingerprintItemsScanned,
         capacity: this.mesh ? this.instanceCapacity : 0,
         geometryBuilds: this.geometryBuilds,
         attributeReuses: this.attributeReuses,
@@ -434,8 +444,8 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.atlasMetrics.recordBuild(atlas)
   }
 
-  private prewarmAtlas(atlas: TextureAtlasResult): void {
-    const shouldPrewarm = this.atlasOptions.texturePrewarm === true
+  private prewarmAtlas(atlas: TextureAtlasResult, force = false): void {
+    const shouldPrewarm = force || this.atlasOptions.texturePrewarm === true
       || (
         this.atlasOptions.texturePrewarm !== false
         && atlas.data.byteLength <= 16 * 1024 * 1024
@@ -577,6 +587,11 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     return this.atlasBackendReady
   }
 
+  private preparePatchWorkspacePool(): Promise<CardPatchWorkspacePool> {
+    return this.patchWorkspacePool ??= import('./cards/CardPatchWorkspacePool.js')
+      .then(({ CardPatchWorkspacePool }) => new CardPatchWorkspacePool())
+  }
+
   private writeBufferTransform(
     buffer: TransformBufferView,
     index: number,
@@ -700,15 +715,19 @@ function markAttributePair(
 
 function createItemFingerprints<TMeta>(
   items: readonly MotionItem<TMeta>[],
-  options: TextureAtlasOptions<TMeta>,
+  options: CardRendererOptions<TMeta>,
 ): string[] {
   return items.map((item) => createItemFingerprint(item, options))
 }
 
 function createItemFingerprint<TMeta>(
   item: MotionItem<TMeta>,
-  options: TextureAtlasOptions<TMeta>,
+  options: CardRendererOptions<TMeta>,
 ): string {
+  if (options.resolveContentKey) {
+    const key = options.resolveContentKey(item)
+    return `${item.id.length}:${item.id}|${key}`
+  }
   let meta = ''
   let style = ''
   try {
@@ -727,11 +746,6 @@ function createItemFingerprint<TMeta>(
 function equalFingerprints(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length
     && left.every((value, index) => value === right[index])
-}
-
-function normalizeChangedIndices(indices: readonly number[], itemCount: number): number[] {
-  return [...new Set(indices)]
-    .filter((index) => Number.isInteger(index) && index >= 0 && index < itemCount)
 }
 
 function resolveAspectRatio(value: number | undefined): number {

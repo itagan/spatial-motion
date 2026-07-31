@@ -427,6 +427,7 @@ describe('InstancedCardRenderer item loading', () => {
       'frame',
       'highlight',
       'patch',
+      'resourcePreparation',
       'resourceRecovery',
       'streamingEffects',
       'viewport',
@@ -775,6 +776,77 @@ describe('InstancedCardRenderer item loading', () => {
       payload: null,
     })).resolves.toBe(false)
     renderer.dispose()
+  })
+
+  it('explicitly prewarms resident textures and lazy Programs without activating them', async () => {
+    const currentAtlas = atlas(1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const prepareTexture = vi.fn(() => 2)
+    const prepareProgram = vi.fn(async () => 3)
+    const loader = vi.fn(async () => defineCardEffectProgram<Float32Array>({
+      kind: 'prewarm-wave',
+      prefix: 'program_prewarm_',
+      attributes: [{ name: 'program_prewarm_phase', itemSize: 1 }],
+      vertexBody: 'center.y += program_prewarm_phase;',
+      upload(context, payload) {
+        context.setAttribute('program_prewarm_phase', payload)
+      },
+    }))
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene, {
+      effectPrograms: { 'prewarm-wave': loader },
+      prepareTexture,
+      prepareProgram,
+      texturePrewarm: false,
+    })
+    await renderer.setItems([{ id: 'a' }])
+
+    await expect(renderer.prewarm({
+      textures: true,
+      programs: ['prewarm-wave'],
+    })).resolves.toBe(true)
+
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+    expect(prepareTexture).toHaveBeenCalledOnce()
+    expect(prepareProgram).toHaveBeenCalledOnce()
+    expect(loader).toHaveBeenCalledOnce()
+    expect(mesh.geometry.getAttribute('program_prewarm_phase')).toBeDefined()
+    expect(mesh.material).not.toHaveProperty('uniforms.program_prewarm_phase')
+    expect(renderer.getStats().metrics).toMatchObject({ cachedPrograms: 1, programSwitches: 0 })
+
+    await renderer.enableEffect({
+      kind: 'prewarm-wave',
+      activeCount: 1,
+      payload: new Float32Array([0.5]),
+    })
+    expect(loader).toHaveBeenCalledOnce()
+    expect(prepareProgram).toHaveBeenCalledOnce()
+    renderer.dispose()
+  })
+
+  it('discards a Program whose explicit prewarm finishes after disposal', async () => {
+    const currentAtlas = atlas(1)
+    const compilation = deferred<number>()
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const renderer = new InstancedCardRenderer(new Scene(), {
+      effectPrograms: {
+        delayed: defineCardEffectProgram({
+          kind: 'delayed',
+          prefix: 'program_delayed_',
+          vertexBody: 'center.x += 0.0;',
+          upload() {},
+        }),
+      },
+      prepareProgram: () => compilation.promise,
+    })
+    await renderer.setItems([{ id: 'a' }])
+
+    const result = renderer.prewarm({ programs: ['delayed'] })
+    renderer.dispose()
+    compilation.resolve(1)
+
+    await expect(result).resolves.toBe(false)
+    expect(renderer.getStats().metrics).toMatchObject({ cachedPrograms: 0 })
   })
 
   it('runs custom Program runtime prepare, restore, update, and disposal hooks', async () => {
@@ -1175,11 +1247,78 @@ describe('InstancedCardRenderer item loading', () => {
 
     expect(resolveCardStyle).toHaveBeenCalledOnce()
     expect(atlasMock.createPatch.mock.calls[0][1]).toEqual([123])
-    expect(renderer.getStats().metrics).toMatchObject({
-      fingerprintFullScans: 1,
-      fingerprintPatchScans: 1,
-      fingerprintItemsScanned: 2001,
+    expect(renderer.getStats().metrics).toBeDefined()
+    renderer.dispose()
+  })
+
+  it('reuses a patch workspace across sequential updates', async () => {
+    const currentAtlas = atlas(2)
+    const patch = {
+      cells: [],
+      metrics: {
+        cells: 1,
+        renderMs: 1,
+        prepareMs: 0,
+        imageLoadWallMs: 0,
+        cellRenderMs: 1,
+        applyMs: 0,
+        readbackMs: 0,
+        imageLoadMs: 0,
+        imageRequests: 0,
+        imageFailures: 0,
+        uploadBytes: 0,
+      },
+    }
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    atlasMock.createPatch.mockResolvedValue(patch)
+    const renderer = new InstancedCardRenderer(new Scene())
+    await renderer.setItems([{ id: 'a' }, { id: 'b' }])
+
+    await renderer.updateItems([{ id: 'a', title: 'one' }, { id: 'b' }], [0])
+    await renderer.updateItems([{ id: 'a', title: 'two' }, { id: 'b' }], [0])
+
+    expect(atlasMock.createPatch).toHaveBeenCalledTimes(2)
+    renderer.dispose()
+  })
+
+  it('uses a stable content key instead of serializing style for patches', async () => {
+    const currentAtlas = atlas(1)
+    const patch = {
+      cells: [],
+      metrics: {
+        cells: 1,
+        renderMs: 1,
+        prepareMs: 0,
+        imageLoadWallMs: 0,
+        cellRenderMs: 1,
+        applyMs: 0,
+        readbackMs: 0,
+        imageLoadMs: 0,
+        imageRequests: 0,
+        imageFailures: 0,
+        uploadBytes: 0,
+      },
+    }
+    const resolveContentKey = vi.fn((item: { meta?: { revision?: number } }) =>
+      item.meta?.revision ?? 0)
+    const resolveCardStyle = vi.fn(() => ({ borderColor: '#ffd700' }))
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    atlasMock.createPatch.mockResolvedValueOnce(patch)
+    const renderer = new InstancedCardRenderer(new Scene(), {
+      resolveContentKey,
+      resolveCardStyle,
     })
+    await renderer.setItems([{ id: 'a', meta: { revision: 0 } }])
+    resolveContentKey.mockClear()
+    resolveCardStyle.mockClear()
+
+    const changed = [{ id: 'a', meta: { revision: 1 } }]
+    expect(await renderer.updateItems(changed, [0])).toBe(true)
+    expect(await renderer.updateItems([{ id: 'a', meta: { revision: 1 } }], [0])).toBe(true)
+
+    expect(resolveContentKey).toHaveBeenCalledTimes(2)
+    expect(resolveCardStyle).not.toHaveBeenCalled()
+    expect(atlasMock.createPatch).toHaveBeenCalledOnce()
     renderer.dispose()
   })
 })
