@@ -12,7 +12,7 @@ interface BenchmarkSummary {
   }
   averageFps: number
   maximumFrameTimeP95: number
-  longFrames: { over50Ms: number }
+  longFrames: { over24Ms: number; over50Ms: number }
   averageFrameCpuMs: number
   averageRenderSubmitMs: number
   maximumDrawCalls: number
@@ -27,6 +27,10 @@ interface BenchmarkSummary {
     atlasLayers: number
     uploadedAtlasLayers: number
     pendingAtlasLayers: number
+    atlasLayerUploadFrames: number
+    arrayUploadBudgetBytes: number
+    arrayUploadPeakBudgetBytes: number
+    arrayUploadBackoffs: number
     firstRenderSubmitMs: number
   }
 }
@@ -78,6 +82,15 @@ test('2000-card default cold start stays within the WebGL performance envelope',
   })
   expect(result.atlas.uploadedAtlasLayers).toBe(result.atlas.atlasLayers)
   expect(result.atlas.firstRenderSubmitMs).toBeLessThan(33)
+  expect(result.atlas.arrayUploadBudgetBytes).toBeGreaterThanOrEqual(768 * 1024)
+  expect(result.atlas.arrayUploadPeakBudgetBytes).toBeLessThanOrEqual(3 * 1024 * 1024)
+  expect(result.atlas.arrayUploadBackoffs).toBeGreaterThanOrEqual(0)
+  if (
+    result.atlas.arrayUploadPeakBudgetBytes === 3 * 1024 * 1024
+    && result.atlas.arrayUploadBackoffs === 0
+  ) {
+    expect(result.atlas.atlasLayerUploadFrames).toBeLessThanOrEqual(12)
+  }
 
   expect(result.averageFps).toBeGreaterThanOrEqual(20)
   expect(result.maximumFrameTimeP95).toBeLessThan(50)

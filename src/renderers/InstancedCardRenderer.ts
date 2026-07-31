@@ -31,7 +31,10 @@ import {
   markAttribute,
   resolveBufferCapacity,
 } from './cards/CardGeometry.js'
-import type { CardAtlasMetrics } from './cards/CardAtlasMetrics.js'
+import type {
+  ArrayAtlasUploadPolicy,
+  CardAtlasMetrics,
+} from './cards/CardAtlasMetrics.js'
 import { CardMaterialRuntime } from './cards/CardMaterialRuntime.js'
 import type { CardPatchWorkspacePool } from './cards/CardPatchWorkspacePool.js'
 import type { CardAtlasBackend } from './cards/CardAtlasBackend.js'
@@ -95,6 +98,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private layerUploadFrames = 0
   private atlas: TextureAtlasResult | null = null
   private atlasMetrics: CardAtlasMetrics | undefined
+  private arrayUploadPolicy: ArrayAtlasUploadPolicy | undefined
   private patchWorkspacePool: Promise<CardPatchWorkspacePool> | null = null
   private geometryBuilds = 0
   private attributeReuses = 0
@@ -134,7 +138,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       viewport: { resize: (viewport) => this.resize(viewport) },
       resourceRecovery: { refreshResources: () => this.refreshResources() },
       resourcePreparation: { prewarm: (request) => this.prewarm(request) },
-      frame: { update: () => this.advanceAtlasUploads() },
+      frame: { update: (deltaSeconds) => this.advanceAtlasUploads(deltaSeconds) },
       streamingEffects: {
         enable: (data) => this.enableEffect(data),
         disable: () => this.disableEffect(),
@@ -414,6 +418,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
           ? Math.max(0, this.atlas.depth - this.nextLayer)
           : 0,
         layerUploadFrames: this.layerUploadFrames,
+        ...this.arrayUploadPolicy?.snapshot(),
         capacity: this.mesh ? this.instanceCapacity : 0,
         geometryBuilds: this.geometryBuilds,
         attributeReuses: this.attributeReuses,
@@ -483,6 +488,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.atlasBackend.clearPatchQueue(atlas)
     if (atlas.mode !== 'array' || !('layerUpdates' in atlas.texture)) return
     atlas.texture.layerUpdates.clear()
+    this.arrayUploadPolicy!.reset()
     const initialLayers = Math.min(
       atlas.depth,
       this.layersPerUpload(atlas, INITIAL_ARRAY_UPLOAD_BYTES),
@@ -494,13 +500,18 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.skipUploadFrames = 1
   }
 
-  private advanceAtlasUploads(): void {
+  private advanceAtlasUploads(deltaSeconds: number): void {
     const atlas = this.atlas
     if (
       !atlas
       || atlas.mode !== 'array'
       || !('layerUpdates' in atlas.texture)
+      || this.nextLayer >= atlas.depth
     ) return
+    const uploadBudget = this.arrayUploadPolicy!.nextBudget(
+      deltaSeconds,
+      FRAME_ARRAY_UPLOAD_BYTES,
+    )
     if (this.skipUploadFrames > 0) {
       this.skipUploadFrames -= 1
       return
@@ -508,7 +519,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     const [end, uploaded] = this.atlasBackend.advanceUploads(
       atlas,
       this.nextLayer,
-      this.layersPerUpload(atlas, FRAME_ARRAY_UPLOAD_BYTES),
+      this.layersPerUpload(atlas, uploadBudget),
     )
     this.nextLayer = end
     this.setCommonUniform('uLayers', end)
@@ -599,8 +610,9 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.atlasBackendReady ??= Promise.all([
       this.atlasBackend.prepare(),
       import('./cards/CardAtlasMetrics.js'),
-    ]).then(([, { CardAtlasMetrics }]) => {
+    ]).then(([, { ArrayAtlasUploadPolicy, CardAtlasMetrics }]) => {
       this.atlasMetrics ??= new CardAtlasMetrics()
+      this.arrayUploadPolicy ??= new ArrayAtlasUploadPolicy()
     }).catch((error) => {
       this.atlasBackendReady = null
       throw error

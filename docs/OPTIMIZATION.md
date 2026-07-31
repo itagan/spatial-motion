@@ -235,7 +235,7 @@ Cards 增加显式 `single`、`array` 和 `auto` 策略。最初默认 `single` 
 但 Worker 构建未阻塞 Stage 帧；250 层在 64 个 Stage 帧批次内上传完成。画面完整，
 浏览器控制台无 warning/error。
 
-Array 首帧上传预算约 3 MiB，后续每个 Stage RAF 约 768 KiB。新的 Renderer `frame.update()` 可选能力只负责协调该上传队列；默认 Cards 以外的 Renderer 不需要空实现。context restore 会从首层重新上传，局部 patch 则重传受影响的整页，因此 array 面向大型、相对静态的内容，single 仍是高频稀疏 patch 的合理默认。
+Array 首帧上传预算约 3 MiB，后续 Stage RAF 从 768 KiB 起步；连续两个不超过 18ms 的稳定帧会把预算逐级提高到 3 MiB，超过 24ms 时减半并冷却六帧。Renderer `frame.update()` 可选能力只负责协调该上传队列；默认 Cards 以外的 Renderer 不需要空实现。context restore 会从首层重新上传，局部 patch 则重传受影响的整页，因此 array 面向大型、相对静态的内容，single 仍是高频稀疏 patch 的合理默认。
 
 2026-07-26 Chromium 150 / Apple M4 / 2000 Cards 实测：array 和 `auto + mipmaps:false` 选择 2×4 单元页面、250 层，首次 WebGL 提交约 4.3ms，P95 18.4–18.6ms，0 个 33ms 长帧并保持主体 1 Draw Call；`auto + mipmaps:true` 确定性使用 single，首次提交约 34.7–37.3ms。500 项无 mipmap图集约 10.49 MiB，低于 16 MiB 门槛，auto 同样保持 single。
 
@@ -549,3 +549,25 @@ Atlas 统计实现改为随首次 backend 准备动态加载，同时保留首�
 tarball 消费与公开边界全部通过；Chromium WebGL 门禁随后通过。root/Core/Cards-only
 为 36,992/15,251/9,813 bytes gzip，Cards 在 10 KiB 硬上限下保留 427 bytes 余量；
 layout-only 为 7,956 bytes，tarball 为 131,206 bytes。
+
+## Array Atlas 自适应帧预算
+
+固定 768 KiB 帧预算虽然能保护低性能设备，但在稳定 60 FPS 的桌面设备上会不必要地
+延长渐进完整显示时间。新的内部上传策略只消费既有 `frame.update(deltaSeconds)`，不扩展
+Renderer 公共协议：预算从 768 KiB 起步，连续稳定帧按 1×/2×/4× 增长，上一帧超过
+24ms 时立即减半并进入六帧冷却。Atlas 重建和 WebGL context 恢复会重置策略；完成全部
+层后不再执行无效 backend 调用。
+
+2026-08-01 Chromium 150 / Apple M4 / 1265×633 / DPR 2 的 2000/high/cold-start
+有界面三轮均为 60 FPS、P95 17.6–17.7ms、P99 17.7ms，0 个 24/33/50ms 长帧、
+主体 1 Draw Call。预算稳定升至 3 MiB、退避为 0，250 层均在 9 个实际上传帧完成，
+首次提交为 2.0–2.5ms；相对上一轮记录的 64 帧缩短约 86%。无头 Chromium 因自身
+调度只有约 49 FPS 且存在 24ms 压力，策略保持 768 KiB 并在 34 个上传帧安全完成，
+证明慢环境不会为了追求完成速度强制升档。策略确定性单测覆盖升档、退避、冷却与重置，
+浏览器门禁在无退避升至 3 MiB 时要求不超过 12 个上传帧。
+
+最终 `npm run verify` 为 36 个测试文件、395 项测试，Library/Demo/Examples、真实
+tarball 消费和 Chromium WebGL 门禁全部通过。root/Core/Cards-only 为
+37,065/15,251/9,888 bytes gzip，layout-only 为 7,956 bytes，tarball 为
+131,833 bytes；Cards 在 10 KiB 上限下剩余 352 bytes，下一阶段应优先拆分 Effect
+Runtime，而不是提高预算。

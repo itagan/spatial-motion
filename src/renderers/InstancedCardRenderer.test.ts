@@ -542,14 +542,16 @@ describe('InstancedCardRenderer item loading', () => {
     texture.layerUpdates.clear()
     renderer.capabilities.frame?.update(1 / 60)
 
-    expect(texture.layerUpdates).toEqual(new Set([12, 13, 14]))
-    expect(mesh.material.uniforms.uLayers.value).toBe(15)
+    expect(texture.layerUpdates).toEqual(new Set([12, 13, 14, 15, 16, 17]))
+    expect(mesh.material.uniforms.uLayers.value).toBe(18)
     expect(renderer.getStats().metrics).toMatchObject({
-      uploadedLayers: 15,
-      pendingLayers: 5,
+      uploadedLayers: 18,
+      pendingLayers: 2,
       layerUploadFrames: 1,
+      arrayUploadBudgetBytes: 1_572_864,
+      arrayUploadPeakBudgetBytes: 1_572_864,
+      arrayUploadBackoffs: 0,
     })
-    renderer.capabilities.frame?.update(1 / 60)
     renderer.capabilities.frame?.update(1 / 60)
     expect(mesh.material.uniforms.uLayers.value).toBe(20)
     texture.layerUpdates.clear()

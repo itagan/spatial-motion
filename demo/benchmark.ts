@@ -427,6 +427,12 @@ function renderResult(result: BenchmarkResult): void {
       uploadedAtlasLayers: result.samples.at(-1)?.stats.renderer.metrics.uploadedLayers ?? 0,
       pendingAtlasLayers: result.samples.at(-1)?.stats.renderer.metrics.pendingLayers ?? 0,
       atlasLayerUploadFrames: result.samples.at(-1)?.stats.renderer.metrics.layerUploadFrames ?? 0,
+      arrayUploadBudgetBytes:
+        result.samples.at(-1)?.stats.renderer.metrics.arrayUploadBudgetBytes ?? 0,
+      arrayUploadPeakBudgetBytes:
+        result.samples.at(-1)?.stats.renderer.metrics.arrayUploadPeakBudgetBytes ?? 0,
+      arrayUploadBackoffs:
+        result.samples.at(-1)?.stats.renderer.metrics.arrayUploadBackoffs ?? 0,
       firstRenderSubmitMs: Number(coldStartRenderSubmitMs.toFixed(3)),
     },
     operations: stressOperations,

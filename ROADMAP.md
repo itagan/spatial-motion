@@ -83,6 +83,8 @@
   未使用 Extension 的 Core 消费者不携带扩展调度和诊断实现。
 - [x] **过渡工作区复用**：StageMotionCoordinator 固定复用 from/target Buffer，
   连续布局中断、容量缩放和 Effect 静态回退不再重复分配或上传 Transform。
+- [x] **Array 上传自适应**：大型 Array Atlas 从保守帧预算逐级利用稳定帧余量，
+  出现 24ms 压力时自动退避并冷却，保持单 Draw Call 和完整上传可观测性。
 
 - [x] 建立可比较的 steady、cold-start、atlas-update 与 transition-stress 基准。
 - [x] 暴露 P50/P95/P99、长帧、CPU/提交、图集和图片加载指标。
@@ -131,7 +133,7 @@
 - [x] 高频 pointermove 合并到 Stage RAF，并增加 interaction-stress 浏览器基准。
 - [x] 包体积改用真实 root/Core/Cards 消费者门禁，保留分模块聚合诊断。
 - [x] Atlas 冷启动增加分阶段指标，默认绘制移除逐卡临时 Canvas，并移除整图像素缓冲二次复制。
-- [x] 完成默认 Atlas 的离主线程绘制/readback，以及可选 Texture2DArray 分页与渐进式纹理首传评估；默认保留 single，保守 auto 策略只在无 mipmap 的大型图集启用 array。
+- [x] 完成默认 Atlas 的离主线程绘制/readback，以及 Texture2DArray 分页与自适应渐进首传；默认 auto 在未显式要求 mipmap 的大型图集启用 array，压力帧会降低后续上传预算。
 - [ ] 收集自定义 Renderer/Layout 案例，完成发布候选 API freeze。
 
 ### CSS3D 可选渲染器
