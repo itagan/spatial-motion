@@ -68,6 +68,7 @@ describe('CompiledRendererRuntime', () => {
     const setHighlightIndex = vi.fn()
     const resize = vi.fn()
     const refreshResources = vi.fn()
+    const prewarm = vi.fn(async () => true)
     const enable = vi.fn(async () => true)
     const disable = vi.fn()
     const setTime = vi.fn()
@@ -78,6 +79,7 @@ describe('CompiledRendererRuntime', () => {
       highlight: { setHighlightIndex },
       viewport: { resize },
       resourceRecovery: { refreshResources },
+      resourcePreparation: { prewarm },
       streamingEffects: { enable, disable, setTime },
       frame: { update },
     })
@@ -93,6 +95,7 @@ describe('CompiledRendererRuntime', () => {
     runtime.setHighlightIndex(0)
     runtime.resize({ width: 100, height: 50, pixelRatio: 2 })
     runtime.refreshResources()
+    expect(await runtime.prewarm({ textures: true, programs: ['wave'] })).toBe(true)
     runtime.updateFrame(0.016)
     await runtime.streamingEffects?.enable({ kind: 'custom', activeCount: 0, payload: null })
     runtime.streamingEffects?.setTime(2)
@@ -106,6 +109,7 @@ describe('CompiledRendererRuntime', () => {
     expect(setHighlightIndex).toHaveBeenCalledWith(0)
     expect(resize).toHaveBeenCalledWith({ width: 100, height: 50, pixelRatio: 2 })
     expect(refreshResources).toHaveBeenCalledOnce()
+    expect(prewarm).toHaveBeenCalledWith({ textures: true, programs: ['wave'] })
     expect(update).toHaveBeenCalledWith(0.016)
     expect(enable).toHaveBeenCalledWith({ kind: 'custom', activeCount: 0, payload: null })
     expect(setTime).toHaveBeenCalledWith(2)

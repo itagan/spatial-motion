@@ -9,6 +9,7 @@ import type {
 import {
   type MotionRenderer,
   type MotionRendererFactory,
+  type MotionRendererPrewarmRequest,
 } from '../renderers/MotionRenderer.js'
 import type {
   AdaptivePerformanceOptions,
@@ -208,6 +209,8 @@ export class MotionStage<TMeta = unknown> {
   private reducedMotion = false
   private frameCpuMs = 0
   private renderSubmitMs = 0
+  private performanceSnapshot: StagePerformanceStats | null = null
+  private performanceSnapshotClearQueued = false
   private readonly updateRendererProgress = (progress: number) => {
     this.contentRenderer.setProgress(progress)
   }
@@ -265,7 +268,10 @@ export class MotionStage<TMeta = unknown> {
       element: canvas,
       onFrame: (now, rawFrameMs, deltaSeconds) =>
         this.renderFrame(now, rawFrameMs, deltaSeconds),
-      onPauseChange: (paused) => this.extensionHost?.setPaused(paused),
+      onPauseChange: (paused) => {
+        this.invalidatePerformanceSnapshot()
+        this.extensionHost?.setPaused(paused)
+      },
       onResume: (now) => {
         this.motionController.rebaseClock(now)
         this.effectController.rebaseClock(now)
@@ -277,7 +283,10 @@ export class MotionStage<TMeta = unknown> {
         void this.effectController.restoreRendererState()
         this.extensionHost?.contextRestored()
       },
-      onContextChange: (state) => this.events.emit('contextchange', { state }),
+      onContextChange: (state) => {
+        this.invalidatePerformanceSnapshot()
+        this.events.emit('contextchange', { state })
+      },
     })
     this.motionCoordinator = new StageMotionCoordinator({
       state: this.contentState,
@@ -312,6 +321,7 @@ export class MotionStage<TMeta = unknown> {
         hideBackHemisphere: this.contentState.hideBackHemisphere,
         effectActive: this.effectController.hasActive(),
       }),
+      getItemIndex: (id) => this.contentState.getItemIndex(id),
       resolveTransformBuffer: (now) =>
         this.motionCoordinator.resolveTransformBuffer(now),
       hasScheduledFrame: () => this.runtime.hasScheduledFrame(),
@@ -357,6 +367,7 @@ export class MotionStage<TMeta = unknown> {
 
   setItems(items: readonly MotionItem<TMeta>[]): Promise<void> {
     this.assertActive()
+    this.invalidatePerformanceSnapshot()
     this.contentCoordinator.validateItems(items)
     this.motionCoordinator.invalidate()
     return this.contentCoordinator.setItems(items)
@@ -372,6 +383,7 @@ export class MotionStage<TMeta = unknown> {
 
   to(layout: Layout<TMeta>, options: TransitionOptions = {}): Promise<boolean> {
     this.assertActive()
+    this.invalidatePerformanceSnapshot()
     return this.motionCoordinator.transitionAndRemember(layout, options)
   }
 
@@ -404,6 +416,7 @@ export class MotionStage<TMeta = unknown> {
 
   enterEffect(effect: StreamingEffect, options: TransitionOptions = {}): Promise<boolean> {
     this.assertActive()
+    this.invalidatePerformanceSnapshot()
     return this.motionCoordinator.enterEffect(effect, options)
   }
 
@@ -412,6 +425,7 @@ export class MotionStage<TMeta = unknown> {
     options: UpdateItemsOptions<TMeta> = {},
   ): Promise<boolean> {
     this.assertActive()
+    this.invalidatePerformanceSnapshot()
     this.contentCoordinator.validateItems(items)
     this.motionCoordinator.invalidate()
     return this.contentCoordinator.updateItems(items, options)
@@ -430,6 +444,7 @@ export class MotionStage<TMeta = unknown> {
     options: UpdateItemsOptions<TMeta> = {},
   ): Promise<boolean> {
     this.assertActive()
+    this.invalidatePerformanceSnapshot()
     this.contentCoordinator.validateUpdates(updates)
     this.motionCoordinator.invalidate()
     return this.contentCoordinator.updateItemsById(updates, options)
@@ -437,11 +452,13 @@ export class MotionStage<TMeta = unknown> {
 
   focusItems(ids: string[], options: FocusItemsOptions = {}): Promise<boolean> {
     this.assertActive()
+    this.invalidatePerformanceSnapshot()
     return this.motionCoordinator.focusItems(ids, options)
   }
 
   restoreLayout(options: TransitionOptions = {}): Promise<boolean> {
     this.assertActive()
+    this.invalidatePerformanceSnapshot()
     return this.motionCoordinator.restoreLayout(options)
   }
 
@@ -471,6 +488,7 @@ export class MotionStage<TMeta = unknown> {
 
   setQuality(mode: QualityMode): void {
     this.assertActive()
+    this.invalidatePerformanceSnapshot()
     const quality = this.qualityController.setMode(mode)
     if (quality) this.applyQuality(quality)
   }
@@ -515,6 +533,13 @@ export class MotionStage<TMeta = unknown> {
     this.resizeInternal()
   }
 
+  /** Explicitly prepares resident textures and renderer-specific lazy Programs. */
+  async prewarm(request: MotionRendererPrewarmRequest = {}): Promise<boolean> {
+    this.assertActive()
+    const result = await this.contentRenderer.prewarm(request)
+    return !this.destroyed && result
+  }
+
   private resizeInternal(): void {
     const { clientWidth: width, clientHeight: height } = this.options.container
     if (!width || !height) return
@@ -528,6 +553,7 @@ export class MotionStage<TMeta = unknown> {
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
+    this.performanceSnapshot = null
     this.motionCoordinator.invalidate()
     this.contentCoordinator.invalidate()
     this.motionController.cancel('destroyed')
@@ -555,11 +581,12 @@ export class MotionStage<TMeta = unknown> {
 
   getPerformanceStats(): StagePerformanceStats {
     this.assertActive()
+    if (this.performanceSnapshot) return this.performanceSnapshot
     const performanceStats = this.qualityController.getStats()
     const rendererStats = normalizeRendererStats(this.contentRenderer.getStats())
     const interactionStats = this.interaction.getStats()
     const activeEffectItems = this.effectController.getActiveCount()
-    return {
+    const snapshot = Object.freeze({
       ...performanceStats,
       qualityMode: this.qualityController.getMode(),
       inputItems: this.contentState.inputItemCount,
@@ -584,7 +611,16 @@ export class MotionStage<TMeta = unknown> {
       extensions: this.extensionHost?.getCount() ?? 0,
       extensionUpdateMs: this.extensionHost?.getUpdateDuration() ?? 0,
       extensionRenderMs: this.extensionHost?.getRenderDuration() ?? 0,
+    })
+    this.performanceSnapshot = snapshot
+    if (!this.performanceSnapshotClearQueued) {
+      this.performanceSnapshotClearQueued = true
+      queueMicrotask(() => {
+        this.performanceSnapshot = null
+        this.performanceSnapshotClearQueued = false
+      })
     }
+    return snapshot
   }
 
   getExtensionStats(): StageExtensionStats[] {
@@ -638,6 +674,7 @@ export class MotionStage<TMeta = unknown> {
     this.host.render()
     this.renderSubmitMs = performance.now() - renderStartedAt
     this.extensionHost?.afterRender()
+    this.invalidatePerformanceSnapshot()
   }
 
   private applyQuality(quality: QualityLevel): void {
@@ -690,6 +727,10 @@ export class MotionStage<TMeta = unknown> {
 
   private assertActive(): void {
     if (this.destroyed) throw new Error('MotionStage has been destroyed')
+  }
+
+  private invalidatePerformanceSnapshot(): void {
+    this.performanceSnapshot = null
   }
 
   private getExtensionHost(): Promise<ExtensionHost> {

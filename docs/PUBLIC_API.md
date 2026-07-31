@@ -21,7 +21,7 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 - 构造参数提供 `items` 时通过 `stage.ready` 等待初始 Renderer 数据准备；后续数据使用 `setItems()` / `updateItem(s)`。
 - `MotionItem<TMeta>`、Renderer/Layout 输入及更新索引使用只读契约；Stage、Cards/Points Resolver 和 item 回调共享同一泛型 meta。
 - Factory 只获得隔离内容 `Group`、GPU 限制（含 `maxTextureSize`、`maxTextureLayers`）、受限纹理准备函数和 destroy `AbortSignal`，不能接管 Scene、Camera、WebGLRenderer 或 RAF。
-- 核心协议负责数据、Transform Buffer、GPU 过渡进度、质量可见比例、统计和销毁；patch、visual、highlight、viewport、resource recovery、streaming effects 与逐帧 `frame.update()` 是可选能力。
+- 核心协议负责数据、Transform Buffer、GPU 过渡进度、质量可见比例、统计和销毁；patch、visual、highlight、viewport、resource recovery、resource preparation、streaming effects 与逐帧 `frame.update()` 是可选能力。
 - `setTransforms(buffer)` 与 `prepareTransition(from, to)` 强制接收
   `TransformBufferView`。视图包含 position/rotation 的三分量 Float32Array、
   scale/opacity 的单分量 Float32Array 和有效 `count`；Renderer 必须同步读取或复制，
@@ -39,6 +39,9 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 - Effect 入场编排与 Extension Host 也是按需模块。后发 Layout、数据替换或 destroy
   会使尚未完成的 Effect 入口失效；首次 `addExtension()` 才加载扩展调度运行时。
 - `StagePerformanceStats` 明确报告 input、resident、submitted、visible 与 active effect 数量；`render` 报告场景 Draw Call/三角形，`renderer` 报告 GPU 字节和有限 metrics。
+- `stage.prewarm({ textures, programs })` 将显式资源准备转发给 Renderer 的可选
+  `resourcePreparation` capability；不支持时确定性返回 `false`。Cards 的 `programs`
+  使用已注册 Effect Program kind，预热只缓存和编译，不激活 Material。
 - `QualityController` 独立拥有模式、档位、Profile 和自适应采样器；Stage 接受
   `qualityProfiles` 与 `adaptivePerformanceOptions`，覆盖值在 Renderer 创建前验证。
 - `stage.on()` 提供类型化多订阅事件并返回取消订阅函数，覆盖 item、quality、
@@ -53,7 +56,7 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 
 ## Cards 与模板
 
-- `cardsRenderer()` 统一接收 `style`、`resolveStyle`、`draw`、`content`、`aspectRatio` 和 Atlas 图片资源选项；`resolution` 支持显式像素值或 `'auto'`，`mipmaps` 可关闭，`texturePrewarm` 可覆盖默认的小图集自适应预热策略。
+- `cardsRenderer()` 统一接收 `style`、`resolveStyle`、`draw`、`content`、`aspectRatio` 和 Atlas 图片资源选项；`resolution` 支持显式像素值或 `'auto'`，`mipmaps` 可关闭，`texturePrewarm` 可覆盖默认的小图集自适应预热策略。`resolveContentKey(item)` 可用业务修订号替代默认 meta/style 指纹；调用方负责在所有可见内容变化时更新 key。
 - `cardsRenderer()` 还接受 `motionProgram` 与按 kind 注册的 `effectPrograms`。
   `defineCardMotionProgram()` / `defineCardEffectProgram()` 验证私有字段前缀、GLSL
   入口、itemSize、初始值、重复字段和显式 `clockUniform`；四个内置特效默认可用
@@ -83,6 +86,11 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 ## 性能与扩展
 
 - Cards 与 Points 主体各保持单一批量对象；默认布局、过渡和质量裁剪不为每项增加 Draw Call。
+- Stage 内容更新通过共享稳定 id 索引继承 Transform；并发更新使用有界
+  `TransformBuffer` 租约池，Cards patch 使用独立的索引/指纹工作区池。过期、失败和
+  destroy 路径都会归还租约，不把可复用缓冲暴露给 Renderer 异步边界之外。
+- 同一同步观察周期的 `getPerformanceStats()` 共享一个规范化只读快照；帧提交和
+  Stage 状态变更会使其失效。WebGL 环境能力缓存到 resize 或 pixel ratio 改变。
 - 质量下降保留已有 resident pool，只立即降低 submitted/visible 比例，避免设备已经
   承压时重建 Atlas；从较低初始档位升级时才扩展 resident pool。
 - `dev` 导出 Renderer/Layout 验证报告和可挂载到 StageExtension 的布局方向可视化；error 不自动修正，重叠等启发式结果为 warning。

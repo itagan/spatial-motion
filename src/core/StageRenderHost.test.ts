@@ -104,4 +104,25 @@ describe('StageRenderHost', () => {
     expect(() => new StageRenderHost(container, profile)).toThrow('mount failed')
     expect(hostMocks.renderers[0]?.dispose).toHaveBeenCalledOnce()
   })
+
+  it('caches environment capability queries until viewport state changes', () => {
+    const container = document.createElement('div')
+    Object.defineProperties(container, {
+      clientWidth: { value: 640 },
+      clientHeight: { value: 360 },
+    })
+    const host = new StageRenderHost(container, profile)
+    const renderer = hostMocks.renderers[0]!
+    renderer.getContext.mockClear()
+
+    const first = host.getEnvironment()
+    const second = host.getEnvironment()
+    expect(second).toBe(first)
+    expect(renderer.getContext).toHaveBeenCalledOnce()
+
+    host.resize()
+    expect(host.getEnvironment()).not.toBe(first)
+    expect(renderer.getContext).toHaveBeenCalledTimes(2)
+    host.dispose()
+  })
 })

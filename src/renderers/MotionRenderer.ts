@@ -59,6 +59,17 @@ export interface MotionRendererResourceRecoveryCapability {
   refreshResources(): void
 }
 
+export interface MotionRendererPrewarmRequest {
+  /** Prepare renderer-owned textures that are already resident. */
+  readonly textures?: boolean
+  /** Renderer-specific lazy Program kinds to load and compile. */
+  readonly programs?: readonly string[]
+}
+
+export interface MotionRendererResourcePreparationCapability {
+  prewarm(request: MotionRendererPrewarmRequest): boolean | void | Promise<boolean | void>
+}
+
 export interface MotionRendererStreamingEffectsCapability {
   /** Return false to reject an effect key and make Stage use its static CPU frame. */
   enable(data: StreamingEffectGpuData): boolean | void | Promise<boolean | void>
@@ -76,6 +87,7 @@ export interface MotionRendererCapabilities<TMeta = unknown> {
   readonly highlight?: MotionRendererHighlightCapability
   readonly viewport?: MotionRendererViewportCapability
   readonly resourceRecovery?: MotionRendererResourceRecoveryCapability
+  readonly resourcePreparation?: MotionRendererResourcePreparationCapability
   readonly streamingEffects?: MotionRendererStreamingEffectsCapability
   readonly frame?: MotionRendererFrameCapability
 }

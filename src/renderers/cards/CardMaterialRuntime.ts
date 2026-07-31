@@ -25,6 +25,11 @@ interface PreparedEffectProgram {
   restorePending: boolean
 }
 
+interface PreparedEffectProgramResult {
+  readonly runtime: PreparedEffectProgram
+  readonly created: boolean
+}
+
 interface CardMaterialBinding<TMeta> {
   mesh: Mesh<InstancedBufferGeometry, ShaderMaterial>
   ensureAttributes(program: CardEffectProgram | CardMotionProgram<TMeta>): void
@@ -134,6 +139,17 @@ export class CardMaterialRuntime<TMeta = unknown> {
     }
   }
 
+  async prewarm(kinds: readonly string[]): Promise<boolean> {
+    const binding = this.binding
+    if (!binding || !this.baseMaterial) return false
+    for (const kind of kinds) {
+      const program = await this.loader.load(kind)
+      if (!program || this.binding !== binding) return false
+      if (!await this.ensurePreparedProgram(binding, program)) return false
+    }
+    return true
+  }
+
   disableEffect(itemCount = this.binding?.mesh.geometry.instanceCount ?? 0): void {
     this.options.scheduler.cancel('cards-effect')
     this.activeProgram?.lifecycle?.deactivate?.()
@@ -216,40 +232,10 @@ export class CardMaterialRuntime<TMeta = unknown> {
   } | null> {
     const program = await this.loader.load(data.kind)
     if (!program || signal.aborted || this.binding !== binding) return null
-    let runtime = this.programs.get(program.kind)
-    let createdKind: string | null = null
-    if (!runtime) {
-      const preparedAt = performance.now()
-      binding.ensureAttributes(program)
-      const material = createCardProgramMaterial(
-        this.baseMaterial!.uniforms.atlas!.value as Texture,
-        this.baseMaterial!.uniforms.uLayers!.value as number,
-        program,
-      )
-      this.configureMaterial?.(material)
-      try {
-        runtime = {
-          program,
-          material,
-          timeUniform: resolveProgramTimeUniform(program, material),
-          lifecycle: createProgramLifecycle(program),
-          restorePending: false,
-        }
-        await this.options.prepareProgram?.(material, binding.mesh.geometry)
-      } catch (error) {
-        runtime?.lifecycle?.dispose?.()
-        material.dispose()
-        throw error
-      }
-      if (signal.aborted || this.binding !== binding) {
-        runtime.lifecycle?.dispose?.()
-        material.dispose()
-        return null
-      }
-      this.programs.set(program.kind, runtime)
-      createdKind = program.kind
-      this.programPrepareMs += performance.now() - preparedAt
-    }
+    const prepared = await this.ensurePreparedProgram(binding, program, signal)
+    if (!prepared) return null
+    const { runtime } = prepared
+    const createdKind = prepared.created ? program.kind : null
     try {
       this.syncCommonUniforms(runtime.material)
       const upload = binding.createUploadContext(program, runtime.material)
@@ -301,6 +287,52 @@ export class CardMaterialRuntime<TMeta = unknown> {
     runtime?.lifecycle?.dispose?.()
     runtime?.material.dispose()
     this.programs.delete(kind)
+  }
+
+  private async ensurePreparedProgram(
+    binding: CardMaterialBinding<TMeta>,
+    program: CardEffectProgram,
+    signal?: AbortSignal,
+  ): Promise<PreparedEffectProgramResult | null> {
+    const cached = this.programs.get(program.kind)
+    if (cached) return { runtime: cached, created: false }
+    const preparedAt = performance.now()
+    binding.ensureAttributes(program)
+    const material = createCardProgramMaterial(
+      this.baseMaterial!.uniforms.atlas!.value as Texture,
+      this.baseMaterial!.uniforms.uLayers!.value as number,
+      program,
+    )
+    this.configureMaterial?.(material)
+    let runtime: PreparedEffectProgram | null = null
+    try {
+      runtime = {
+        program,
+        material,
+        timeUniform: resolveProgramTimeUniform(program, material),
+        lifecycle: createProgramLifecycle(program),
+        restorePending: false,
+      }
+      await this.options.prepareProgram?.(material, binding.mesh.geometry)
+    } catch (error) {
+      runtime?.lifecycle?.dispose?.()
+      material.dispose()
+      throw error
+    }
+    if (signal?.aborted || this.binding !== binding || !this.baseMaterial) {
+      runtime.lifecycle?.dispose?.()
+      material.dispose()
+      return null
+    }
+    const concurrent = this.programs.get(program.kind)
+    if (concurrent) {
+      runtime.lifecycle?.dispose?.()
+      material.dispose()
+      return { runtime: concurrent, created: false }
+    }
+    this.programs.set(program.kind, runtime)
+    this.programPrepareMs += performance.now() - preparedAt
+    return { runtime, created: true }
   }
 }
 

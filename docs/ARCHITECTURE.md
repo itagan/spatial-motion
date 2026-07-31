@@ -69,6 +69,9 @@ Renderer 通过可异步的 `streamingEffects.enable()` 协商特效 program key
 Stage 热路径只调用已解析的方法，不逐帧执行可选链或重新探测 capability；自定义
 Renderer 仍只需实现它实际支持的公开能力。
 
+`resourcePreparation.prewarm()` 是通用的显式准备边界。Stage 只传递纹理开关和
+Renderer 私有 Program kind，不读取 Cards 实现；销毁后完成的异步准备不得发布。
+
 ### Effect
 
 Effect 通过 `calculateInto()` 把确定性的 CPU 首帧、fallback 与拾取状态直接写入
@@ -98,6 +101,10 @@ Loader 分别承担实例缓冲、图集诊断、Material/Program 生命周期�
 Effect Program 可通过 `createRuntime()` 接管异步 prepare/restore、激活、逐帧更新
 和释放，但只能通过受限 upload context 写入自身字段。Material、Attribute 和
 TypedArray 继续按容量缓存，不增加 Mesh。
+
+Cards patch 使用有界 Workspace 租约保存规范化索引与并行指纹，异步 Atlas prepare
+完成前独占租约，commit/discard 后统一归还。Stage 内容更新以共享 id 索引继承状态，
+并通过独立 TransformBuffer 租约池支持并发 latest-wins，避免每次完整更新分配快照。
 
 ### Resource 与 Atlas
 

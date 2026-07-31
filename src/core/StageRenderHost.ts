@@ -19,6 +19,7 @@ export class StageRenderHost {
   readonly canvas: HTMLCanvasElement
   private readonly abortController = new AbortController()
   private disposed = false
+  private environmentSnapshot: ReturnType<StageRenderHost['createEnvironmentSnapshot']> | null = null
 
   constructor(
     private readonly container: HTMLElement,
@@ -74,6 +75,7 @@ export class StageRenderHost {
   }
 
   resize(width = this.container.clientWidth, height = this.container.clientHeight): void {
+    this.environmentSnapshot = null
     const safeHeight = Math.max(1, height)
     this.camera.aspect = width / safeHeight
     this.camera.updateProjectionMatrix()
@@ -81,6 +83,7 @@ export class StageRenderHost {
   }
 
   setPixelRatio(maxPixelRatio: number): void {
+    this.environmentSnapshot = null
     const ratio = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1
     this.renderer.setPixelRatio(Math.min(ratio, maxPixelRatio))
   }
@@ -132,6 +135,23 @@ export class StageRenderHost {
     gpuVendor: string | null
     gpuRenderer: string | null
   } {
+    return this.environmentSnapshot ??= this.createEnvironmentSnapshot()
+  }
+
+  private createEnvironmentSnapshot(): {
+    userAgent: string
+    platform: string
+    logicalCores: number | null
+    deviceMemoryGb: number | null
+    viewportWidth: number
+    viewportHeight: number
+    devicePixelRatio: number
+    pixelRatio: number
+    maxTextureSize: number
+    webglVersion: string
+    gpuVendor: string | null
+    gpuRenderer: string | null
+  } {
     const context = this.renderer.getContext()
     const debugInfo = context.getExtension('WEBGL_debug_renderer_info') as {
       UNMASKED_VENDOR_WEBGL: number
@@ -141,7 +161,7 @@ export class StageRenderHost {
       ? null
       : navigator as Navigator & { deviceMemory?: number }
     const viewport = this.getViewport()
-    return {
+    return Object.freeze({
       userAgent: browserNavigator?.userAgent ?? '',
       platform: browserNavigator?.platform ?? '',
       logicalCores: finiteOrNull(browserNavigator?.hardwareConcurrency),
@@ -154,7 +174,7 @@ export class StageRenderHost {
       webglVersion: String(context.getParameter(context.VERSION) ?? ''),
       gpuVendor: debugInfo ? String(context.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) ?? '') : null,
       gpuRenderer: debugInfo ? String(context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) ?? '') : null,
-    }
+    })
   }
 
   dispose(): void {

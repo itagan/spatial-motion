@@ -20,6 +20,10 @@ import type { InteractionController } from './InteractionController.js'
 import type { QualityController } from './QualityController.js'
 import type { RendererStateCoordinator } from './RendererStateCoordinator.js'
 import type { StageContentState } from './StageContentState.js'
+import {
+  ContentTransformPool,
+  type ContentTransformPoolStats,
+} from './ContentTransformPool.js'
 
 export interface StageContentUpdateOptions<TMeta = unknown> extends TransitionOptions {
   layout?: Layout<TMeta>
@@ -42,6 +46,8 @@ interface StageContentCoordinatorOptions<TMeta> {
 
 export class StageContentCoordinator<TMeta = unknown> {
   readonly items: ItemCoordinator<TMeta>
+  private readonly transformPool = new ContentTransformPool()
+  private retainedTransforms: TransformBuffer | null = null
 
   constructor(private readonly options: StageContentCoordinatorOptions<TMeta>) {
     this.items = new ItemCoordinator({
@@ -60,10 +66,17 @@ export class StageContentCoordinator<TMeta = unknown> {
 
   invalidate(): void {
     this.items.invalidate()
+    this.retainedTransforms = null
+    this.transformPool.dispose()
+  }
+
+  getTransformPoolStats(): ContentTransformPoolStats {
+    return this.transformPool.getStats()
   }
 
   async setItems(items: readonly MotionItem<TMeta>[]): Promise<void> {
     await this.items.flushPatches()
+    if (this.options.isDestroyed()) return
     return this.setItemsInternal(items)
   }
 
@@ -75,9 +88,18 @@ export class StageContentCoordinator<TMeta = unknown> {
       items,
       this.options.quality.getProfile().maxVisibleItems,
     )
-    const nextTransforms = createIdentityBuffer(prepared.visibleItems.length)
-    const applied = await this.options.renderer.setItems(prepared.visibleItems)
-    if (!applied || !this.items.isCurrent(revision)) return
+    const nextTransforms = this.acquireIdentityBuffer(prepared.visibleItems.length)
+    let applied: boolean
+    try {
+      applied = await this.options.renderer.setItems(prepared.visibleItems)
+    } catch (error) {
+      this.transformPool.release(nextTransforms)
+      throw error
+    }
+    if (!applied || !this.items.isCurrent(revision)) {
+      this.transformPool.release(nextTransforms)
+      return
+    }
     this.commitItems(prepared.sourceItems, prepared.visibleItems, nextTransforms)
   }
 
@@ -86,6 +108,7 @@ export class StageContentCoordinator<TMeta = unknown> {
     options: StageContentUpdateOptions<TMeta>,
   ): Promise<boolean> {
     await this.items.flushPatches()
+    if (this.options.isDestroyed()) return false
     return this.updateItemsInternal(items, options)
   }
 
@@ -108,29 +131,38 @@ export class StageContentCoordinator<TMeta = unknown> {
     const state = this.options.state
     const now = performance.now()
     const current = this.options.resolveTransformBuffer(now)
-    const previousById = new Map(
-      state.items.map((item, index) => [item.id, index]),
-    )
     const currentEffect = preserveEffect ? this.options.effects.getToken() : null
     const revision = this.items.beginOperation()
     this.options.motion.cancel('interrupted')
     if (!preserveEffect) this.options.effects.deactivate()
-    state.transforms = new TransformBuffer().copyFromBuffer(current)
+    const snapshot = this.transformPool.acquire(current.count).copyFromBuffer(current)
+    state.transforms = snapshot
+    this.releaseRetainedTransforms()
     this.options.renderer.setTransforms(state.transforms)
 
     const prepared = this.items.prepareItems(
       items,
       this.options.quality.getProfile().maxVisibleItems,
     )
-    const nextTransforms = createIdentityBuffer(prepared.visibleItems.length)
+    const nextTransforms = this.acquireIdentityBuffer(prepared.visibleItems.length)
     prepared.visibleItems.forEach((item, index) => {
-      const previous = previousById.get(item.id)
-      if (previous !== undefined && previous < current.count) {
-        nextTransforms.setFromBuffer(index, current, previous)
+      const previous = state.getItemIndex(item.id)
+      if (previous !== undefined && previous < snapshot.count) {
+        nextTransforms.setFromBuffer(index, snapshot, previous)
       }
     })
-    const applied = await this.options.renderer.setItems(prepared.visibleItems)
-    if (!applied || !this.items.isCurrent(revision)) return false
+    let applied: boolean
+    try {
+      applied = await this.options.renderer.setItems(prepared.visibleItems)
+    } catch (error) {
+      this.finishRejectedUpdate(revision, snapshot, nextTransforms)
+      throw error
+    }
+    if (!applied || !this.items.isCurrent(revision)) {
+      this.finishRejectedUpdate(revision, snapshot, nextTransforms)
+      return false
+    }
+    this.transformPool.release(snapshot)
     this.commitItems(prepared.sourceItems, prepared.visibleItems, nextTransforms)
 
     const targetLayout = options.layout ?? state.lastLayout
@@ -140,7 +172,7 @@ export class StageContentCoordinator<TMeta = unknown> {
           targetLayout,
           state.items.length,
           this.options.getLayoutContext(),
-          new TransformBuffer(),
+          nextTransforms,
         )
         this.options.renderer.setTransforms(state.transforms)
         if (options.layout) state.lastLayout = options.layout
@@ -189,7 +221,7 @@ export class StageContentCoordinator<TMeta = unknown> {
     )
     if (!applied || !this.items.isCurrent(revision)) return false
     state.sourceItems = prepared.sourceItems
-    state.items = prepared.visibleItems
+    state.setItems(prepared.visibleItems)
     state.inputItemCount = prepared.sourceItems.length
     state.visibleRatio = state.items.length
       ? Math.min(1, this.options.quality.getProfile().maxVisibleItems / state.items.length)
@@ -222,22 +254,47 @@ export class StageContentCoordinator<TMeta = unknown> {
   ): void {
     const state = this.options.state
     state.sourceItems = sourceItems
-    state.items = items
+    state.setItems(items)
     state.inputItemCount = sourceItems.length
     state.transforms = transforms
+    this.retainTransforms(transforms)
     this.options.renderer.setVisualState(state.getVisualState())
     this.options.renderer.setTransforms(transforms)
     state.visibleRatio = 1
     this.options.renderer.setVisibleRatio(1)
     this.options.interaction.syncItems()
   }
-}
 
-function createIdentityBuffer(count: number): TransformBuffer {
-  const buffer = new TransformBuffer(count)
-  buffer.scales.fill(0.01, 0, count)
-  buffer.opacities.fill(1, 0, count)
-  return buffer
+  private acquireIdentityBuffer(count: number): TransformBuffer {
+    const buffer = this.transformPool.acquire(count)
+    buffer.positions.fill(0, 0, count * 3)
+    buffer.rotations.fill(0, 0, count * 3)
+    buffer.scales.fill(0.01, 0, count)
+    buffer.opacities.fill(1, 0, count)
+    return buffer
+  }
+
+  private finishRejectedUpdate(
+    revision: number,
+    snapshot: TransformBuffer,
+    next: TransformBuffer,
+  ): void {
+    this.transformPool.release(next)
+    if (this.items.isCurrent(revision)) this.retainTransforms(snapshot)
+    else this.transformPool.release(snapshot)
+  }
+
+  private retainTransforms(buffer: TransformBuffer): void {
+    if (this.retainedTransforms === buffer) return
+    this.releaseRetainedTransforms()
+    this.retainedTransforms = buffer
+  }
+
+  private releaseRetainedTransforms(): void {
+    if (!this.retainedTransforms) return
+    this.transformPool.release(this.retainedTransforms)
+    this.retainedTransforms = null
+  }
 }
 
 function isBatchableItemUpdate(options: StageContentUpdateOptions): boolean {
