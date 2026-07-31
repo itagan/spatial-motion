@@ -160,3 +160,8 @@ Program 成功动态准备并保持 1 Canvas、1 Mesh、1 Draw Call，状态面�
 submitted 和 1 cached Program；返回球体、hover 和公共 Atlas 管线正常。2000/high
 的 steady、transition-stress、interaction-stress P95 分别为 18.23/18.35/18.35ms，
 均约 60 FPS、0 个 24/33/50ms 长帧和主体 1 Draw Call；浏览器无 warning/error。
+
+2026-08-01 已完成 Array Atlas 自适应上传复验：2000/high/cold-start 有界面 Chromium
+三轮均保持 60 FPS、P95 17.6–17.7ms、0 个 24/33/50ms 长帧和主体 1 Draw Call；
+250 层在 9 个上传帧完成，预算升至 3 MiB 且无退避，首次提交 2.0–2.5ms。无头
+Chromium 的低帧率调度下预算保持 768 KiB，没有为缩短上传时间继续制造压力。

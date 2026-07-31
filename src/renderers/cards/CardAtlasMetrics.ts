@@ -2,6 +2,7 @@ import type {
   TextureAtlasMetrics,
   TextureAtlasResult,
 } from '../textureAtlas.js'
+export { ArrayAtlasUploadPolicy } from './CardAtlasUploadPolicy.js'
 
 export class CardAtlasMetrics {
   textureBytes = 0
