@@ -31,7 +31,12 @@ npm run benchmark:matrix -- \
 
 推荐选择同一环境、实例数和布局下通过全部要求场景的最高档。通过条件与默认
 `AdaptivePerformanceManager` 的降级边界一致：平均 FPS 不低于目标的 78%、P95 不
-超过该 FPS 对应的帧预算、33ms 长帧比例低于 8%，并保持主体 1 Draw Call 和有效提交。
+超过该 FPS 对应的帧预算、33ms 长帧比例低于 8%，并保持主体 1 Draw Call。resident 与
+submitted 必须等于该档 `min(inputItems, maxVisibleItems)`，防止部分实例证据被误判通过。
+`--items` 不受 Benchmark 页面预设按钮限制，可直接用于 3000、5000、10000 等拐点探测。
+默认档位仍会执行自身的实例上限；仅在定位 High 全量渲染拐点时，可显式传入
+`--high-max-visible-items 10000`。该参数及覆盖后的实例覆盖要求会写入结果，不能与默认
+High 结果混为一组发布基线。
 仅有 `steady` 结果表示初步建议；调整默认质量档前至少应同时采集
 `transition-stress`，并在目标硬件上复验视觉效果。
 

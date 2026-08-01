@@ -621,7 +621,20 @@ Chromium 151、ANGLE Metal Renderer: Apple M4、DPR 2；请求窗口为 1265×63
 档的裁剪策略一致：High 提交全部实例，Medium 最多 1000，Low 最多 500。三个规模下
 High 均同时通过平均 FPS、P95、33ms 长帧比例和提交有效性门槛，因此该环境建议 High。
 
-这份矩阵证明 2000 项尚未触及 Apple M4 的稳定帧性能边界，不能据此提高所有设备的
-默认档位。下一轮应扩展到 3000/5000/10000 项以定位本机拐点，并优先补齐 Intel 集显、
-Android 中低端 GPU 和 iOS Safari 的同规格证据；在至少覆盖一个桌面低端与一个移动端
-环境前，不调整运行时默认质量参数。
+这份矩阵证明默认 High 的 2000 项上限尚未触及 Apple M4 的稳定帧性能边界，不能据此
+提高所有设备的默认档位。矩阵校准随后增加实例覆盖校验：每档必须恰好 resident/submitted
+`min(inputItems, maxVisibleItems)`，避免把“输入 10000、实际只渲染 2000”误读为 10000
+项全量性能。
+
+开发基准提供显式 `--high-max-visible-items`，只用于绕过默认 High 上限寻找硬件边界，
+不会改变库的默认配置。3000/5000/10000 项全量 High 的 3 秒探测均约 60 FPS；纹理占用
+分别为 35.89/59.81/119.63 MiB，渐进上传分别需要 13/34/76 个实际上传帧。10000 项随后
+完成 10 秒正式 steady 与 transition-stress 复测：两者均为 60.0 FPS、P95 18.4ms、
+P99 18.60–18.65ms、0 个 24/33/50ms 长帧、1 Draw Call，并完整 resident/submitted
+10000 项。结果保存在
+`benchmarks/results/2026-08-01-apple-m4-10000-uncapped-quality-matrix.json`。
+
+全量稳态帧率仍未触及 M4 拐点，但 10000 项纹理已经达到默认 2000 项约五倍；当前约束
+首先是内容与纹理容量，而不是 Draw Call 或逐帧 CPU。默认 2000 上限保持不变。下一步
+优先补齐 Intel 集显、Android 中低端 GPU 和 iOS Safari 的同规格证据，并增加冷启动/
+内存压力边界；在至少覆盖一个桌面低端与一个移动端环境前，不调整默认质量参数。

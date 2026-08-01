@@ -1,9 +1,9 @@
 const qualityOrder = ['high', 'medium', 'low']
 
 export const qualityCalibrationProfiles = Object.freeze({
-  high: Object.freeze({ targetFps: 60 }),
-  medium: Object.freeze({ targetFps: 45 }),
-  low: Object.freeze({ targetFps: 30 }),
+  high: Object.freeze({ targetFps: 60, maxVisibleItems: 2000 }),
+  medium: Object.freeze({ targetFps: 45, maxVisibleItems: 1000 }),
+  low: Object.freeze({ targetFps: 30, maxVisibleItems: 500 }),
 })
 
 const degradeThreshold = 0.78
@@ -15,7 +15,7 @@ export function buildQualityCalibration(results, options = {}) {
     throw new TypeError('Quality calibration requires benchmark results')
   }
   const requiredScenarios = normalizeScenarios(options.requiredScenarios ?? ['steady'])
-  const evaluations = results.map(evaluateQualityRun)
+  const evaluations = results.map((result) => evaluateQualityRun(result, options))
   const groups = new Map()
 
   evaluations.forEach((evaluation) => {
@@ -75,13 +75,17 @@ export function buildQualityCalibration(results, options = {}) {
   }
 }
 
-export function evaluateQualityRun(result) {
+export function evaluateQualityRun(result, options = {}) {
   assertBenchmarkResult(result)
   const quality = result.configuration.qualityMode
   if (!qualityOrder.includes(quality)) {
     throw new TypeError('Quality calibration requires a fixed qualityMode')
   }
-  const profile = qualityCalibrationProfiles[quality]
+  const profile = {
+    ...qualityCalibrationProfiles[quality],
+    maxVisibleItems: options.maxVisibleItems?.[quality]
+      ?? qualityCalibrationProfiles[quality].maxVisibleItems,
+  }
   const minimumFps = profile.targetFps * degradeThreshold
   const frameBudgetMs = 1000 / minimumFps
   const estimatedFrames = Math.max(
@@ -92,11 +96,14 @@ export function evaluateQualityRun(result) {
   )
   const longFrameRatio = result[longFrameField] / estimatedFrames
   const failures = []
+  const expectedItems = Math.min(result.configuration.itemCount, profile.maxVisibleItems)
   if (result.averageFps < minimumFps) failures.push('AVERAGE_FPS')
   if (result.maximumFrameTimeP95 > frameBudgetMs) failures.push('FRAME_TIME_P95')
   if (longFrameRatio >= maximumLongFrameRatio) failures.push('LONG_FRAME_RATIO')
   if (result.maximumDrawCalls > 1) failures.push('DRAW_CALLS')
-  if (result.renderedItems <= 0 || result.submittedItems <= 0) failures.push('NO_SUBMITTED_ITEMS')
+  if (result.renderedItems !== expectedItems || result.submittedItems !== expectedItems) {
+    failures.push('INSTANCE_COVERAGE')
+  }
   if (!result.configuration.environment) failures.push('MISSING_ENVIRONMENT')
   return {
     result,
@@ -104,6 +111,7 @@ export function evaluateQualityRun(result) {
     targetFps: profile.targetFps,
     minimumFps,
     frameBudgetMs,
+    expectedItems,
     longFrameField,
     maximumLongFrameRatio,
     longFrameRatio,

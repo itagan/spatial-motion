@@ -10,7 +10,11 @@ import { buildQualityCalibration } from './quality-calibration.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const options = parseArguments(process.argv.slice(2))
-const baseUrl = `http://127.0.0.1:${options.port}/benchmark.html`
+const benchmarkUrl = new URL(`http://127.0.0.1:${options.port}/benchmark.html`)
+if (options.highMaxVisibleItems !== undefined) {
+  benchmarkUrl.searchParams.set('highMaxVisibleItems', String(options.highMaxVisibleItems))
+}
+const baseUrl = benchmarkUrl.href
 let server = null
 let browser = null
 
@@ -52,9 +56,9 @@ try {
 
   const results = []
   for (const itemCount of options.itemCounts) {
-    await page.locator(`[data-count="${itemCount}"]`).click()
+    await configureBenchmark(page, { itemCount })
     for (const quality of options.qualities) {
-      await page.locator(`[data-quality="${quality}"]`).click()
+      await configureBenchmark(page, { qualityMode: quality })
       await page.waitForFunction(
         ({ count, mode }) => {
           const items = document.querySelector('#metric-items')?.textContent ?? ''
@@ -98,6 +102,9 @@ try {
 
   const calibration = buildQualityCalibration(results, {
     requiredScenarios: options.scenarios,
+    maxVisibleItems: options.highMaxVisibleItems === undefined
+      ? undefined
+      : { high: options.highMaxVisibleItems },
   })
   const output = {
     version: 1,
@@ -115,6 +122,7 @@ try {
       scenarios: options.scenarios,
       viewport: options.viewport,
       deviceScaleFactor: options.deviceScaleFactor,
+      highMaxVisibleItems: options.highMaxVisibleItems ?? null,
     },
     results,
     calibration,
@@ -155,6 +163,10 @@ function parseArguments(args) {
     port: positiveInteger(read('--port', '4174'), '--port'),
     headed: args.includes('--headed'),
     verbose: args.includes('--verbose'),
+    highMaxVisibleItems: optionalPositiveInteger(
+      read('--high-max-visible-items', undefined),
+      '--high-max-visible-items',
+    ),
   }
 }
 
@@ -192,6 +204,10 @@ function positiveNumber(value, name) {
   return parsed
 }
 
+function optionalPositiveInteger(value, name) {
+  return value === undefined ? undefined : positiveInteger(value, name)
+}
+
 async function isReachable(url) {
   try {
     return (await fetch(url)).ok
@@ -224,6 +240,15 @@ function resolveRevision(directory) {
   } catch {
     return 'unknown'
   }
+}
+
+async function configureBenchmark(page, configuration) {
+  await page.evaluate(async (nextConfiguration) => {
+    if (!window.__spatialMotionBenchmarkConfigure) {
+      throw new Error('Benchmark page does not expose its configuration hook')
+    }
+    await window.__spatialMotionBenchmarkConfigure(nextConfiguration)
+  }, configuration)
 }
 
 function assertNoPageErrors(pageErrors) {

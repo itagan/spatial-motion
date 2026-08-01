@@ -17,6 +17,7 @@ const environment = {
 }
 
 function result(qualityMode, overrides = {}) {
+  const submittedItems = qualityMode === 'low' ? 500 : 1000
   return {
     version: 1,
     configuration: {
@@ -34,8 +35,8 @@ function result(qualityMode, overrides = {}) {
     longFramesOver33Ms: 0,
     longFramesOver50Ms: 0,
     maximumDrawCalls: 1,
-    renderedItems: 1000,
-    submittedItems: 1000,
+    renderedItems: submittedItems,
+    submittedItems,
     ...overrides,
   }
 }
@@ -55,6 +56,25 @@ test('evaluates each fixed quality against its own frame envelope', () => {
     'FRAME_TIME_P95',
     'LONG_FRAME_RATIO',
   ])
+
+  const incomplete = evaluateQualityRun(result('high', { submittedItems: 999 }))
+  assert.deepEqual(incomplete.failures, ['INSTANCE_COVERAGE'])
+
+  const capped = evaluateQualityRun(result('low', {
+    configuration: { ...result('low').configuration, itemCount: 2000 },
+    renderedItems: 500,
+    submittedItems: 500,
+  }))
+  assert.equal(capped.expectedItems, 500)
+  assert.equal(capped.passed, true)
+
+  const overridden = evaluateQualityRun(result('high', {
+    configuration: { ...result('high').configuration, itemCount: 3000 },
+    renderedItems: 3000,
+    submittedItems: 3000,
+  }), { maxVisibleItems: { high: 3000 } })
+  assert.equal(overridden.expectedItems, 3000)
+  assert.equal(overridden.passed, true)
 })
 
 test('recommends the highest passing quality with complete scenario evidence', () => {
