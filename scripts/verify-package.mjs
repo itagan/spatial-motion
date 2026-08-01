@@ -49,6 +49,12 @@ const requiredExports = [
   './renderers/points',
   './dev',
 ]
+const frozenExportPaths = [...requiredExports, './package.json'].sort()
+const declaredExportPaths = Object.keys(packageJson.exports ?? {}).sort()
+assert(
+  JSON.stringify(declaredExportPaths) === JSON.stringify(frozenExportPaths),
+  `Public export paths changed from the frozen baseline: ${declaredExportPaths.join(', ')}`,
+)
 for (const exportPath of requiredExports) {
   const declaration = packageJson.exports?.[exportPath]
   assert(declaration?.types && declaration?.import, `Missing typed ESM export: ${exportPath}`)
@@ -203,6 +209,78 @@ try {
       import('${packageName}/experimental-renderer'),
       (error) => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED',
     )
+    const businessItems = [
+      { id: 'north', meta: { lane: 0, score: 80 } },
+      { id: 'south', meta: { lane: 1, score: 45 } },
+    ]
+    const businessLayout = layouts.defineLayout({
+      name: 'package-business-layout',
+      calculateInto(count, context, target) {
+        target.resize(count)
+        for (let index = 0; index < count; index += 1) {
+          const meta = context.items?.[index]?.meta
+          target.setValues(index, meta?.lane ?? 0, meta?.score ?? 0, 0, 1, 0, 0, 0, 1)
+        }
+      },
+    })
+    const businessLayoutReport = dev.validateLayout(businessLayout, {
+      counts: [businessItems.length],
+      contexts: [{ width: 100, height: 100, items: businessItems }],
+      itemBounds: null,
+    })
+    assert.equal(businessLayoutReport.valid, true)
+    assert.equal(businessLayout.calculate(2, {
+      width: 100,
+      height: 100,
+      items: businessItems,
+    })[0].y, 80)
+
+    const { BufferGeometry, Float32BufferAttribute, Points, PointsMaterial } = await import('three')
+    const customRendererFactory = core.defineMotionRenderer(({ root, signal }) => {
+      const geometry = new BufferGeometry()
+      geometry.setAttribute('position', new Float32BufferAttribute([0, 0, 0], 3))
+      const material = new PointsMaterial()
+      const object = new Points(geometry, material)
+      root.add(object)
+      let itemCount = 0
+      let disposed = false
+      const dispose = () => {
+        if (disposed) return
+        disposed = true
+        signal.removeEventListener('abort', dispose)
+        root.remove(object)
+        geometry.dispose()
+        material.dispose()
+      }
+      signal.addEventListener('abort', dispose, { once: true })
+      return {
+        descriptor: { itemBounds: null },
+        capabilities: {},
+        async setItems(items) { itemCount = items.length; return !disposed },
+        setTransforms(buffer) { assert.equal(buffer.count, itemCount) },
+        prepareTransition(from, to) {
+          assert.equal(from.count, itemCount)
+          assert.equal(to.count, itemCount)
+        },
+        setProgress(progress) { assert.equal(Number.isFinite(progress), true) },
+        setVisibleRatio(ratio) { assert.equal(Number.isFinite(ratio), true) },
+        getStats() {
+          return {
+            instanceCount: disposed ? 0 : itemCount,
+            submittedInstanceCount: disposed ? 0 : itemCount,
+            gpuBytes: disposed ? 0 : geometry.getAttribute('position').array.byteLength,
+          }
+        },
+        dispose,
+      }
+    })
+    const customRendererReport = await dev.validateMotionRenderer(customRendererFactory, {
+      items: businessItems,
+      cycles: 3,
+    })
+    assert.equal(customRendererReport.valid, true)
+    assert.equal(customRendererReport.samples.finalInstanceCount, businessItems.length)
+    assert.equal(customRendererReport.samples.peakObjects, 2)
   `)
   run(process.execPath, ['runtime-check.mjs'], consumer)
 

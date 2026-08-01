@@ -46,6 +46,11 @@
 - `MotionRenderer` 成为稳定 Core 契约，新增 `core`、Cards、Points 和逐布局按需入口。
 - 新增 `defineLayout()`，为自定义布局提供冻结对象与 Transform 输出验证。
 - 新增按需 `dev` 入口，可验证自定义 Renderer/Layout 并生成批量边界、法线和顶部方向调试对象。
+- 新增只使用稳定入口的 `custom-renderer-layout` 案例：业务 Layout 直接写入 SoA
+  Buffer，自定义单批次 Renderer 负责 GPU 过渡、质量裁剪、统计和幂等资源释放；
+  真实 tgz 消费者会运行同类协议并对公共子路径执行冻结白名单检查。
+- 新增仓库级 `benchmark:matrix` 采集器和质量校准测试；按 GPU、视口与 DPR 隔离
+  high/medium/low 证据，并使用默认自适应降级边界生成最高稳定档建议，不新增包导出。
 - Benchmark Atlas 指标新增 prepare、图片墙钟、单元绘制和像素 readback 分段耗时，便于定位冷启动瓶颈。
 - Cards `resolution` 新增 `'auto'`，内置默认卡片超过 1024 项时使用 48px；新增 `mipmaps` 开关及实际分辨率/mipmap Renderer 指标。
 - 默认图片卡片可将去重后的图片转换为可转移 `ImageBitmap`，在 OffscreenCanvas Worker 中完成首次 Atlas 绘制与 readback；Benchmark 同步报告位图解码和纹理预热成本。

@@ -3,6 +3,7 @@ import {
   compareBenchmarkResults,
   parseBenchmarkResult,
   MotionStage,
+  qualityProfiles,
   cardsRenderer,
   box,
   cone,
@@ -62,6 +63,9 @@ const requestedMipmaps = mipmapsParameter === '1'
   ? true
   : mipmapsParameter === '0' ? false : undefined
 const requestedTexturePrewarm = resolveTexturePrewarm(benchmarkParameters.get('prewarm'))
+const requestedHighMaxVisibleItems = resolvePositiveInteger(
+  benchmarkParameters.get('highMaxVisibleItems'),
+)
 const atlasParameter = benchmarkParameters.get('atlas')
 const requestedAtlasMode = atlasParameter === 'single'
   || atlasParameter === 'array'
@@ -77,6 +81,14 @@ const stage = new MotionStage({
     atlasMode: requestedAtlasMode,
   }),
   quality: 'auto',
+  qualityProfiles: requestedHighMaxVisibleItems === undefined
+    ? undefined
+    : {
+        high: {
+          ...qualityProfiles.high,
+          maxVisibleItems: requestedHighMaxVisibleItems,
+        },
+      },
   adaptivePerformance: true,
   hoverEffect: 'highlight',
 })
@@ -84,6 +96,19 @@ let itemCount = 500
 let qualityMode: QualityMode = 'auto'
 let layoutName = 'sphere'
 let lastResult: BenchmarkResult | null = null
+declare global {
+  interface Window {
+    __spatialMotionBenchmarkResult?: BenchmarkResult
+    __spatialMotionBenchmarkConfigure?: (configuration: {
+      itemCount?: number
+      qualityMode?: QualityMode
+    }) => Promise<void>
+    __spatialMotionBenchmarkDiagnostics?: {
+      firstRenderSubmitMs: number
+      operations: number
+    }
+  }
+}
 let baselineResult: BenchmarkResult | null = null
 let runTimer = 0
 let sampleTimer = 0
@@ -112,20 +137,21 @@ const stressSequence = [
 await stage.setItems(createItems(itemCount))
 stage.autoRotate({ y: 0.24 })
 await stage.to(layouts[layoutName], { duration: 900 })
+window.__spatialMotionBenchmarkConfigure = configureBenchmark
 
 document.querySelectorAll<HTMLButtonElement>('[data-count]').forEach((button) => {
   button.addEventListener('click', async () => {
-    itemCount = Number(button.dataset.count)
+    await configureBenchmark({ itemCount: Number(button.dataset.count) })
     setActive('[data-count]', button)
-    await applyConfiguration()
   })
 })
 
 document.querySelectorAll<HTMLButtonElement>('[data-quality]').forEach((button) => {
   button.addEventListener('click', async () => {
-    qualityMode = (button.dataset.quality ?? 'auto') as QualityMode
+    await configureBenchmark({
+      qualityMode: (button.dataset.quality ?? 'auto') as QualityMode,
+    })
     setActive('[data-quality]', button)
-    await applyConfiguration()
   })
 })
 
@@ -160,6 +186,31 @@ document.querySelector<HTMLInputElement>('#import-baseline')?.addEventListener('
 
 const metricsTimer = window.setInterval(updateMetrics, 500)
 updateMetrics()
+
+async function configureBenchmark(configuration: {
+  itemCount?: number
+  qualityMode?: QualityMode
+}): Promise<void> {
+  if (configuration.itemCount !== undefined) {
+    if (!Number.isSafeInteger(configuration.itemCount) || configuration.itemCount <= 0) {
+      throw new TypeError('Benchmark itemCount must be a positive safe integer')
+    }
+    itemCount = configuration.itemCount
+  }
+  if (configuration.qualityMode !== undefined) {
+    if (!['auto', 'high', 'medium', 'low'].includes(configuration.qualityMode)) {
+      throw new TypeError('Benchmark qualityMode is unsupported')
+    }
+    qualityMode = configuration.qualityMode
+  }
+  await applyConfiguration()
+}
+
+function resolvePositiveInteger(value: string | null): number | undefined {
+  if (value === null) return undefined
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+}
 
 async function applyConfiguration(): Promise<void> {
   cancelRun('配置已更新，可以重新运行采样')
@@ -209,6 +260,7 @@ type BenchmarkScenario =
 async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
   cancelRun()
   const generation = runGeneration
+  window.__spatialMotionBenchmarkDiagnostics = undefined
   const durationSeconds = Number((document.querySelector<HTMLSelectElement>('#duration'))?.value ?? 10)
   const scenario = forcedScenario
     ?? (document.querySelector<HTMLSelectElement>('#scenario')?.value ?? 'steady') as BenchmarkScenario
@@ -250,6 +302,11 @@ async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
     runTimer = 0
     session.record(stage.getPerformanceStats(), performance.now(), benchmarkExtensionStats())
     lastResult = session.finish()
+    window.__spatialMotionBenchmarkResult = lastResult
+    window.__spatialMotionBenchmarkDiagnostics = {
+      firstRenderSubmitMs: coldStartRenderSubmitMs,
+      operations: stressOperations,
+    }
     renderResult(lastResult)
     setRunButtonsDisabled(false)
     const exportButton = document.querySelector<HTMLButtonElement>('#export-result')

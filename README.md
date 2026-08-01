@@ -452,6 +452,11 @@ await stage.setItems(items)
 
 自定义 `MotionRenderer` 只需实现数据、Transform Buffer、过渡进度、质量可见比例、统计与销毁；`setTransforms()` / `prepareTransition()` 同步消费 SoA `TransformBufferView`，可直接上传或复制到按容量复用的 TypedArray，不需要还原逐项对象。局部 patch、视觉状态、高亮、viewport、资源恢复、显式资源预热和流式特效通过 `capabilities` 按需声明。`descriptor.itemBounds` 可使用 quad、disc 或 `null`。`getPerformanceStats()` 将场景提交数据放在 `render`，将实例、GPU 字节与 Renderer 专属指标放在 `renderer`；同一同步观察周期复用规范化快照。
 
+完整的公共协议案例见 `examples/custom-renderer-layout`：自定义 Renderer 使用一个
+`THREE.LineSegments` 批量对象完成 GPU 过渡和质量裁剪，自定义 Layout 根据
+`MotionItem.meta` 分组并通过 `calculateInto()` 直写 SoA Buffer。该案例不导入任何
+`src`、`dist` 或未声明的渲染器内部路径。
+
 开发自定义 Renderer 或 Layout 时可使用独立诊断入口：
 
 ```ts
@@ -559,6 +564,18 @@ npx spatial-motion-benchmark baseline.json current.json
 npx spatial-motion-benchmark baseline.json current.json --preset transition-stress-2000-auto
 ```
 
+维护者可自动采集固定质量矩阵并生成最高稳定档建议：
+
+```bash
+npm run benchmark:matrix
+npm run benchmark:matrix -- --scenarios steady,transition-stress --duration 10 --headed
+```
+
+矩阵按 GPU、视口和设备 DPR 隔离，完整保存运行环境与原始结果。判定边界与默认
+自适应降级策略一致，同时检查平均 FPS、P95、33ms 长帧比例、Draw Call 和有效提交；
+无头 SwiftShader 数据不会被当作本机原生 GPU 结论。采集规范和已保存结果见
+`benchmarks/README.md`。
+
 默认阈值覆盖 FPS、最大帧时间、P95/P99、33ms 长帧、Stage CPU、WebGL 提交、Atlas build/patch、纹理内存与估算上传量。配置不兼容或超过阈值时命令返回非零退出码；自定义阈值可对每个指标设置 `maxRegressionPercent`、`maxRegressionAbsolute` 或两者。随包提供的六个 `--preset` 覆盖 100/500/1000/2000 实例、low/medium/high/auto 质量和四类固定场景，CLI 会拒绝与预设不一致的结果。
 
 重复提交视觉数据完全一致的列表时，渲染器会复用当前纹理图集，避免无意义的 Canvas 重绘和 GPU 纹理替换。同一 JavaScript turn 内的稳定 id 更新会合并；Cards 按项目保存内容指纹，局部更新只检查去重后的变化索引，不扫描完整名单。局部索引与指纹数组由并发安全的有界工作区池复用。高频业务可通过 `resolveContentKey(item)` 返回稳定修订号，跳过默认的 meta JSON 和样式指纹解析；调用方必须在任何可见内容变化时更新该 key。已初始化图集只上传变化单元对应的数据行，相邻单元会合并连续上传范围。Cards/Points 的 GPU Attribute 使用容量桶并原位写入，同一容量档内的布局切换不会替换 Geometry、Material 或过渡 Attribute。
@@ -582,7 +599,7 @@ Library build 使用 ESM 保留模块结构并生成 `.d.ts`/声明映射，Thre
 | 按需 card-template gzip | ≤ 12 KB | 6.0 KB（6,194 bytes） |
 | 按需 Points Renderer gzip | ≤ 12 KB | 2.8 KB（2,859 bytes） |
 | 按需开发诊断 gzip | ≤ 12 KB | 3.9 KB（3,951 bytes） |
-| npm tarball | ≤ 150 KB | 约 128.7 KiB（131,833 bytes） |
+| npm tarball | ≤ 150 KB | 约 129.7 KiB（132,785 bytes） |
 | 仅引入 `sphere()` 的消费者产物 | ≤ 8 KB | 7.8 KB（7,956 bytes） |
 
 `npm run pack:check` 会真实生成 `.tgz`，在临时消费者项目中完成安装、Node ESM 加载、严格 TypeScript 检查、未声明深层路径拦截、浏览器 Stage 构建和 Vite Tree Shaking 验证。根入口、Core-only 与 Cards-only 的预算按真实 Vite/Terser 消费产物计算，并保持 Three.js external；各输出模块 gzip 相加只保留为诊断值，不作为用户下载体积门禁。发布内容仅包含 `dist`、版本/使用文档、LICENSE 和包元数据。

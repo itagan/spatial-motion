@@ -8,6 +8,7 @@
 | [`three-extension`](./three-extension/) | 使用 `StageExtension` 挂载原生 Three.js 内容，并演示启停、质量适配和释放 |
 | [`gsap-extension`](./gsap-extension/) | 用 Stage 的 `elapsed` 驱动 paused GSAP timeline，并响应启停与低动态模式 |
 | [`custom-card-effect`](./custom-card-effect/) | 注册业务 Cards GPU Program，上传私有 Attribute / Uniform，并保持单 Draw Call |
+| [`custom-renderer-layout`](./custom-renderer-layout/) | 只用公共协议实现单 Draw Call 指标条 Renderer，以及读取业务 meta 的 Buffer-native Layout |
 | [`lottery-screen`](./lottery-screen/) | Vue 3 抽奖大屏：奖项/轮次、开始停止、多人揭晓、排除、历史、撤销、名单导入、本地恢复和中奖 CSV 导出 |
 
 在仓库根目录运行：
@@ -23,6 +24,7 @@ npm run dev:examples
 - `/three-extension/`
 - `/gsap-extension/`
 - `/custom-card-effect/`
+- `/custom-renderer-layout/`
 - `/lottery-screen/`
 
 生产构建使用 `npm run build:examples`，输出到 `dist-examples/`。示例从正式包名 `@itagan/spatial-motion` 导入，构建前需要先生成根包的 `dist/`；根级 `npm run build` 已按正确顺序执行。

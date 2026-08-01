@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spatial Motion · Custom renderer and layout</title>
+  </head>
+  <body>
+    <main class="example">
+      <header>
+        <div><h1>Custom renderer + layout</h1><p>公开协议驱动单 Draw Call 指标条，并按业务 meta 分组布局。</p></div>
+        <span id="status" class="status">loading</span>
+      </header>
+      <section id="stage" class="stage" aria-label="Custom renderer and layout stage"></section>
+      <footer>
+        <div class="controls">
+          <button id="business">业务分组</button>
+          <button id="sphere">球体</button>
+        </div>
+        <p>Renderer 同步消费 TransformBufferView；Layout 直接写入复用 SoA Buffer。</p>
+      </footer>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

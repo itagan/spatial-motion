@@ -571,3 +571,102 @@ tarball 消费和 Chromium WebGL 门禁全部通过。root/Core/Cards-only 为
 37,065/15,251/9,888 bytes gzip，layout-only 为 7,956 bytes，tarball 为
 131,833 bytes；Cards 在 10 KiB 上限下剩余 352 bytes，下一阶段应优先拆分 Effect
 Runtime，而不是提高预算。
+
+## 2026-08-01 发布候选 API Freeze 验收
+
+新增 `examples/custom-renderer-layout`，只从稳定包入口与 Three.js peer dependency
+导入。业务 Layout 根据 `MotionItem.meta` 分组并直接写入 `TransformBuffer`；自定义
+Renderer 使用单个 `LineSegments`、容量复用 Attribute、GPU 过渡和质量裁剪，完整
+实现统计、context restore 与幂等释放。
+
+真实 tgz 消费者会运行自定义 Layout/Renderer 诊断，验证业务 meta、Buffer count、
+三轮容量变化及销毁后无对象残留；包检查同时冻结 `package.json#exports` 子路径白名单。
+本地 Chromium 的业务分组与 Sphere 往返均为 1 Canvas、1 Draw Call、180 submitted、
+34,816 GPU bytes，控制台无 warning/error。完整验证为 36 个测试文件、395 项测试；
+root/Core/Cards-only 分别为 37,065/15,251/9,888 bytes gzip，tarball 132,785 bytes。
+
+## 2026-08-01 多环境质量矩阵基础
+
+仓库新增 `benchmark:matrix`，自动遍历固定实例数与 high/medium/low，保存完整环境、
+原始 `BenchmarkResult` 和按环境隔离的建议。判定与默认自适应降级边界保持一致：
+平均 FPS 不低于目标的 78%，P95 不超过该 FPS 的帧预算，33ms 长帧比例低于 8%，
+同时要求主体 1 Draw Call 和有效提交。该工具只属于仓库工作流，没有改变已冻结的
+包入口或运行时 API。
+
+首份 1265×633、DPR 1、Chromium 151 无头 SwiftShader 的 3 秒 steady 矩阵保存在
+`benchmarks/results/2026-08-01-swiftshader-quality-matrix.json`。500 项 High 为 87.4
+FPS / P95 17.9ms，建议 High；1000 项 High 的 P95 为 27.1ms，Medium 为 73.6 FPS /
+P95 27.1ms，建议 Medium；2000 项 High 为 51.9 FPS / P95 28.3ms，Medium 为 70.1
+FPS / P95 26.7ms，建议 Medium。所有运行保持 1 Draw Call。
+
+这些数字只证明采集与建议闭环，并暴露出软件渲染随短采样产生的调度波动；不能用于
+修改 Apple M4 或其他原生 GPU 默认档位。正式校准仍需目标硬件的 10 秒 steady +
+transition-stress、有界面模式和长时间视觉验收。
+
+## 2026-08-01 Apple M4 原生 GPU 质量矩阵
+
+首份原生 GPU 正式矩阵保存在
+`benchmarks/results/2026-08-01-apple-m4-chromium-quality-matrix.json`。采集使用有界面
+Chromium 151、ANGLE Metal Renderer: Apple M4、DPR 2；请求窗口为 1265×633，浏览器
+实际内容视口为 1250×625。500/1000/2000 项分别遍历 High、Medium、Low，每档同时运行
+10 秒 steady 与 transition-stress，共 18 组。
+
+| 实例数 | 建议档位 | High steady | High transition-stress | High 实际提交 |
+| ---: | --- | --- | --- | ---: |
+| 500 | High | 60.0 FPS / P95 17.7ms | 60.0 FPS / P95 17.7ms | 500 |
+| 1000 | High | 60.0 FPS / P95 17.5ms | 60.0 FPS / P95 17.5ms | 1000 |
+| 2000 | High | 60.0 FPS / P95 17.6ms | 60.0 FPS / P95 17.6ms | 2000 |
+
+18 组均为主体 1 Draw Call、0 个 24/33/50ms 长帧，且 rendered/submitted 与各质量
+档的裁剪策略一致：High 提交全部实例，Medium 最多 1000，Low 最多 500。三个规模下
+High 均同时通过平均 FPS、P95、33ms 长帧比例和提交有效性门槛，因此该环境建议 High。
+
+这份矩阵证明默认 High 的 2000 项上限尚未触及 Apple M4 的稳定帧性能边界，不能据此
+提高所有设备的默认档位。矩阵校准随后增加实例覆盖校验：每档必须恰好 resident/submitted
+`min(inputItems, maxVisibleItems)`，避免把“输入 10000、实际只渲染 2000”误读为 10000
+项全量性能。
+
+开发基准提供显式 `--high-max-visible-items`，只用于绕过默认 High 上限寻找硬件边界，
+不会改变库的默认配置。3000/5000/10000 项全量 High 的 3 秒探测均约 60 FPS；纹理占用
+分别为 35.89/59.81/119.63 MiB，渐进上传分别需要 13/34/76 个实际上传帧。10000 项随后
+完成 10 秒正式 steady 与 transition-stress 复测：两者均为 60.0 FPS、P95 18.4ms、
+P99 18.60–18.65ms、0 个 24/33/50ms 长帧、1 Draw Call，并完整 resident/submitted
+10000 项。结果保存在
+`benchmarks/results/2026-08-01-apple-m4-10000-uncapped-quality-matrix.json`。
+
+全量稳态帧率仍未触及 M4 拐点，但 10000 项纹理已经达到默认 2000 项约五倍；当前约束
+首先是内容与纹理容量，而不是 Draw Call 或逐帧 CPU。默认 2000 上限保持不变。下一步
+优先补齐 Intel 集显、Android 中低端 GPU 和 iOS Safari 的同规格证据，并增加冷启动/
+内存压力边界；在至少覆盖一个桌面低端与一个移动端环境前，不调整默认质量参数。
+
+同环境随后运行 2000/5000/10000 项全量 High、10 秒 cold-start 矩阵。采集器新增独立
+`runDiagnostics`，保存页面在重建后连续两个 RAF 内捕获的首次真实提交峰值，避免 500ms
+性能样本漏过纹理首传。
+
+| 实例数 | Atlas build / readback | 首次提交 | 纹理 | 上传帧 |
+| ---: | ---: | ---: | ---: | ---: |
+| 2000 | 81.8 / 28.0ms | 1.9ms | 23.93 MiB | 18 |
+| 5000 | 97.8 / 56.8ms | 1.9ms | 59.81 MiB | 60 |
+| 10000 | 173.2 / 111.6ms | 2.0ms | 119.63 MiB | 144 |
+
+三档均约 60 FPS、P95 17.6–17.7ms、P99 17.65–17.70ms、0 个 24/33/50ms 长帧，
+并在采样结束前完整上传、resident/submitted 全量实例。Worker 隔离了随容量增长的绘制与
+readback，分页上传也把首次提交稳定在 2ms 内；当前无需改动提交策略。下一轮针对大容量
+内存应评估更低的自动 resolution 或业务侧内容分页，但必须以清晰度验收为前提，不能仅
+为 10000 项非默认场景牺牲默认 2000 项画质。结果保存在
+`benchmarks/results/2026-08-01-apple-m4-uncapped-cold-start-matrix.json`。
+
+10000 项全量 High 随后显式对照 48/40/32px，每组运行 10 秒 cold-start；该参数只作用于
+Benchmark 页面，不改变 Cards 的默认 `auto` 分辨率。
+
+| 分辨率 | Atlas build / readback | 首次提交 | 纹理 | 上传帧 | 相对 48px 纹理 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 48px | 183.0 / 102.5ms | 1.8ms | 119.63 MiB | 84 | 基线 |
+| 40px | 146.5 / 75.0ms | 1.7ms | 87.89 MiB | 64 | -26.5% |
+| 32px | 133.6 / 64.4ms | 1.8ms | 61.04 MiB | 42 | -49.0% |
+
+三组均为 60 FPS、P95 17.5ms、0 长帧并完成全部层上传。有界面 Chromium 固定使用
+500 项 Grid 近景对照：40px 基本保留 48px 的头像轮廓、金色边缘和编号可辨识度；32px
+的小字号编号与细边缘已经明显变软，页面无 warning/error。结论是 40px 可作为业务明确
+接受画质折中后的超大容量显式选项，32px 不进入自动策略；默认 High/2000 项继续使用
+现有 auto→48px，不因非默认 10000 项场景降低画质。
