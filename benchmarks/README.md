@@ -66,6 +66,10 @@ DPR 至少 2，并匹配真实 Adreno/Mali/PowerVR/Immortalis 或 Apple GPU。UA
 dirty、缺少 `sourceRevision` 或不是 7–40 位 Git 十六进制 SHA 的结果只记作
 `development-only`，不会满足正式门禁。报告还通过 `git cat-file` 确认证据 SHA 对应当前
 仓库中真实存在的 commit；格式正确但不存在的字符串同样不能成为正式基线。
+证据 SHA 到当前 HEAD 之间的 `src`、`demo`、依赖锁、Vite 构建配置、矩阵采集器、真实设备
+导入语义或质量/稳定性算法也必须无变化；任一相关路径改变会显示 `revision:stale` 并降为
+开发证据。这些相关路径存在未提交或暂存变更时同样视为 stale；文档、覆盖报告实现和
+`benchmarks/results` 的变化不会无意义地要求重采。
 同一目标的 steady 与长稳要求必须在同一个干净 SHA 上同时成立；各自都有干净结果、但
 没有共同 SHA 时报告 `mixed-revision`，严格门禁仍失败。采集器与真实设备导入器只忽略
 `benchmarks/results` 自身的变化，允许从同一代码提交连续写入整套证据；其他文件变化仍

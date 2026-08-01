@@ -52,6 +52,8 @@ export function evaluateDeviceCoverage(targets, artifacts) {
           path: selected.path,
           sourceRevision: selected.sourceRevision,
           revisionKnown: selected.revisionKnown,
+          revisionCompatible: selected.revisionCompatible,
+          revisionStatus: selected.revisionStatus,
           durationSeconds: selected.durationSeconds,
           qualityPassed: selected.qualityPassed,
           qualityFailures: selected.qualityFailures,
@@ -86,6 +88,13 @@ function flattenArtifact(artifact) {
   if (!Array.isArray(artifact.data?.results)) return []
   return artifact.data.results.map((result) => {
     const sourceRevision = String(artifact.data.sourceRevision ?? '')
+    const revisionKnown = artifact.revisionKnown !== false
+    const revisionCompatible = artifact.revisionCompatible !== false
+    const revisionStatus = resolveRevisionStatus(
+      sourceRevision,
+      revisionKnown,
+      revisionCompatible,
+    )
     const stability = artifact.data.stabilityDiagnostics?.find((entry) =>
       sameConfiguration(entry.configuration, result.configuration))
     const quality = artifact.data.calibration?.evaluations?.find((entry) =>
@@ -121,9 +130,10 @@ function flattenArtifact(artifact) {
       path: artifact.path,
       browserName: artifact.data.browser?.name ?? '',
       sourceRevision,
-      revisionKnown: artifact.revisionKnown !== false,
-      cleanRevision: /^[0-9a-f]{7,40}$/i.test(sourceRevision)
-        && artifact.revisionKnown !== false,
+      revisionKnown,
+      revisionCompatible,
+      revisionStatus,
+      cleanRevision: revisionStatus === 'clean',
       configuration: result.configuration,
       durationSeconds: Number(result.durationMs ?? 0) / 1000,
       qualityPassed: recordedQualityPassed && recalculatedQuality.passed,
@@ -132,6 +142,14 @@ function flattenArtifact(artifact) {
       stabilityFailures,
     }
   })
+}
+
+function resolveRevisionStatus(sourceRevision, known, compatible) {
+  if (sourceRevision.endsWith('-dirty')) return 'dirty'
+  if (!/^[0-9a-f]{7,40}$/i.test(sourceRevision)) return 'invalid'
+  if (!known) return 'unavailable'
+  if (!compatible) return 'stale'
+  return 'clean'
 }
 
 function safelyEvaluateQuality(result) {
