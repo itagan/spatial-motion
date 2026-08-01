@@ -85,6 +85,10 @@
   连续布局中断、容量缩放和 Effect 静态回退不再重复分配或上传 Transform。
 - [x] **Array 上传自适应**：大型 Array Atlas 从保守帧预算逐级利用稳定帧余量，
   出现 24ms 压力时自动退避并冷却，保持单 Draw Call 和完整上传可观测性。
+- [x] **发布候选 API Freeze**：以自定义单批次 Renderer 和业务数据 Layout 验证
+  公共协议，真实 tgz 消费者覆盖运行、类型、资源释放与内部路径封锁，并冻结子路径白名单。
+- [x] **质量矩阵采集基础**：自动遍历固定质量/实例规模，按 GPU、视口和 DPR 保存
+  完整 Benchmark，并以线上降级边界生成最高稳定档建议，不扩展冻结后的库 API。
 
 - [x] 建立可比较的 steady、cold-start、atlas-update 与 transition-stress 基准。
 - [x] 暴露 P50/P95/P99、长帧、CPU/提交、图集和图片加载指标。
@@ -134,7 +138,7 @@
 - [x] 包体积改用真实 root/Core/Cards 消费者门禁，保留分模块聚合诊断。
 - [x] Atlas 冷启动增加分阶段指标，默认绘制移除逐卡临时 Canvas，并移除整图像素缓冲二次复制。
 - [x] 完成默认 Atlas 的离主线程绘制/readback，以及 Texture2DArray 分页与自适应渐进首传；默认 auto 在未显式要求 mipmap 的大型图集启用 array，压力帧会降低后续上传预算。
-- [ ] 收集自定义 Renderer/Layout 案例，完成发布候选 API freeze。
+- [x] 收集自定义 Renderer/Layout 案例，完成发布候选 API freeze。
 
 ### CSS3D 可选渲染器
 
@@ -151,6 +155,7 @@
 ### 质量与可观测性
 
 - [x] 建立包含运行环境与分阶段成本的可复现基准格式。
+- [x] 建立多环境质量矩阵采集、环境隔离和档位建议工具。
 - [ ] 积累不同设备和实例规模的基准 JSON。
 - [ ] 根据实测 P95、长帧和纹理上传数据调整质量档位。
 

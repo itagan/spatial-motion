@@ -17,7 +17,7 @@ npm run dev
 - `/benchmark.html`：不同实例数量和质量档位的性能基准。
 - `/benchmark.html` 的压力模式：持续中断布局/特效并局部更新图集，可选择最长 30 分钟。
 
-`npm run dev:examples` 独立启动集成示例站点，提供 `/vanilla/`、`/three-extension/`、`/gsap-extension/`、`/custom-card-effect/` 和 `/lottery-screen/`。Lottery Screen 使用 Vue 3 验证真实应用编排，但抽奖状态与随机选择保持在 examples，不进入核心库。
+`npm run dev:examples` 独立启动集成示例站点，提供 `/vanilla/`、`/three-extension/`、`/gsap-extension/`、`/custom-card-effect/`、`/custom-renderer-layout/` 和 `/lottery-screen/`。Lottery Screen 使用 Vue 3 验证真实应用编排，但抽奖状态与随机选择保持在 examples，不进入核心库。
 
 ## 常用命令
 
@@ -29,9 +29,10 @@ npm run dev
 | `npm run test:browser` | 使用 Playwright Chromium 运行真实 WebGL 冷启动与性能门禁 |
 | `npm run test:watch` | 监听模式运行测试 |
 | `npm run benchmark:compare -- baseline.json current.json` | 严格解析并按阈值判定性能回归 |
+| `npm run benchmark:matrix` | 自动采集固定质量矩阵并输出按环境隔离的档位建议 |
 | `npm run build:lib` | 构建 ESM 库与类型声明到 `dist/` |
 | `npm run build:demo` | 构建演示站点到 `dist-demo/` |
-| `npm run build:examples` | 构建五个独立示例到 `dist-examples/` |
+| `npm run build:examples` | 构建六个独立示例到 `dist-examples/` |
 | `npm run build` | 依次构建库、演示站点和独立示例 |
 | `npm run pack:check` | 验证发布文件、体积、导出、类型、运行时消费和 Tree Shaking |
 | `npm run verify` | 串行执行类型、全部测试、库/demo 构建和包消费者验证 |
@@ -152,6 +153,13 @@ npm tarball 只携带运行时 `dist`、README、CHANGELOG、LICENSE、PUBLIC_AP
 优先使用 steady、cold-start、atlas-update、interaction-stress 与 transition-stress 五类固定场景，并导出完整 JSON。`interaction-stress` 用于本地浏览器验证高频指针事件合帧；`scripts/benchmark-presets.json` 继续固化跨 100/500/1000/2000 实例和 low/medium/high/auto 质量的六组 CI 配置。CLI 的 `--preset` 会同时校验基线和当前结果。比较优化前后结果时，实例数、质量、布局、场景和环境应一致；`compareBenchmarkResults()` 会标记配置是否可直接比较，`evaluateBenchmarkRegression()` 和 `benchmark:compare` 可进一步按方向感知阈值产生 CI 退出码。基准 JSON 必须先通过 `parseBenchmarkResult()`，不要把结构不完整的手写对象作为性能证据。
 
 性能结果会受设备与浏览器影响，所以不要只报告一个孤立 FPS 数字，也不要以降低视觉数量之外的指标来掩盖退化。
+
+跨设备校准使用 `npm run benchmark:matrix`。默认采集 500/1000/2000 项的
+high/medium/low steady 矩阵；准备调整默认档位时增加
+`--scenarios steady,transition-stress --duration 10 --headed`。结果写入
+`benchmarks/results`，按 GPU、视口和 DPR 隔离，不把 SwiftShader、无头调度或不同
+分辨率的数据合并。建议门限与 `AdaptivePerformanceManager` 的默认降级条件保持一致，
+但自动建议不能替代目标设备上的视觉和长时间压力验收。
 
 ## 文档维护
 

@@ -571,3 +571,57 @@ tarball 消费和 Chromium WebGL 门禁全部通过。root/Core/Cards-only 为
 37,065/15,251/9,888 bytes gzip，layout-only 为 7,956 bytes，tarball 为
 131,833 bytes；Cards 在 10 KiB 上限下剩余 352 bytes，下一阶段应优先拆分 Effect
 Runtime，而不是提高预算。
+
+## 2026-08-01 发布候选 API Freeze 验收
+
+新增 `examples/custom-renderer-layout`，只从稳定包入口与 Three.js peer dependency
+导入。业务 Layout 根据 `MotionItem.meta` 分组并直接写入 `TransformBuffer`；自定义
+Renderer 使用单个 `LineSegments`、容量复用 Attribute、GPU 过渡和质量裁剪，完整
+实现统计、context restore 与幂等释放。
+
+真实 tgz 消费者会运行自定义 Layout/Renderer 诊断，验证业务 meta、Buffer count、
+三轮容量变化及销毁后无对象残留；包检查同时冻结 `package.json#exports` 子路径白名单。
+本地 Chromium 的业务分组与 Sphere 往返均为 1 Canvas、1 Draw Call、180 submitted、
+34,816 GPU bytes，控制台无 warning/error。完整验证为 36 个测试文件、395 项测试；
+root/Core/Cards-only 分别为 37,065/15,251/9,888 bytes gzip，tarball 132,785 bytes。
+
+## 2026-08-01 多环境质量矩阵基础
+
+仓库新增 `benchmark:matrix`，自动遍历固定实例数与 high/medium/low，保存完整环境、
+原始 `BenchmarkResult` 和按环境隔离的建议。判定与默认自适应降级边界保持一致：
+平均 FPS 不低于目标的 78%，P95 不超过该 FPS 的帧预算，33ms 长帧比例低于 8%，
+同时要求主体 1 Draw Call 和有效提交。该工具只属于仓库工作流，没有改变已冻结的
+包入口或运行时 API。
+
+首份 1265×633、DPR 1、Chromium 151 无头 SwiftShader 的 3 秒 steady 矩阵保存在
+`benchmarks/results/2026-08-01-swiftshader-quality-matrix.json`。500 项 High 为 87.4
+FPS / P95 17.9ms，建议 High；1000 项 High 的 P95 为 27.1ms，Medium 为 73.6 FPS /
+P95 27.1ms，建议 Medium；2000 项 High 为 51.9 FPS / P95 28.3ms，Medium 为 70.1
+FPS / P95 26.7ms，建议 Medium。所有运行保持 1 Draw Call。
+
+这些数字只证明采集与建议闭环，并暴露出软件渲染随短采样产生的调度波动；不能用于
+修改 Apple M4 或其他原生 GPU 默认档位。正式校准仍需目标硬件的 10 秒 steady +
+transition-stress、有界面模式和长时间视觉验收。
+
+## 2026-08-01 Apple M4 原生 GPU 质量矩阵
+
+首份原生 GPU 正式矩阵保存在
+`benchmarks/results/2026-08-01-apple-m4-chromium-quality-matrix.json`。采集使用有界面
+Chromium 151、ANGLE Metal Renderer: Apple M4、DPR 2；请求窗口为 1265×633，浏览器
+实际内容视口为 1250×625。500/1000/2000 项分别遍历 High、Medium、Low，每档同时运行
+10 秒 steady 与 transition-stress，共 18 组。
+
+| 实例数 | 建议档位 | High steady | High transition-stress | High 实际提交 |
+| ---: | --- | --- | --- | ---: |
+| 500 | High | 60.0 FPS / P95 17.7ms | 60.0 FPS / P95 17.7ms | 500 |
+| 1000 | High | 60.0 FPS / P95 17.5ms | 60.0 FPS / P95 17.5ms | 1000 |
+| 2000 | High | 60.0 FPS / P95 17.6ms | 60.0 FPS / P95 17.6ms | 2000 |
+
+18 组均为主体 1 Draw Call、0 个 24/33/50ms 长帧，且 rendered/submitted 与各质量
+档的裁剪策略一致：High 提交全部实例，Medium 最多 1000，Low 最多 500。三个规模下
+High 均同时通过平均 FPS、P95、33ms 长帧比例和提交有效性门槛，因此该环境建议 High。
+
+这份矩阵证明 2000 项尚未触及 Apple M4 的稳定帧性能边界，不能据此提高所有设备的
+默认档位。下一轮应扩展到 3000/5000/10000 项以定位本机拐点，并优先补齐 Intel 集显、
+Android 中低端 GPU 和 iOS Safari 的同规格证据；在至少覆盖一个桌面低端与一个移动端
+环境前，不调整运行时默认质量参数。

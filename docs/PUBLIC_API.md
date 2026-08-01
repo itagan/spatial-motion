@@ -1,7 +1,9 @@
 # 公共 API 与兼容策略
 
-Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰的职责和性能边界
-优先，不为仓库内历史调用保留兼容层；发布候选冻结后再开始遵循 Semantic Versioning。
+Spatial Motion 尚未发布。v2 架构已在 2026-08-01 完成发布候选 API Freeze；稳定
+入口、核心协议、泛型数据契约和降级语义以本文为基线。首个正式版本发布后遵循
+Semantic Versioning；发布前若必须改变冻结契约，也需要同步迁移说明、真实消费者
+检查和本文，不能通过内部路径兼容层绕过审查。
 
 ## 稳定入口
 
@@ -14,6 +16,8 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 - `@itagan/spatial-motion/dev`：按需开发诊断，不从根入口重导出。
 
 未在 `package.json#exports` 中声明的 `src`、`dist` 和内部模块不可导入。旧 `experimental-renderer` 入口不存在。
+`scripts/verify-package.mjs` 对上述入口执行精确白名单检查，新增或删除稳定子路径会
+直接使包验证失败，必须作为显式 API 决策处理。
 
 ## Core 与 Renderer
 
@@ -82,6 +86,9 @@ Spatial Motion 尚未发布。当前进入 v2 架构整理阶段，API 以清晰
 - `LayoutContext<TMeta>` 提供通用 `itemWidth/itemHeight`、当前可见 `items` 和质量档位，
   自定义布局可以按业务字段分组、排序或加权。
 - `LayoutConfig` 当前格式版本为 `1`；`parseLayoutConfig()` 严格解析外部配置，`createLayout()` 创建内置布局。
+- `examples/custom-renderer-layout` 是发布候选公共协议夹具：它只从稳定入口和 Three.js
+  peer dependency 导入，实现一个单批次 Renderer 与读取业务 `meta` 的 Buffer-native
+  Layout；同类能力不需要内部模块或 Scene/Renderer 访问权。
 
 ## 性能与扩展
 

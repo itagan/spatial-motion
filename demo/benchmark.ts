@@ -84,6 +84,11 @@ let itemCount = 500
 let qualityMode: QualityMode = 'auto'
 let layoutName = 'sphere'
 let lastResult: BenchmarkResult | null = null
+declare global {
+  interface Window {
+    __spatialMotionBenchmarkResult?: BenchmarkResult
+  }
+}
 let baselineResult: BenchmarkResult | null = null
 let runTimer = 0
 let sampleTimer = 0
@@ -250,6 +255,7 @@ async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
     runTimer = 0
     session.record(stage.getPerformanceStats(), performance.now(), benchmarkExtensionStats())
     lastResult = session.finish()
+    window.__spatialMotionBenchmarkResult = lastResult
     renderResult(lastResult)
     setRunButtonsDisabled(false)
     const exportButton = document.querySelector<HTMLButtonElement>('#export-result')
