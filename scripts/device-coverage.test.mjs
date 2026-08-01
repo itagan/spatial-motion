@@ -65,6 +65,29 @@ test('rejects the wrong GPU, short duration, and failed stability evidence', () 
   assert.equal(coverage[0].requirements[1].status, 'missing')
 })
 
+test('rejects evidence that fails its quality calibration envelope', () => {
+  const failedSteady = artifact('slow.json', 'abc1234', 'steady', 10)
+  failedSteady.data.calibration.evaluations[0] = {
+    configuration: failedSteady.data.results[0].configuration,
+    passed: false,
+    failures: ['AVERAGE_FPS', 'DRAW_CALLS'],
+  }
+  const coverage = evaluateDeviceCoverage(targets, [
+    failedSteady,
+    artifact('soak.json', 'abc1234', 'transition-stress', 300, true),
+  ])
+
+  assert.equal(coverage[0].status, 'missing')
+  assert.equal(coverage[0].requirements[0].status, 'missing')
+  assert.deepEqual(coverage[0].requirements[0].rejectedEvidence[0].failures, [
+    'QUALITY_CALIBRATION',
+  ])
+  assert.deepEqual(coverage[0].requirements[0].rejectedEvidence[0].qualityFailures, [
+    'AVERAGE_FPS',
+    'DRAW_CALLS',
+  ])
+})
+
 test('rejects legacy stability evidence that did not prove diagnostic coverage', () => {
   const legacy = artifact('legacy.json', 'abc1234', 'transition-stress', 300, true)
   legacy.data.stabilityDiagnostics[0].evaluation = { passed: true }
@@ -123,6 +146,9 @@ function artifact(path, sourceRevision, scenario, durationSeconds, stabilityPass
       sourceRevision,
       browser: { name: 'chromium' },
       results: [{ configuration, durationMs: durationSeconds * 1000 }],
+      calibration: {
+        evaluations: [{ configuration, passed: true, failures: [] }],
+      },
       stabilityDiagnostics: stabilityPassed
         ? [{ configuration, evaluation: { version: 2, passed: true } }]
         : [],

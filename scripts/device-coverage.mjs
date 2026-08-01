@@ -1,10 +1,13 @@
 export function evaluateDeviceCoverage(targets, artifacts) {
   const evidence = artifacts.flatMap(flattenArtifact)
   return targets.map((target) => {
-    const requirementMatches = target.requirements.map((requirement) =>
+    const requirementCandidates = target.requirements.map((requirement) =>
       evidence
         .filter((entry) => matchesTarget(entry, target.match))
-        .filter((entry) => matchesRequirement(entry, requirement))
+        .filter((entry) => matchesRequirementConfiguration(entry, requirement)))
+    const requirementMatches = target.requirements.map((requirement, index) =>
+      requirementCandidates[index]
+        .filter((entry) => passesRequirement(entry, requirement))
         .sort(compareEvidence))
     const missing = requirementMatches.some((matches) => matches.length === 0)
     const commonCleanRevisions = missing
@@ -25,6 +28,17 @@ export function evaluateDeviceCoverage(targets, artifacts) {
       const selected = sourceRevision
         ? matches.find((entry) => entry.sourceRevision === sourceRevision) ?? null
         : matches[0] ?? null
+      const rejectedEvidence = requirementCandidates[index]
+        .filter((entry) => !passesRequirement(entry, requirement))
+        .map((entry) => ({
+          path: entry.path,
+          sourceRevision: entry.sourceRevision,
+          failures: [
+            ...(!entry.qualityPassed ? ['QUALITY_CALIBRATION'] : []),
+            ...(requirement.stability && !entry.stabilityPassed ? ['STABILITY'] : []),
+          ],
+          qualityFailures: entry.qualityFailures,
+        }))
       return {
         ...requirement,
         status: selected
@@ -34,8 +48,11 @@ export function evaluateDeviceCoverage(targets, artifacts) {
           path: selected.path,
           sourceRevision: selected.sourceRevision,
           durationSeconds: selected.durationSeconds,
+          qualityPassed: selected.qualityPassed,
+          qualityFailures: selected.qualityFailures,
           stabilityPassed: selected.stabilityPassed,
         },
+        rejectedEvidence,
       }
     })
     return {
@@ -66,6 +83,8 @@ function flattenArtifact(artifact) {
     const sourceRevision = String(artifact.data.sourceRevision ?? '')
     const stability = artifact.data.stabilityDiagnostics?.find((entry) =>
       sameConfiguration(entry.configuration, result.configuration))
+    const quality = artifact.data.calibration?.evaluations?.find((entry) =>
+      sameConfiguration(entry.configuration, result.configuration))
     return {
       path: artifact.path,
       browserName: artifact.data.browser?.name ?? '',
@@ -73,6 +92,8 @@ function flattenArtifact(artifact) {
       cleanRevision: /^[0-9a-f]{7,40}$/i.test(sourceRevision),
       configuration: result.configuration,
       durationSeconds: Number(result.durationMs ?? 0) / 1000,
+      qualityPassed: quality?.passed === true,
+      qualityFailures: Array.isArray(quality?.failures) ? quality.failures : [],
       stabilityPassed: stability?.evaluation?.version === 2
         && stability.evaluation.passed === true,
     }
@@ -93,13 +114,16 @@ function matchesTarget(entry, match) {
     && matchesMaximum(environment.devicePixelRatio, match.maxDevicePixelRatio)
 }
 
-function matchesRequirement(entry, requirement) {
+function matchesRequirementConfiguration(entry, requirement) {
   const configuration = entry.configuration
   return configuration.itemCount === requirement.itemCount
     && configuration.qualityMode === requirement.quality
     && configuration.scenario === requirement.scenario
     && entry.durationSeconds >= requirement.minDurationSeconds
-    && (!requirement.stability || entry.stabilityPassed)
+}
+
+function passesRequirement(entry, requirement) {
+  return entry.qualityPassed && (!requirement.stability || entry.stabilityPassed)
 }
 
 function matchesPattern(value, pattern) {

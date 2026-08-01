@@ -69,6 +69,9 @@ dirty、缺少 `sourceRevision` 或不是 7–40 位 Git 十六进制 SHA 的结
 没有共同 SHA 时报告 `mixed-revision`，严格门禁仍失败。采集器与真实设备导入器只忽略
 `benchmarks/results` 自身的变化，允许从同一代码提交连续写入整套证据；其他文件变化仍
 会产生 `-dirty`。
+每条结果还必须存在匹配的 `calibration.evaluations[].passed: true`；平均 FPS、P95、33ms
+长帧比例、主体 Draw Call 或 resident/submitted 实例覆盖任一失败，都不能仅凭资源趋势
+稳定而满足设备要求。
 Apple Silicon 当前正式证据为 `2026-08-02-apple-m4-same-revision-steady.json` 与
 `2026-08-02-apple-m4-same-revision-stability-300s.json`；二者均来自同一干净 SHA
 `14e08574e821`。其他目标必须在对应真实硬件上采集，不接受仅修改 UA、视口或设备缩放的

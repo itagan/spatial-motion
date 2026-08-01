@@ -28,6 +28,13 @@ if (process.argv.includes('--json')) {
       const key = `${requirement.itemCount}/${requirement.quality}/${requirement.scenario}/${requirement.minDurationSeconds}s${requirement.stability ? '/stability' : ''}`
       const source = requirement.evidence ? ` · ${requirement.evidence.path}` : ''
       console.log(`  ${requirement.status.padEnd(16)} ${key}${source}`)
+      if (requirement.evidence) return
+      requirement.rejectedEvidence.forEach((rejected) => {
+        const quality = rejected.qualityFailures.length
+          ? `:${rejected.qualityFailures.join(',')}`
+          : ''
+        console.log(`    rejected ${rejected.failures.join('+')}${quality} · ${rejected.path}`)
+      })
     })
   })
 }
