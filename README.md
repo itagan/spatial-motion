@@ -570,6 +570,10 @@ npx spatial-motion-benchmark baseline.json current.json --preset transition-stre
 npm run benchmark:matrix
 npm run benchmark:matrix -- --scenarios steady,transition-stress --duration 10 --headed
 npm run benchmark:matrix -- --preview --scenarios cold-start --duration 10 --headed
+npm run benchmark:matrix -- --preview --stability --stability-interval 5 \
+  --scenarios transition-stress --duration 60 --headed
+npm run benchmark:coverage
+npm run benchmark:coverage -- --strict
 ```
 
 矩阵按 GPU、视口和设备 DPR 隔离，完整保存运行环境与原始结果。判定边界与默认
@@ -578,6 +582,12 @@ npm run benchmark:matrix -- --preview --scenarios cold-start --duration 10 --hea
 `benchmarks/README.md`。涉及动态 import、Worker asset 或首次 chunk 求值的 cold-start
 对照应使用 `--preview`，先构建生产 Demo 再从静态 preview 服务采集，避免把开发服务器
 按需 transform 误计为运行时成本。
+长时间切换或局部更新使用 `--stability`；采集器保存 JS heap、DOM/Canvas 和 Renderer
+资源趋势，并在稳定窗口出现持续 GPU/纹理/Geometry 增长、资源失败或意外 context loss
+时返回非零退出码。
+跨设备目标声明在 `benchmarks/device-targets.json`。`benchmark:coverage` 自动扫描已保存
+结果，区分正式提交上的 `qualified`、dirty/缺 SHA 的 `development-only` 和 `missing`；
+`--strict` 仅在全部桌面与移动目标都有正式 steady 与 300 秒长稳证据时通过。
 
 默认阈值覆盖 FPS、最大帧时间、P95/P99、33ms 长帧、Stage CPU、WebGL 提交、Atlas build/patch、纹理内存与估算上传量。配置不兼容或超过阈值时命令返回非零退出码；自定义阈值可对每个指标设置 `maxRegressionPercent`、`maxRegressionAbsolute` 或两者。随包提供的六个 `--preset` 覆盖 100/500/1000/2000 实例、low/medium/high/auto 质量和四类固定场景，CLI 会拒绝与预设不一致的结果。
 

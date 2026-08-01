@@ -911,7 +911,7 @@ Cards-only 从 9,888 降至 8,889 bytes gzip，减少 999 bytes；距 10 KiB 上
 由 352 增至 1,351 bytes。root consumer 从 37,065 降至 36,285 bytes gzip；Core-only
 保持 15,251 bytes，tarball 在加入独立主线程 fallback chunk、内容基准与单元 Canvas
 复用、readback/pack/Worker 时序诊断、批次矩阵、连续 pack、单次 build 快照与冷启动
-重叠后为 140,276 bytes，仍低于
+重叠后为 140,910 bytes，仍低于
 150 KiB 上限。
 模块总量略增是独立 lazy 模块、诊断与 sourcemap 的代价，不代表基础消费者下载回退。
 
@@ -975,3 +975,44 @@ readback（17.1→17.9ms），也不保留。两项实验均约 60 FPS、P95 17.
 24/33/50ms 长帧；这证明当前约 17ms readback 无法再通过 Canvas context hint 稳定降低。
 下一步若继续攻击该段，需要评估不经 CPU `getImageData()` 的 GPU Array texture 上传链路，
 并先解决局部 patch、context restore 与 CPU 权威缓冲契约，不能把读回简单搬到主线程。
+
+## 长时间稳定性趋势门禁
+
+Atlas 微优化停止后，投入转向跨设备校准和长时间资源稳定性。质量矩阵新增
+`--stability`，在现有 steady/transition-stress/atlas-update 场景外不复制业务操作逻辑；
+浏览器每个配置按指定间隔采集 JS heap、DOM 和 Canvas，既有 500ms Benchmark 样本继续
+提供 GPU bytes、纹理 bytes、Geometry build、资源/Program 失败和 context loss。
+
+判定将前半段定义为预热窗口，允许 Atlas 与四个 Effect Program 按需建立；后半段必须
+收敛。Heap 使用稳定窗口首尾三分之一的低水位差抵抗 GC 锯齿，默认最多保留 16 MiB；
+GPU/纹理/Geometry/Canvas 和失败计数不得增长，DOM 最多增加 5 个节点。原始样本、阈值、
+指标和结构化失败原因全部写入 `stabilityDiagnostics`，失败时仍保存证据并返回非零退出码。
+
+2026-08-02 production preview / Chromium 151 / Apple M4 / 1250×625 / DPR 2 的
+2000/high/transition-stress 20 秒 smoke 完成 23 次操作：60.0 FPS、P95 17.4ms、0 个
+24/33/50ms 长帧。后半段 retained heap、DOM、Canvas、GPU bytes、纹理 bytes 与 Geometry
+build 均零增长，无 context loss 或图片失败。结果保存在
+`benchmarks/results/2026-08-02-apple-m4-transition-stability-smoke.json`；该短样本只验证
+门禁闭环，正式设备证据仍应运行 300 秒，候选版本资源改动运行 1800 秒。
+
+同环境随后完成 60 秒 transition-stress：67 次操作、60.0 FPS、P95/P99
+18.26/18.60ms、0 个长帧；稳定窗口 retained heap 增长约 0.63 MiB，其余资源与失败
+指标全部零增长。20 秒 atlas-update 完成 112 次真实 patch，60.0 FPS、P95 18.25ms、
+0 长帧；heap 低水位增长约 2.10 MiB，其余已采指标同样零增长。结果分别保存在
+`benchmarks/results/2026-08-02-apple-m4-transition-stability-60s.json` 和
+`benchmarks/results/2026-08-02-apple-m4-atlas-update-stability-smoke.json`。
+
+同日的 300 秒 production preview 正式时长运行完成 334 次 transition/patch 操作：平均
+60.0 FPS、最低窗口 59.98 FPS、P95/P99 17.60/17.75ms、主体 1 Draw Call，且没有
+24/33/50ms 长帧。稳定窗口 retained heap 仅增长 342,146 bytes，DOM、Canvas、GPU bytes、
+纹理 bytes 与 Geometry build 均零增长，无 context loss 或图片失败。
+结果保存在 `benchmarks/results/2026-08-02-apple-m4-transition-stability-300s.json`。
+
+为避免单机结果被误当成跨设备结论，`benchmarks/device-targets.json` 固化五类目标及其
+steady/300 秒长稳要求，`npm run benchmark:coverage` 自动扫描证据并匹配浏览器、平台、
+GPU、规模、质量和场景。当前 Apple Silicon 两项要求均有 `development-only` 证据；Intel
+集成显卡、Windows 主流桌面 GPU、Android 中端机和 iOS Safari 仍为 `missing`。因此本轮
+随后审计发现 Stage 的 64 项 Renderer 指标上限会截掉 Cards 的资源与 Program 失败计数，
+旧结果因此只能证明已实际保存的资源趋势，不能作为完整长稳证据。上限已扩至 96，长稳
+判定升级为 v2：必要样本或关键计数缺失时直接失败，覆盖工具也拒绝旧版 `passed`。提交后
+从干净 SHA 重采 v2 证据，并继续采集四类目标设备；在覆盖完整前不调整默认 Profile。

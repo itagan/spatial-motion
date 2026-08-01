@@ -70,6 +70,12 @@
   cold-start 的 Atlas build 中位数由 43.2ms 降至 40.6ms。
 - 质量矩阵采集器新增 `--preview` 生产构建模式，并在输出中记录 `serverMode`；动态
   import/Worker 冷启动不再把 Vite 开发服务器的按需 transform 当作浏览器运行时成本。
+- 质量矩阵新增 `--stability` 长时间门禁：保存 JS heap、DOM/Canvas 与 Renderer 资源
+  趋势，在预热后的稳定窗口检查 GPU/纹理/Geometry 增长、资源失败和 context loss。
+- 新增版本化跨设备目标清单与 `benchmark:coverage`：自动匹配浏览器、平台、GPU、规模、
+  场景和长稳结果，区分正式、dirty 开发与缺失证据，并提供严格 CI 退出码。
+- Renderer 诊断指标上限由 64 扩至 96，确保 Cards 的 Program 与资源失败计数不会被
+  Atlas 指标截断；长稳 v2 判定拒绝缺少必要样本或关键计数的历史证据。
 
 ### Added
 

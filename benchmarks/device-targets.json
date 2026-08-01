@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "targets": [
+    {
+      "id": "apple-silicon-desktop",
+      "label": "Apple Silicon desktop Chromium",
+      "match": {
+        "browserNames": ["chromium"],
+        "platformPattern": "Mac",
+        "gpuPattern": "Apple"
+      },
+      "requirements": [
+        { "itemCount": 2000, "quality": "high", "scenario": "steady", "minDurationSeconds": 10 },
+        { "itemCount": 2000, "quality": "high", "scenario": "transition-stress", "minDurationSeconds": 300, "stability": true }
+      ]
+    },
+    {
+      "id": "intel-integrated-desktop",
+      "label": "Intel integrated desktop Chromium",
+      "match": {
+        "browserNames": ["chromium"],
+        "gpuPattern": "Intel"
+      },
+      "requirements": [
+        { "itemCount": 2000, "quality": "high", "scenario": "steady", "minDurationSeconds": 10 },
+        { "itemCount": 2000, "quality": "high", "scenario": "transition-stress", "minDurationSeconds": 300, "stability": true }
+      ]
+    },
+    {
+      "id": "windows-mainstream-desktop",
+      "label": "Windows mainstream GPU Chromium",
+      "match": {
+        "browserNames": ["chromium"],
+        "platformPattern": "Win"
+      },
+      "requirements": [
+        { "itemCount": 2000, "quality": "high", "scenario": "steady", "minDurationSeconds": 10 },
+        { "itemCount": 2000, "quality": "high", "scenario": "transition-stress", "minDurationSeconds": 300, "stability": true }
+      ]
+    },
+    {
+      "id": "android-midrange",
+      "label": "Android mid-range Chromium",
+      "match": {
+        "browserNames": ["chromium"],
+        "userAgentPattern": "Android"
+      },
+      "requirements": [
+        { "itemCount": 1000, "quality": "medium", "scenario": "steady", "minDurationSeconds": 10 },
+        { "itemCount": 1000, "quality": "medium", "scenario": "transition-stress", "minDurationSeconds": 300, "stability": true }
+      ]
+    },
+    {
+      "id": "ios-safari",
+      "label": "iOS Safari",
+      "match": {
+        "browserNames": ["webkit", "safari"],
+        "userAgentPattern": "iPhone|iPad"
+      },
+      "requirements": [
+        { "itemCount": 1000, "quality": "medium", "scenario": "steady", "minDurationSeconds": 10 },
+        { "itemCount": 1000, "quality": "medium", "scenario": "transition-stress", "minDurationSeconds": 300, "stability": true }
+      ]
+    }
+  ]
+}

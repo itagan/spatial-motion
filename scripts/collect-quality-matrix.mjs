@@ -7,6 +7,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { chromium } from '@playwright/test'
 import { buildQualityCalibration } from './quality-calibration.mjs'
+import { evaluateStabilityRun } from './stability-evaluation.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const options = parseArguments(process.argv.slice(2))
@@ -80,6 +81,7 @@ try {
 
   const results = []
   const runDiagnostics = []
+  const stabilityDiagnostics = []
   for (const itemCount of options.itemCounts) {
     await configureBenchmark(page, { itemCount })
     for (const quality of options.qualities) {
@@ -108,9 +110,18 @@ try {
         await page.waitForFunction(() =>
           document.querySelector('#benchmark-status')?.textContent?.includes('正在运行'),
         null, { timeout: 5_000 })
-        await page.waitForFunction(() =>
-          document.querySelector('#benchmark-status')?.textContent?.includes('采样完成：'),
-        null, { timeout: options.durationSeconds * 1000 + 20_000 })
+        const stabilitySamples = options.stability
+          ? await waitForBenchmarkWithStability(
+              page,
+              options.durationSeconds * 1000 + 20_000,
+              options.stabilityIntervalSeconds * 1000,
+            )
+          : null
+        if (!stabilitySamples) {
+          await page.waitForFunction(() =>
+            document.querySelector('#benchmark-status')?.textContent?.includes('采样完成：'),
+          null, { timeout: options.durationSeconds * 1000 + 20_000 })
+        }
         const { result, diagnostics } = await page.evaluate(() => ({
           result: window.__spatialMotionBenchmarkResult,
           diagnostics: window.__spatialMotionBenchmarkDiagnostics,
@@ -123,6 +134,12 @@ try {
           operations: diagnostics?.operations ?? 0,
           residentItems: result.renderedItems,
           submittedItems: result.submittedItems,
+        })
+        if (stabilitySamples) stabilityDiagnostics.push({
+          configuration: result.configuration,
+          intervalSeconds: options.stabilityIntervalSeconds,
+          browserSamples: stabilitySamples,
+          evaluation: evaluateStabilityRun(stabilitySamples, result),
         })
         assertNoPageErrors(pageErrors)
         console.log([
@@ -165,9 +182,12 @@ try {
       disableAtlasWorker: options.disableAtlasWorker,
       contentMode: options.contentMode,
       serverMode: options.preview ? 'preview' : 'development',
+      stability: options.stability,
+      stabilityIntervalSeconds: options.stability ? options.stabilityIntervalSeconds : null,
     },
     results,
     runDiagnostics,
+    stabilityDiagnostics,
     calibration,
   }
   const outputPath = resolve(root, options.output)
@@ -183,6 +203,16 @@ try {
   calibration.recommendations.forEach(({ itemCount, recommendedQuality, environmentKey }) => {
     console.log(`${itemCount} items · ${recommendedQuality ?? 'no passing quality'} · ${environmentKey}`)
   })
+  const failedStabilityRuns = stabilityDiagnostics.filter(({ evaluation }) => !evaluation.passed)
+  failedStabilityRuns.forEach(({ configuration, evaluation }) => {
+    console.error([
+      configuration.itemCount,
+      configuration.qualityMode,
+      configuration.scenario,
+      evaluation.failures.map(({ code }) => code).join(', '),
+    ].join(' · '))
+  })
+  if (failedStabilityRuns.length > 0) process.exitCode = 1
 } finally {
   await browser?.close()
   server?.kill('SIGTERM')
@@ -196,6 +226,17 @@ function parseArguments(args) {
   const durationSeconds = positiveInteger(read('--duration', '3'), '--duration')
   if (![3, 10, 20, 60, 300, 1800].includes(durationSeconds)) {
     throw new TypeError('--duration must match a benchmark page option')
+  }
+  const stability = args.includes('--stability')
+  if (stability && durationSeconds < 20) {
+    throw new TypeError('--stability requires --duration of at least 20 seconds')
+  }
+  const stabilityIntervalSeconds = positiveNumber(
+    read('--stability-interval', '5'),
+    '--stability-interval',
+  )
+  if (stability && stabilityIntervalSeconds > durationSeconds / 2) {
+    throw new TypeError('--stability-interval must not exceed half of --duration')
   }
   return {
     durationSeconds,
@@ -219,11 +260,45 @@ function parseArguments(args) {
     resolution: optionalPositiveInteger(read('--resolution', undefined), '--resolution'),
     disableAtlasWorker: args.includes('--disable-atlas-worker'),
     preview: args.includes('--preview'),
+    stability,
+    stabilityIntervalSeconds,
     contentMode: enumValue(read('--content', 'default'), '--content', [
       'default', 'template', 'canvas',
     ]),
     screenshot: read('--screenshot', undefined),
   }
+}
+
+async function waitForBenchmarkWithStability(page, timeoutMs, intervalMs) {
+  const startedAt = Date.now()
+  const samples = []
+  while (Date.now() - startedAt <= timeoutMs) {
+    const snapshot = await page.evaluate(() => {
+      const memory = performance.memory
+      return {
+        complete: document.querySelector('#benchmark-status')?.textContent
+          ?.includes('采样完成：') ?? false,
+        usedJSHeapBytes: Number.isFinite(memory?.usedJSHeapSize)
+          ? memory.usedJSHeapSize
+          : null,
+        totalJSHeapBytes: Number.isFinite(memory?.totalJSHeapSize)
+          ? memory.totalJSHeapSize
+          : null,
+        domNodes: document.getElementsByTagName('*').length,
+        canvases: document.querySelectorAll('canvas').length,
+      }
+    })
+    samples.push({
+      elapsedMs: Date.now() - startedAt,
+      usedJSHeapBytes: snapshot.usedJSHeapBytes,
+      totalJSHeapBytes: snapshot.totalJSHeapBytes,
+      domNodes: snapshot.domNodes,
+      canvases: snapshot.canvases,
+    })
+    if (snapshot.complete) return samples
+    await page.waitForTimeout(intervalMs)
+  }
+  throw new Error('Timed out waiting for benchmark stability run')
 }
 
 function integerList(value, name) {
@@ -281,7 +356,7 @@ async function isReachable(url) {
 async function waitForServer(url, child) {
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error('Benchmark development server exited early')
+    if (child.exitCode !== null) throw new Error('Benchmark server exited early')
     if (await isReachable(url)) return
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 100))
   }

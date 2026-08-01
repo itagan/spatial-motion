@@ -2126,7 +2126,7 @@ describe('MotionStage', () => {
 
   it('normalizes renderer metrics and rejects incomplete optional capabilities', () => {
     const metrics = Object.fromEntries(
-      Array.from({ length: 70 }, (_value, index) => [
+      Array.from({ length: 110 }, (_value, index) => [
         `metric-${index}`,
         index === 0 ? Number.NaN : index === 1 ? -2 : index,
       ]),
@@ -2148,7 +2148,7 @@ describe('MotionStage', () => {
         gpuBytes: 0,
       },
     })
-    expect(Object.keys(stats.renderer.metrics)).toHaveLength(64)
+    expect(Object.keys(stats.renderer.metrics)).toHaveLength(96)
     expect(Object.values(stats.renderer.metrics).every((value) => value >= 0)).toBe(true)
     stage.destroy()
 

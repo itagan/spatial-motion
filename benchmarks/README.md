@@ -23,6 +23,45 @@ npm run benchmark:matrix -- \
   --output benchmarks/results/device-name.json
 ```
 
+长时间稳定性门禁使用生产构建，并明确采样间隔：
+
+```bash
+npm run benchmark:matrix -- \
+  --preview \
+  --stability \
+  --stability-interval 5 \
+  --items 2000 \
+  --qualities high \
+  --scenarios transition-stress \
+  --duration 60 \
+  --headed \
+  --output benchmarks/results/device-transition-soak.json
+```
+
+`--stability` 至少需要 20 秒。顶层 `stabilityDiagnostics` 保存浏览器 heap、DOM/Canvas
+原始样本和自动判定；前半段允许 Atlas 与四个 Effect Program 预热，后半段作为稳定窗口。
+默认要求稳定窗口内 GPU bytes、纹理 bytes、Geometry build、Canvas 和失败计数零增长，
+DOM 最多增加 5 个节点；JS heap 使用前后分段低水位抵抗 GC 锯齿，保留量增长上限为
+16 MiB。平台不提供 `performance.memory` 时 heap 指标为 `null`，其余资源门禁仍执行。
+稳定窗口至少需要两个浏览器与两个 Renderer 样本，且 GPU、纹理、Geometry 和失败计数
+都必须实际存在；缺样本不会按零增长处理。`--stability-interval` 不得超过采样时长一半。
+任一运行不通过时结果仍会写盘，但命令返回非零退出码。只有 `evaluation.version: 2` 的完整
+诊断可以满足跨设备长稳覆盖，旧结果保留作历史参考但不进入正式判定。
+
+检查跨设备证据覆盖：
+
+```bash
+npm run benchmark:coverage
+npm run benchmark:coverage -- --json
+npm run benchmark:coverage -- --strict
+```
+
+目标与所需场景声明在 `device-targets.json`。当前覆盖 Apple Silicon、Intel 集成显卡、
+Windows 主流桌面 GPU、Android 中端机和 iOS Safari；桌面要求 2000/high，移动端要求
+1000/medium，均包含 10 秒 steady 与通过稳定性门禁的 300 秒 transition-stress。
+普通报告允许缺口存在，便于逐台采集；`--strict` 要求每项目标均为 `qualified`。
+dirty 或缺少 `sourceRevision` 的结果只记作 `development-only`，不会满足正式门禁。
+
 `--headed` 用于采集真实有界面 GPU 环境；默认无头模式适合自动化和软件渲染基线。
 不同 `gpuRenderer`、视口或 DPR 的结果不会合并推荐。无头 SwiftShader 结果只能代表
 软件渲染环境，不能用于调整 Apple、Intel、NVIDIA、AMD 或移动 GPU 的默认档位。
@@ -47,3 +86,4 @@ High 结果混为一组发布基线。
 
 矩阵顶层 `runDiagnostics` 与 `results` 按索引对应，保存页面级、无法由 500ms 定时样本
 可靠还原的指标。当前包括 cold-start 重建后连续两个 RAF 内的首次提交峰值和场景操作数。
+`stabilityDiagnostics` 同样按配置对应，但只在显式启用 `--stability` 时生成。

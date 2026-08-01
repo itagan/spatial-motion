@@ -122,6 +122,10 @@
   保留 lazy chunk 并让 Worker 启动与 Runtime 加载并行；同时封闭发送前中止竞态。
 - [x] **生产冷启动口径**：质量矩阵可从 production preview 采集并记录 server mode，
   动态 chunk/Worker 优化不再混入开发服务器 transform；无稳定收益的提示与静态合并回退。
+- [x] **长期稳定性门禁基础**：质量矩阵可选采集 heap、DOM/Canvas 和 Renderer 资源趋势，
+  区分前半段预热与后半段稳定窗口，并以非零退出码阻断持续增长、失败或 context loss。
+- [x] **跨设备证据覆盖清单**：版本化声明桌面与移动端目标、固定场景和最短采样时长，
+  自动区分正式、开发与缺失证据，并提供发布前严格退出码。
 
 - [x] 建立可比较的 steady、cold-start、atlas-update 与 transition-stress 基准。
 - [x] 暴露 P50/P95/P99、长帧、CPU/提交、图集和图片加载指标。

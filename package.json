@@ -137,6 +137,7 @@
     "dev:examples": "vite --config vite.examples.config.ts",
     "benchmark:compare": "npm run build:lib --silent && node scripts/compare-benchmarks.mjs",
     "benchmark:matrix": "node scripts/collect-quality-matrix.mjs",
+    "benchmark:coverage": "node scripts/report-device-coverage.mjs",
     "build": "npm run build:lib && npm run build:demo && npm run build:examples",
     "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.build.json",
     "build:demo": "vite build",
@@ -146,7 +147,7 @@
     "pack:check": "node scripts/verify-package.mjs",
     "verify": "npm run typecheck && npm test && npm run build && npm run pack:check",
     "typecheck": "tsc --noEmit && vue-tsc --noEmit -p tsconfig.examples.json && tsc -p tsconfig.browser.json",
-    "test": "vitest run --config vitest.config.ts && node --test scripts/quality-calibration.test.mjs",
+    "test": "vitest run --config vitest.config.ts && node --test scripts/quality-calibration.test.mjs scripts/stability-evaluation.test.mjs scripts/device-coverage.test.mjs",
     "test:browser": "playwright test",
     "test:watch": "vitest --config vitest.config.ts"
   },
