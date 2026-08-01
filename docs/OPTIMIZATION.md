@@ -911,7 +911,7 @@ Cards-only 从 9,888 降至 8,889 bytes gzip，减少 999 bytes；距 10 KiB 上
 由 352 增至 1,351 bytes。root consumer 从 37,065 降至 36,285 bytes gzip；Core-only
 保持 15,251 bytes，tarball 在加入独立主线程 fallback chunk、内容基准与单元 Canvas
 复用、readback/pack/Worker 时序诊断、批次矩阵、连续 pack、单次 build 快照与冷启动
-重叠后为 141,313 bytes，仍低于
+重叠后约为 141 KiB，仍低于
 150 KiB 上限。
 模块总量略增是独立 lazy 模块、诊断与 sourcemap 的代价，不代表基础消费者下载回退。
 
@@ -1010,20 +1010,23 @@ build 均零增长，无 context loss 或图片失败。结果保存在
 
 为避免单机结果被误当成跨设备结论，`benchmarks/device-targets.json` 固化五类目标及其
 steady/300 秒长稳要求，`npm run benchmark:coverage` 自动扫描证据并匹配浏览器、平台、
-GPU、规模、质量和场景。当前 Apple Silicon 两项要求均有 `development-only` 证据；Intel
-集成显卡、Windows 主流桌面 GPU、Android 中端机和 iOS Safari 仍为 `missing`。因此本轮
-随后审计发现 Stage 的 64 项 Renderer 指标上限会截掉 Cards 的资源与 Program 失败计数，
-旧结果因此只能证明已实际保存的资源趋势，不能作为完整长稳证据。上限已扩至 96，长稳
-判定升级为 v2：必要样本或关键计数缺失时直接失败，覆盖工具也拒绝旧版 `passed`。提交后
-从干净 SHA `28cacd5664b2` 重采的 300 秒 v2 证据包含 16 个稳定窗口浏览器样本和 301 个
-Renderer 样本：334 次操作、60.0 FPS、P95/P99 18.26/18.60ms、0 长帧；Heap、DOM、
-Canvas、GPU/纹理 bytes、Geometry build、资源与 Program 失败均零增长。结果保存在
-`benchmarks/results/2026-08-02-apple-m4-transition-stability-300s-v2.json`。
+GPU、viewport、DPR、规模、质量和场景。审计发现 Stage 的 64 项 Renderer 指标上限会截掉
+Cards 的资源与 Program 失败计数，旧结果因此只能证明已保存的部分趋势。上限已扩至 96，
+长稳判定升级为 v2：必要样本或关键计数缺失时直接失败，覆盖工具也拒绝旧版 `passed`。
 
-随后从干净 SHA `b4ce488c7824` 采集 10 秒 steady：60.0 FPS、P95/P99 18.10/18.45ms、
-0 长帧、2000 resident/submitted、主体 1 Draw Call。该结果与 v2 soak 共同使
-`apple-silicon-desktop` 达到 `qualified`。Intel、Windows、Android 与 iOS 仍缺真实设备
-证据；在覆盖完整前不调整默认 Profile，也不把 UA/viewport 模拟当作实机结论。
+覆盖门禁随后进一步要求同一目标的所有场景共享同一个干净源码 SHA，不能把不同代码版本的
+独立通过结果拼成 `qualified`。从干净 SHA `14e08574e821` 连续重采的 Apple M4 证据为：
+
+- 10 秒 steady：60.0 FPS、P95 17.4ms、0 长帧、2000 resident/submitted、1 Draw Call；
+- 300 秒 transition-stress：334 次操作、60.0 FPS、P95/P99 17.70/17.80ms、0 长帧；
+  稳定窗口包含 16 个浏览器样本与 301 个 Renderer 样本，Heap、DOM、Canvas、GPU/纹理
+  bytes、Geometry build、资源与 Program 失败均零增长。
+
+结果分别保存在 `benchmarks/results/2026-08-02-apple-m4-same-revision-steady.json` 与
+`benchmarks/results/2026-08-02-apple-m4-same-revision-stability-300s.json`，共同使
+`apple-silicon-desktop` 在 SHA `14e08574e821` 上达到 `qualified`。Intel、Windows、
+Android 与 iOS 仍缺真实设备证据；在覆盖完整前不调整默认 Profile，也不把 UA/viewport
+模拟当作实机结论。
 
 真实移动端采集入口随后补齐：Benchmark 页在任意设备浏览器中每 5 秒保存 Heap（可用时）、
 DOM/Canvas，同时保留 500ms Renderer 样本和运行操作数；独立“导出设备证据”不会改变原有
