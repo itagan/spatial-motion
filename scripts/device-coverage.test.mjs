@@ -86,6 +86,16 @@ test('rejects evidence that fails its quality calibration envelope', () => {
     'AVERAGE_FPS',
     'DRAW_CALLS',
   ])
+
+  const stalePass = artifact('stale-pass.json', 'abc1234', 'steady', 10)
+  stalePass.data.results[0].averageFps = 1
+  const recalculated = evaluateDeviceCoverage(targets, [
+    stalePass,
+    artifact('soak.json', 'abc1234', 'transition-stress', 300, true),
+  ])
+  assert.equal(recalculated[0].requirements[0].status, 'missing')
+  assert.ok(recalculated[0].requirements[0].rejectedEvidence[0].qualityFailures
+    .includes('AVERAGE_FPS'))
 })
 
 test('rejects legacy stability evidence that did not prove diagnostic coverage', () => {
@@ -145,7 +155,19 @@ function artifact(path, sourceRevision, scenario, durationSeconds, stabilityPass
     data: {
       sourceRevision,
       browser: { name: 'chromium' },
-      results: [{ configuration, durationMs: durationSeconds * 1000 }],
+      results: [{
+        configuration,
+        durationMs: durationSeconds * 1000,
+        averageFps: 60,
+        averageFrameMs: 16.7,
+        maximumFrameTimeP95: 18,
+        longFramesOver24Ms: 0,
+        longFramesOver33Ms: 0,
+        longFramesOver50Ms: 0,
+        maximumDrawCalls: 1,
+        renderedItems: 2000,
+        submittedItems: 2000,
+      }],
       calibration: {
         evaluations: [{ configuration, passed: true, failures: [] }],
       },

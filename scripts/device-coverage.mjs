@@ -1,3 +1,5 @@
+import { evaluateQualityRun } from './quality-calibration.mjs'
+
 export function evaluateDeviceCoverage(targets, artifacts) {
   const evidence = artifacts.flatMap(flattenArtifact)
   return targets.map((target) => {
@@ -85,6 +87,17 @@ function flattenArtifact(artifact) {
       sameConfiguration(entry.configuration, result.configuration))
     const quality = artifact.data.calibration?.evaluations?.find((entry) =>
       sameConfiguration(entry.configuration, result.configuration))
+    const recalculatedQuality = safelyEvaluateQuality(result)
+    const recordedFailures = Array.isArray(quality?.failures) ? quality.failures : []
+    const recordedQualityPassed = quality?.passed === true && recordedFailures.length === 0
+    const qualityFailures = [...new Set([
+      ...(!quality ? ['MISSING_RECORDED_CALIBRATION'] : []),
+      ...(quality && !recordedQualityPassed && recordedFailures.length === 0
+        ? ['INVALID_RECORDED_CALIBRATION']
+        : []),
+      ...recordedFailures,
+      ...recalculatedQuality.failures,
+    ])]
     return {
       path: artifact.path,
       browserName: artifact.data.browser?.name ?? '',
@@ -92,12 +105,21 @@ function flattenArtifact(artifact) {
       cleanRevision: /^[0-9a-f]{7,40}$/i.test(sourceRevision),
       configuration: result.configuration,
       durationSeconds: Number(result.durationMs ?? 0) / 1000,
-      qualityPassed: quality?.passed === true,
-      qualityFailures: Array.isArray(quality?.failures) ? quality.failures : [],
+      qualityPassed: recordedQualityPassed && recalculatedQuality.passed,
+      qualityFailures,
       stabilityPassed: stability?.evaluation?.version === 2
         && stability.evaluation.passed === true,
     }
   })
+}
+
+function safelyEvaluateQuality(result) {
+  try {
+    const evaluation = evaluateQualityRun(result)
+    return { passed: evaluation.passed, failures: evaluation.failures }
+  } catch {
+    return { passed: false, failures: ['INVALID_BENCHMARK_RESULT'] }
+  }
 }
 
 function matchesTarget(entry, match) {

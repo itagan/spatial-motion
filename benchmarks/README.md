@@ -71,7 +71,8 @@ dirty、缺少 `sourceRevision` 或不是 7–40 位 Git 十六进制 SHA 的结
 会产生 `-dirty`。
 每条结果还必须存在匹配的 `calibration.evaluations[].passed: true`；平均 FPS、P95、33ms
 长帧比例、主体 Draw Call 或 resident/submitted 实例覆盖任一失败，都不能仅凭资源趋势
-稳定而满足设备要求。
+稳定而满足设备要求。覆盖扫描还会使用当前 `quality-calibration` 策略从原始 Benchmark
+重新计算；记录判定缺失、结构无效、阈值更新后不再通过或与原始指标冲突时同样拒绝。
 Apple Silicon 当前正式证据为 `2026-08-02-apple-m4-same-revision-steady.json` 与
 `2026-08-02-apple-m4-same-revision-stability-300s.json`；二者均来自同一干净 SHA
 `14e08574e821`。其他目标必须在对应真实硬件上采集，不接受仅修改 UA、视口或设备缩放的
