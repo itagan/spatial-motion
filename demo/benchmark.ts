@@ -103,6 +103,10 @@ declare global {
       itemCount?: number
       qualityMode?: QualityMode
     }) => Promise<void>
+    __spatialMotionBenchmarkDiagnostics?: {
+      firstRenderSubmitMs: number
+      operations: number
+    }
   }
 }
 let baselineResult: BenchmarkResult | null = null
@@ -256,6 +260,7 @@ type BenchmarkScenario =
 async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
   cancelRun()
   const generation = runGeneration
+  window.__spatialMotionBenchmarkDiagnostics = undefined
   const durationSeconds = Number((document.querySelector<HTMLSelectElement>('#duration'))?.value ?? 10)
   const scenario = forcedScenario
     ?? (document.querySelector<HTMLSelectElement>('#scenario')?.value ?? 'steady') as BenchmarkScenario
@@ -298,6 +303,10 @@ async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
     session.record(stage.getPerformanceStats(), performance.now(), benchmarkExtensionStats())
     lastResult = session.finish()
     window.__spatialMotionBenchmarkResult = lastResult
+    window.__spatialMotionBenchmarkDiagnostics = {
+      firstRenderSubmitMs: coldStartRenderSubmitMs,
+      operations: stressOperations,
+    }
     renderResult(lastResult)
     setRunButtonsDisabled(false)
     const exportButton = document.querySelector<HTMLButtonElement>('#export-result')

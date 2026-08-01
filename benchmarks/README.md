@@ -37,8 +37,13 @@ submitted 必须等于该档 `min(inputItems, maxVisibleItems)`，防止部分�
 默认档位仍会执行自身的实例上限；仅在定位 High 全量渲染拐点时，可显式传入
 `--high-max-visible-items 10000`。该参数及覆盖后的实例覆盖要求会写入结果，不能与默认
 High 结果混为一组发布基线。
+`--resolution 40` 可显式覆盖 Cards Atlas 单元分辨率，用于同设备、同实例数下的容量与
+清晰度对照；它不会改变库的默认自动策略，结果也必须与默认分辨率分开解释。
 仅有 `steady` 结果表示初步建议；调整默认质量档前至少应同时采集
 `transition-stress`，并在目标硬件上复验视觉效果。
 
 文件名应包含日期和环境类型。`sourceRevision` 带 `-dirty` 表示采集时工作区存在未提交
 变更，可以保留作开发证据，但不能作为正式发布基线。
+
+矩阵顶层 `runDiagnostics` 与 `results` 按索引对应，保存页面级、无法由 500ms 定时样本
+可靠还原的指标。当前包括 cold-start 重建后连续两个 RAF 内的首次提交峰值和场景操作数。

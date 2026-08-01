@@ -14,6 +14,9 @@ const benchmarkUrl = new URL(`http://127.0.0.1:${options.port}/benchmark.html`)
 if (options.highMaxVisibleItems !== undefined) {
   benchmarkUrl.searchParams.set('highMaxVisibleItems', String(options.highMaxVisibleItems))
 }
+if (options.resolution !== undefined) {
+  benchmarkUrl.searchParams.set('resolution', String(options.resolution))
+}
 const baseUrl = benchmarkUrl.href
 let server = null
 let browser = null
@@ -55,6 +58,7 @@ try {
   assertNoPageErrors(pageErrors)
 
   const results = []
+  const runDiagnostics = []
   for (const itemCount of options.itemCounts) {
     await configureBenchmark(page, { itemCount })
     for (const quality of options.qualities) {
@@ -72,6 +76,7 @@ try {
         await page.locator('#duration').selectOption(String(options.durationSeconds))
         await page.evaluate(() => {
           window.__spatialMotionBenchmarkResult = undefined
+          window.__spatialMotionBenchmarkDiagnostics = undefined
         })
         if (scenario === 'transition-stress') {
           await page.locator('#run-stress').click()
@@ -85,9 +90,17 @@ try {
         await page.waitForFunction(() =>
           document.querySelector('#benchmark-status')?.textContent?.includes('采样完成：'),
         null, { timeout: options.durationSeconds * 1000 + 20_000 })
-        const result = await page.evaluate(() => window.__spatialMotionBenchmarkResult)
+        const { result, diagnostics } = await page.evaluate(() => ({
+          result: window.__spatialMotionBenchmarkResult,
+          diagnostics: window.__spatialMotionBenchmarkDiagnostics,
+        }))
         if (!result) throw new Error('Benchmark page did not expose a completed result')
         results.push(result)
+        runDiagnostics.push({
+          configuration: result.configuration,
+          firstRenderSubmitMs: diagnostics?.firstRenderSubmitMs ?? 0,
+          operations: diagnostics?.operations ?? 0,
+        })
         assertNoPageErrors(pageErrors)
         console.log([
           itemCount,
@@ -123,8 +136,10 @@ try {
       viewport: options.viewport,
       deviceScaleFactor: options.deviceScaleFactor,
       highMaxVisibleItems: options.highMaxVisibleItems ?? null,
+      resolution: options.resolution ?? 'auto',
     },
     results,
+    runDiagnostics,
     calibration,
   }
   const outputPath = resolve(root, options.output)
@@ -167,6 +182,7 @@ function parseArguments(args) {
       read('--high-max-visible-items', undefined),
       '--high-max-visible-items',
     ),
+    resolution: optionalPositiveInteger(read('--resolution', undefined), '--resolution'),
   }
 }
 
