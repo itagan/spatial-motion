@@ -1,12 +1,30 @@
 export function evaluateDeviceCoverage(targets, artifacts) {
   const evidence = artifacts.flatMap(flattenArtifact)
   return targets.map((target) => {
-    const requirements = target.requirements.map((requirement) => {
-      const matches = evidence
+    const requirementMatches = target.requirements.map((requirement) =>
+      evidence
         .filter((entry) => matchesTarget(entry, target.match))
         .filter((entry) => matchesRequirement(entry, requirement))
-        .sort(compareEvidence)
-      const selected = matches[0] ?? null
+        .sort(compareEvidence))
+    const missing = requirementMatches.some((matches) => matches.length === 0)
+    const commonCleanRevisions = missing
+      ? []
+      : intersectRevisions(requirementMatches.map((matches) =>
+          matches.filter(({ cleanRevision }) => cleanRevision)))
+    const commonRevisions = missing ? [] : intersectRevisions(requirementMatches)
+    const sourceRevision = commonCleanRevisions[0] ?? commonRevisions[0] ?? null
+    const status = missing
+      ? 'missing'
+      : commonCleanRevisions.length > 0
+        ? 'qualified'
+        : commonRevisions.length > 0
+          ? 'development-only'
+          : 'mixed-revision'
+    const requirements = target.requirements.map((requirement, index) => {
+      const matches = requirementMatches[index]
+      const selected = sourceRevision
+        ? matches.find((entry) => entry.sourceRevision === sourceRevision) ?? null
+        : matches[0] ?? null
       return {
         ...requirement,
         status: selected
@@ -23,14 +41,23 @@ export function evaluateDeviceCoverage(targets, artifacts) {
     return {
       id: target.id,
       label: target.label,
-      status: requirements.some(({ status }) => status === 'missing')
-        ? 'missing'
-        : requirements.some(({ status }) => status === 'development-only')
-          ? 'development-only'
-          : 'qualified',
+      status,
+      sourceRevision,
       requirements,
     }
   })
+}
+
+function intersectRevisions(groups) {
+  if (groups.length === 0) return []
+  const revisions = new Set(groups[0].map(({ sourceRevision }) => sourceRevision))
+  for (const group of groups.slice(1)) {
+    const current = new Set(group.map(({ sourceRevision }) => sourceRevision))
+    for (const revision of revisions) {
+      if (!current.has(revision)) revisions.delete(revision)
+    }
+  }
+  return [...revisions]
 }
 
 function flattenArtifact(artifact) {

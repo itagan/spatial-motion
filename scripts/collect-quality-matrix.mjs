@@ -369,14 +369,22 @@ function resolveRevision(directory) {
       cwd: directory,
       encoding: 'utf8',
     }).trim()
-    const dirty = execFileSync('git', ['status', '--porcelain'], {
+    const status = execFileSync('git', ['status', '--porcelain'], {
       cwd: directory,
       encoding: 'utf8',
     }).trim()
+    const dirty = status.split('\n').filter(Boolean).some((entry) =>
+      !statusPath(entry).startsWith('benchmarks/results/'))
     return dirty ? `${revision}-dirty` : revision
   } catch {
     return 'unknown'
   }
+}
+
+function statusPath(entry) {
+  const path = entry.slice(3)
+  const renameSeparator = path.lastIndexOf(' -> ')
+  return renameSeparator >= 0 ? path.slice(renameSeparator + 4) : path
 }
 
 async function configureBenchmark(page, configuration) {

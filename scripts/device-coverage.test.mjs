@@ -43,6 +43,14 @@ test('distinguishes missing, development-only, and clean qualified evidence', ()
     artifact('soak-clean.json', 'abc1234', 'transition-stress', 300, true),
   ])
   assert.equal(qualified[0].status, 'qualified')
+  assert.equal(qualified[0].sourceRevision, 'abc1234')
+
+  const mixed = evaluateDeviceCoverage(targets, [
+    artifact('steady-mixed.json', 'abc1234', 'steady', 10),
+    artifact('soak-mixed.json', 'def5678', 'transition-stress', 300, true),
+  ])
+  assert.equal(mixed[0].status, 'mixed-revision')
+  assert.equal(mixed[0].sourceRevision, null)
 })
 
 test('rejects the wrong GPU, short duration, and failed stability evidence', () => {

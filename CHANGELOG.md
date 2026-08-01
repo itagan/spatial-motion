@@ -81,6 +81,8 @@
   实机闭环且拒绝旧缓存或错版本 capture。
 - 设备覆盖匹配新增 CSS viewport、DPR 与移动 GPU 边界，Android/iOS 证据不再能由桌面
   浏览器仅修改 UA 误判满足。
+- 设备目标的 steady 与长稳证据必须共享同一干净源码 SHA；不同版本拼接会明确报告
+  `mixed-revision`，采集器仅忽略结果目录变化以支持同 SHA 连续采集。
 
 ### Added
 

@@ -22,7 +22,8 @@ if (process.argv.includes('--json')) {
   console.log(JSON.stringify({ version: 1, coverage }, null, 2))
 } else {
   coverage.forEach((target) => {
-    console.log(`${target.status.padEnd(16)} ${target.id} · ${target.label}`)
+    const revision = target.sourceRevision ? ` · ${target.sourceRevision}` : ''
+    console.log(`${target.status.padEnd(16)} ${target.id} · ${target.label}${revision}`)
     target.requirements.forEach((requirement) => {
       const key = `${requirement.itemCount}/${requirement.quality}/${requirement.scenario}/${requirement.minDurationSeconds}s${requirement.stability ? '/stability' : ''}`
       const source = requirement.evidence ? ` · ${requirement.evidence.path}` : ''

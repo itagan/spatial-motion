@@ -65,6 +65,10 @@ DPR 至少 2，并匹配真实 Adreno/Mali/PowerVR/Immortalis 或 Apple GPU。UA
 普通报告允许缺口存在，便于逐台采集；`--strict` 要求每项目标均为 `qualified`。
 dirty、缺少 `sourceRevision` 或不是 7–40 位 Git 十六进制 SHA 的结果只记作
 `development-only`，不会满足正式门禁。
+同一目标的 steady 与长稳要求必须在同一个干净 SHA 上同时成立；各自都有干净结果、但
+没有共同 SHA 时报告 `mixed-revision`，严格门禁仍失败。采集器与真实设备导入器只忽略
+`benchmarks/results` 自身的变化，允许从同一代码提交连续写入整套证据；其他文件变化仍
+会产生 `-dirty`。
 Apple Silicon 当前正式证据为 `2026-08-02-apple-m4-steady-qualified.json` 与
 `2026-08-02-apple-m4-transition-stability-300s-v2.json`；二者均从采集开始时的干净 SHA
 生成。其他目标必须在对应真实硬件上采集，不接受仅修改 UA、视口或设备缩放的模拟结果。
