@@ -79,6 +79,8 @@
 - Benchmark 页面新增真实设备证据导出；`benchmark:import-device` 校验浏览器、矩阵和时长，
   校验构建指纹与当前代码 SHA，并在仓库端生成 v2 稳定性与质量校准结果，支持 Android/iOS
   实机闭环且拒绝旧缓存或错版本 capture。
+- 设备覆盖匹配新增 CSS viewport、DPR 与移动 GPU 边界，Android/iOS 证据不再能由桌面
+  浏览器仅修改 UA 误判满足。
 
 ### Added
 

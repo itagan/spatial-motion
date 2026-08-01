@@ -7,7 +7,9 @@
       "match": {
         "browserNames": ["chromium"],
         "platformPattern": "Mac",
-        "gpuPattern": "Apple"
+        "gpuPattern": "Apple",
+        "minViewportWidth": 1200,
+        "minViewportHeight": 600
       },
       "requirements": [
         { "itemCount": 2000, "quality": "high", "scenario": "steady", "minDurationSeconds": 10 },
@@ -19,7 +21,9 @@
       "label": "Intel integrated desktop Chromium",
       "match": {
         "browserNames": ["chromium"],
-        "gpuPattern": "Intel"
+        "gpuPattern": "Intel",
+        "minViewportWidth": 1200,
+        "minViewportHeight": 600
       },
       "requirements": [
         { "itemCount": 2000, "quality": "high", "scenario": "steady", "minDurationSeconds": 10 },
@@ -27,11 +31,13 @@
       ]
     },
     {
-      "id": "windows-mainstream-desktop",
-      "label": "Windows mainstream GPU Chromium",
+      "id": "windows-desktop",
+      "label": "Windows desktop Chromium",
       "match": {
         "browserNames": ["chromium"],
-        "platformPattern": "Win"
+        "platformPattern": "Win",
+        "minViewportWidth": 1200,
+        "minViewportHeight": 600
       },
       "requirements": [
         { "itemCount": 2000, "quality": "high", "scenario": "steady", "minDurationSeconds": 10 },
@@ -39,11 +45,15 @@
       ]
     },
     {
-      "id": "android-midrange",
-      "label": "Android mid-range Chromium",
+      "id": "android-mobile",
+      "label": "Android mobile Chromium",
       "match": {
         "browserNames": ["chromium"],
-        "userAgentPattern": "Android"
+        "userAgentPattern": "Android",
+        "gpuPattern": "Adreno|Mali|PowerVR|Immortalis",
+        "maxViewportWidth": 600,
+        "minViewportHeight": 600,
+        "minDevicePixelRatio": 2
       },
       "requirements": [
         { "itemCount": 1000, "quality": "medium", "scenario": "steady", "minDurationSeconds": 10 },
@@ -55,7 +65,11 @@
       "label": "iOS Safari",
       "match": {
         "browserNames": ["webkit", "safari"],
-        "userAgentPattern": "iPhone|iPad"
+        "userAgentPattern": "iPhone|iPad",
+        "gpuPattern": "Apple",
+        "maxViewportWidth": 600,
+        "minViewportHeight": 600,
+        "minDevicePixelRatio": 2
       },
       "requirements": [
         { "itemCount": 1000, "quality": "medium", "scenario": "steady", "minDurationSeconds": 10 },

@@ -57,8 +57,11 @@ npm run benchmark:coverage -- --strict
 ```
 
 目标与所需场景声明在 `device-targets.json`。当前覆盖 Apple Silicon、Intel 集成显卡、
-Windows 主流桌面 GPU、Android 中端机和 iOS Safari；桌面要求 2000/high，移动端要求
+Windows 桌面、Android 移动端和 iOS Safari；桌面要求 2000/high，移动端要求
 1000/medium，均包含 10 秒 steady 与通过稳定性门禁的 300 秒 transition-stress。
+桌面目标要求至少 1200×600 CSS viewport；移动目标要求宽度不超过 600、高度至少 600、
+DPR 至少 2，并匹配真实 Adreno/Mali/PowerVR/Immortalis 或 Apple GPU。UA 模拟、桌面 GPU
+或错误 viewport 不会满足移动覆盖。
 普通报告允许缺口存在，便于逐台采集；`--strict` 要求每项目标均为 `qualified`。
 dirty、缺少 `sourceRevision` 或不是 7–40 位 Git 十六进制 SHA 的结果只记作
 `development-only`，不会满足正式门禁。
@@ -75,7 +78,7 @@ npm run build:demo
 npx vite preview --host 0.0.0.0 --port 4173
 ```
 
-在手机打开 `http://<电脑局域网地址>:4173/benchmark.html`。Android 与 iOS 均先采集
+手机保持竖屏，在手机打开 `http://<电脑局域网地址>:4173/benchmark.html`。Android 与 iOS 均先采集
 1000/medium/steady/10 秒，再采集 1000/medium/transition-stress/300 秒；第二项使用
 “运行切换压力测试”。每次完成后点击“导出设备证据”，把下载文件保留在仓库外，然后导入：
 

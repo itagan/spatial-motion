@@ -58,6 +58,12 @@ function matchesTarget(entry, match) {
     && matchesPattern(environment.platform, match.platformPattern)
     && matchesPattern(environment.gpuRenderer, match.gpuPattern)
     && matchesPattern(environment.userAgent, match.userAgentPattern)
+    && matchesMinimum(environment.viewportWidth, match.minViewportWidth)
+    && matchesMaximum(environment.viewportWidth, match.maxViewportWidth)
+    && matchesMinimum(environment.viewportHeight, match.minViewportHeight)
+    && matchesMaximum(environment.viewportHeight, match.maxViewportHeight)
+    && matchesMinimum(environment.devicePixelRatio, match.minDevicePixelRatio)
+    && matchesMaximum(environment.devicePixelRatio, match.maxDevicePixelRatio)
 }
 
 function matchesRequirement(entry, requirement) {
@@ -71,6 +77,14 @@ function matchesRequirement(entry, requirement) {
 
 function matchesPattern(value, pattern) {
   return !pattern || new RegExp(pattern, 'i').test(String(value ?? ''))
+}
+
+function matchesMinimum(value, minimum) {
+  return minimum === undefined || Number.isFinite(value) && value >= minimum
+}
+
+function matchesMaximum(value, maximum) {
+  return maximum === undefined || Number.isFinite(value) && value <= maximum
 }
 
 function compareEvidence(left, right) {

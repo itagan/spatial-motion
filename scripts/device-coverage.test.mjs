@@ -65,6 +65,41 @@ test('rejects legacy stability evidence that did not prove diagnostic coverage',
   assert.equal(coverage[0].requirements[1].status, 'missing')
 })
 
+test('requires target viewport, DPR, and mobile GPU boundaries', () => {
+  const mobileTargets = [{
+    id: 'android',
+    label: 'Android',
+    match: {
+      browserNames: ['chromium'],
+      userAgentPattern: 'Android',
+      gpuPattern: 'Adreno|Mali',
+      maxViewportWidth: 600,
+      minViewportHeight: 600,
+      minDevicePixelRatio: 2,
+    },
+    requirements: [
+      { itemCount: 2000, quality: 'high', scenario: 'steady', minDurationSeconds: 10 },
+    ],
+  }]
+  const valid = artifact('android.json', 'abc1234', 'steady', 10, false, 'Adreno 640')
+  valid.data.results[0].configuration.environment = {
+    ...valid.data.results[0].configuration.environment,
+    userAgent: 'Android Chrome',
+    viewportWidth: 412,
+    viewportHeight: 915,
+    devicePixelRatio: 2.625,
+  }
+  assert.equal(evaluateDeviceCoverage(mobileTargets, [valid])[0].status, 'qualified')
+
+  const desktopViewport = structuredClone(valid)
+  desktopViewport.data.results[0].configuration.environment.viewportWidth = 1265
+  assert.equal(evaluateDeviceCoverage(mobileTargets, [desktopViewport])[0].status, 'missing')
+
+  const desktopGpu = structuredClone(valid)
+  desktopGpu.data.results[0].configuration.environment.gpuRenderer = 'Apple M4'
+  assert.equal(evaluateDeviceCoverage(mobileTargets, [desktopGpu])[0].status, 'missing')
+})
+
 function artifact(path, sourceRevision, scenario, durationSeconds, stabilityPassed = false,
   gpuRenderer = 'ANGLE Apple M4') {
   const configuration = {
