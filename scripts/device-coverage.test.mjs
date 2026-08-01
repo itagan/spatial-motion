@@ -51,6 +51,13 @@ test('distinguishes missing, development-only, and clean qualified evidence', ()
   ])
   assert.equal(mixed[0].status, 'mixed-revision')
   assert.equal(mixed[0].sourceRevision, null)
+
+  const unknownCommit = artifact('unknown-commit.json', 'abc1234', 'steady', 10)
+  unknownCommit.revisionKnown = false
+  const unknownSoak = artifact('unknown-soak.json', 'abc1234', 'transition-stress', 300, true)
+  unknownSoak.revisionKnown = false
+  assert.equal(evaluateDeviceCoverage(targets, [unknownCommit, unknownSoak])[0].status,
+    'development-only')
 })
 
 test('rejects the wrong GPU, short duration, and failed stability evidence', () => {

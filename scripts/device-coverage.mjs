@@ -51,6 +51,7 @@ export function evaluateDeviceCoverage(targets, artifacts) {
         evidence: selected && {
           path: selected.path,
           sourceRevision: selected.sourceRevision,
+          revisionKnown: selected.revisionKnown,
           durationSeconds: selected.durationSeconds,
           qualityPassed: selected.qualityPassed,
           qualityFailures: selected.qualityFailures,
@@ -120,7 +121,9 @@ function flattenArtifact(artifact) {
       path: artifact.path,
       browserName: artifact.data.browser?.name ?? '',
       sourceRevision,
-      cleanRevision: /^[0-9a-f]{7,40}$/i.test(sourceRevision),
+      revisionKnown: artifact.revisionKnown !== false,
+      cleanRevision: /^[0-9a-f]{7,40}$/i.test(sourceRevision)
+        && artifact.revisionKnown !== false,
       configuration: result.configuration,
       durationSeconds: Number(result.durationMs ?? 0) / 1000,
       qualityPassed: recordedQualityPassed && recalculatedQuality.passed,
