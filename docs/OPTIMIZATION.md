@@ -911,7 +911,7 @@ Cards-only 从 9,888 降至 8,889 bytes gzip，减少 999 bytes；距 10 KiB 上
 由 352 增至 1,351 bytes。root consumer 从 37,065 降至 36,285 bytes gzip；Core-only
 保持 15,251 bytes，tarball 在加入独立主线程 fallback chunk、内容基准与单元 Canvas
 复用、readback/pack/Worker 时序诊断、批次矩阵、连续 pack、单次 build 快照与冷启动
-重叠后为 140,114 bytes，仍低于
+重叠后为 140,276 bytes，仍低于
 150 KiB 上限。
 模块总量略增是独立 lazy 模块、诊断与 sourcemap 的代价，不代表基础消费者下载回退。
 
@@ -952,3 +952,26 @@ P95 18.6ms、0 个 24/33/50ms 长帧并完整 resident/submitted 2000 项。原�
 `benchmarks/results/2026-08-01-apple-m4-worker-pre-post-breakdown-run1.json` 至 `run3`、
 `benchmarks/results/2026-08-01-apple-m4-worker-runtime-static-run1.json` 至 `run3`，以及
 `benchmarks/results/2026-08-01-apple-m4-worker-runtime-overlap-run1.json` 至 `run3`。
+
+## 生产冷启动采集与 Worker readback 复核
+
+上述 Runtime 三轮对照来自同一 Vite development server 口径，适合比较同模式相对变化，
+但 `runtimeLoad` 的绝对值可能包含首次请求触发的源码 transform。质量矩阵采集器因此新增
+`--preview`：要求使用未占用端口，先执行生产构建，再启动 Vite preview；结果矩阵记录
+`serverMode: "preview"`，默认开发采集则记录 `development`。两种模式不得混合比较。
+
+生产 preview / Chromium 151 / Apple M4 / 1250×625 / DPR 2 的三轮 2000/high/
+cold-start 重新验证了两个候选：
+
+| 候选 | Atlas build | Runtime load | Prepare | Readback | Worker render |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| lazy Runtime 控制组 | 63.0ms | 34.8ms | 1.0ms | 17.1ms | 24.6ms |
+| 静态 Runtime | 61.6ms | 0ms | 33.7ms | 17.6ms | 24.9ms |
+| `desynchronized` Canvas | 61.4ms | 33.7ms | 约 1ms | 17.9ms | 23.8ms |
+
+静态 Runtime 只改善约 2.2%，加载成本主要转移到 Worker 启动期间的准备等待，同时会扩大
+默认 Atlas backend chunk，因此继续保留 lazy Runtime。`desynchronized` 没有降低生产
+readback（17.1→17.9ms），也不保留。两项实验均约 60 FPS、P95 17.6–17.7ms、无
+24/33/50ms 长帧；这证明当前约 17ms readback 无法再通过 Canvas context hint 稳定降低。
+下一步若继续攻击该段，需要评估不经 CPU `getImageData()` 的 GPU Array texture 上传链路，
+并先解决局部 patch、context restore 与 CPU 权威缓冲契约，不能把读回简单搬到主线程。

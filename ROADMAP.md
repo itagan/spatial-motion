@@ -120,6 +120,8 @@
   窗口内 build generation 增加时输出可选快照，排除累计指标对 cold-start 的歧义。
 - [x] **Worker 冷启动重叠**：分解 Runtime 加载、Worker 构造、请求准备与发送前墙钟，
   保留 lazy chunk 并让 Worker 启动与 Runtime 加载并行；同时封闭发送前中止竞态。
+- [x] **生产冷启动口径**：质量矩阵可从 production preview 采集并记录 server mode，
+  动态 chunk/Worker 优化不再混入开发服务器 transform；无稳定收益的提示与静态合并回退。
 
 - [x] 建立可比较的 steady、cold-start、atlas-update 与 transition-stress 基准。
 - [x] 暴露 P50/P95/P99、长帧、CPU/提交、图集和图片加载指标。

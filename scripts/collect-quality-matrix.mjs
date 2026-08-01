@@ -23,9 +23,21 @@ let server = null
 let browser = null
 
 try {
-  if (!await isReachable(baseUrl)) {
+  const serverAlreadyRunning = await isReachable(baseUrl)
+  if (options.preview && serverAlreadyRunning) {
+    throw new Error(`--preview requires an unused port; ${options.port} is already serving content`)
+  }
+  if (!serverAlreadyRunning) {
+    const vitePath = fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url))
+    if (options.preview) {
+      execFileSync(process.execPath, [vitePath, 'build'], {
+        cwd: root,
+        stdio: options.verbose ? 'inherit' : 'ignore',
+      })
+    }
     server = spawn(process.execPath, [
-      fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
+      vitePath,
+      ...(options.preview ? ['preview'] : []),
       '--host',
       '127.0.0.1',
       '--port',
@@ -152,6 +164,7 @@ try {
       resolution: options.resolution ?? 'auto',
       disableAtlasWorker: options.disableAtlasWorker,
       contentMode: options.contentMode,
+      serverMode: options.preview ? 'preview' : 'development',
     },
     results,
     runDiagnostics,
@@ -205,6 +218,7 @@ function parseArguments(args) {
     ),
     resolution: optionalPositiveInteger(read('--resolution', undefined), '--resolution'),
     disableAtlasWorker: args.includes('--disable-atlas-worker'),
+    preview: args.includes('--preview'),
     contentMode: enumValue(read('--content', 'default'), '--content', [
       'default', 'template', 'canvas',
     ]),

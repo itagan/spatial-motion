@@ -161,6 +161,10 @@ high/medium/low steady 矩阵；准备调整默认档位时增加
 分辨率的数据合并。建议门限与 `AdaptivePerformanceManager` 的默认降级条件保持一致，
 但自动建议不能替代目标设备上的视觉和长时间压力验收。
 
+分析动态 import、Worker 启动或首次 chunk 求值时增加 `--preview` 并使用未占用端口。采集器会先执行生产
+构建，再启动静态 preview 服务，并在矩阵元数据写入 `serverMode: "preview"`；默认开发
+模式记录为 `development`。不要直接比较两种 server mode 的绝对 cold-start 数字。
+
 ## 文档维护
 
 - `README.md`：已经实现、可供使用者依赖的能力。

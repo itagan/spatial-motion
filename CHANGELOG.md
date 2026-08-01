@@ -68,6 +68,8 @@
 - Worker 冷启动诊断进一步区分 Runtime 加载、Worker 构造、请求准备与发送前墙钟；
   默认路径在保留 Runtime lazy chunk 的同时并行启动 Worker，Apple M4 三轮 2000/high
   cold-start 的 Atlas build 中位数由 43.2ms 降至 40.6ms。
+- 质量矩阵采集器新增 `--preview` 生产构建模式，并在输出中记录 `serverMode`；动态
+  import/Worker 冷启动不再把 Vite 开发服务器的按需 transform 当作浏览器运行时成本。
 
 ### Added
 
