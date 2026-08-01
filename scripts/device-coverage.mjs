@@ -1,4 +1,5 @@
 import { evaluateQualityRun } from './quality-calibration.mjs'
+import { evaluateStabilityRun } from './stability-evaluation.mjs'
 
 export function evaluateDeviceCoverage(targets, artifacts) {
   const evidence = artifacts.flatMap(flattenArtifact)
@@ -40,6 +41,7 @@ export function evaluateDeviceCoverage(targets, artifacts) {
             ...(requirement.stability && !entry.stabilityPassed ? ['STABILITY'] : []),
           ],
           qualityFailures: entry.qualityFailures,
+          stabilityFailures: requirement.stability ? entry.stabilityFailures : [],
         }))
       return {
         ...requirement,
@@ -88,6 +90,9 @@ function flattenArtifact(artifact) {
     const quality = artifact.data.calibration?.evaluations?.find((entry) =>
       sameConfiguration(entry.configuration, result.configuration))
     const recalculatedQuality = safelyEvaluateQuality(result)
+    const recalculatedStability = stability
+      ? safelyEvaluateStability(stability.browserSamples, result)
+      : { passed: false, failures: ['MISSING_STABILITY_DIAGNOSTICS'] }
     const recordedFailures = Array.isArray(quality?.failures) ? quality.failures : []
     const recordedQualityPassed = quality?.passed === true && recordedFailures.length === 0
     const qualityFailures = [...new Set([
@@ -98,6 +103,19 @@ function flattenArtifact(artifact) {
       ...recordedFailures,
       ...recalculatedQuality.failures,
     ])]
+    const recordedStabilityPassed = stability?.evaluation?.version === 2
+      && stability.evaluation.passed === true
+    const recordedStabilityFailures = Array.isArray(stability?.evaluation?.failures)
+      ? stability.evaluation.failures.map(({ code }) => code)
+      : []
+    const stabilityFailures = [...new Set([
+      ...(!stability ? ['MISSING_STABILITY_DIAGNOSTICS'] : []),
+      ...(stability && !recordedStabilityPassed && recordedStabilityFailures.length === 0
+        ? ['INVALID_RECORDED_STABILITY']
+        : []),
+      ...recordedStabilityFailures,
+      ...recalculatedStability.failures,
+    ])]
     return {
       path: artifact.path,
       browserName: artifact.data.browser?.name ?? '',
@@ -107,8 +125,8 @@ function flattenArtifact(artifact) {
       durationSeconds: Number(result.durationMs ?? 0) / 1000,
       qualityPassed: recordedQualityPassed && recalculatedQuality.passed,
       qualityFailures,
-      stabilityPassed: stability?.evaluation?.version === 2
-        && stability.evaluation.passed === true,
+      stabilityPassed: recordedStabilityPassed && recalculatedStability.passed,
+      stabilityFailures,
     }
   })
 }
@@ -119,6 +137,18 @@ function safelyEvaluateQuality(result) {
     return { passed: evaluation.passed, failures: evaluation.failures }
   } catch {
     return { passed: false, failures: ['INVALID_BENCHMARK_RESULT'] }
+  }
+}
+
+function safelyEvaluateStability(browserSamples, result) {
+  try {
+    const evaluation = evaluateStabilityRun(browserSamples, result)
+    return {
+      passed: evaluation.passed,
+      failures: evaluation.failures.map(({ code }) => code),
+    }
+  } catch {
+    return { passed: false, failures: ['INVALID_STABILITY_SAMPLES'] }
   }
 }
 

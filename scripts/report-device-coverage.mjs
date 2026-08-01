@@ -33,7 +33,10 @@ if (process.argv.includes('--json')) {
         const quality = rejected.qualityFailures.length
           ? `:${rejected.qualityFailures.join(',')}`
           : ''
-        console.log(`    rejected ${rejected.failures.join('+')}${quality} · ${rejected.path}`)
+        const stability = rejected.stabilityFailures.length
+          ? `:${rejected.stabilityFailures.join(',')}`
+          : ''
+        console.log(`    rejected ${rejected.failures.join('+')}${quality}${stability} · ${rejected.path}`)
       })
     })
   })

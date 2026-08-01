@@ -106,6 +106,20 @@ test('rejects legacy stability evidence that did not prove diagnostic coverage',
   assert.equal(coverage[0].requirements[1].status, 'missing')
 })
 
+test('recomputes stability from raw samples instead of trusting a stored pass', () => {
+  const stalePass = artifact('stale-stability.json', 'abc1234', 'transition-stress', 300, true)
+  const samples = stalePass.data.results[0].samples
+  samples.at(-1).stats.renderer.metrics.resourceFailures = 1
+  const coverage = evaluateDeviceCoverage(targets, [
+    artifact('steady.json', 'abc1234', 'steady', 10),
+    stalePass,
+  ])
+
+  assert.equal(coverage[0].requirements[1].status, 'missing')
+  assert.ok(coverage[0].requirements[1].rejectedEvidence[0].stabilityFailures
+    .includes('resource-failure-growth'))
+})
+
 test('requires target viewport, DPR, and mobile GPU boundaries', () => {
   const mobileTargets = [{
     id: 'android',
@@ -150,6 +164,19 @@ function artifact(path, sourceRevision, scenario, durationSeconds, stabilityPass
     layout: 'sphere',
     environment: { platform: 'MacIntel', gpuRenderer, userAgent: 'Chromium' },
   }
+  const renderer = (resourceFailures = 0) => ({
+    gpuBytes: 1000,
+    metrics: {
+      textureBytes: 800,
+      geometryBuilds: 1,
+      resourceFailures,
+      programFailures: 0,
+    },
+  })
+  const samples = Array.from({ length: 4 }, (_value, index) => ({
+    elapsedMs: index * 500,
+    stats: { contextLost: false, renderer: renderer() },
+  }))
   return {
     path,
     data: {
@@ -167,12 +194,23 @@ function artifact(path, sourceRevision, scenario, durationSeconds, stabilityPass
         maximumDrawCalls: 1,
         renderedItems: 2000,
         submittedItems: 2000,
+        imageFailures: 0,
+        samples,
       }],
       calibration: {
         evaluations: [{ configuration, passed: true, failures: [] }],
       },
       stabilityDiagnostics: stabilityPassed
-        ? [{ configuration, evaluation: { version: 2, passed: true } }]
+        ? [{
+            configuration,
+            browserSamples: Array.from({ length: 4 }, (_value, index) => ({
+              elapsedMs: index * 5_000,
+              usedJSHeapBytes: 100,
+              domNodes: 100,
+              canvases: 1,
+            })),
+            evaluation: { version: 2, passed: true, failures: [] },
+          }]
         : [],
     },
   }
