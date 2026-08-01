@@ -61,6 +61,9 @@ Windows 主流桌面 GPU、Android 中端机和 iOS Safari；桌面要求 2000/h
 1000/medium，均包含 10 秒 steady 与通过稳定性门禁的 300 秒 transition-stress。
 普通报告允许缺口存在，便于逐台采集；`--strict` 要求每项目标均为 `qualified`。
 dirty 或缺少 `sourceRevision` 的结果只记作 `development-only`，不会满足正式门禁。
+Apple Silicon 当前正式证据为 `2026-08-02-apple-m4-steady-qualified.json` 与
+`2026-08-02-apple-m4-transition-stability-300s-v2.json`；二者均从采集开始时的干净 SHA
+生成。其他目标必须在对应真实硬件上采集，不接受仅修改 UA、视口或设备缩放的模拟结果。
 
 `--headed` 用于采集真实有界面 GPU 环境；默认无头模式适合自动化和软件渲染基线。
 不同 `gpuRenderer`、视口或 DPR 的结果不会合并推荐。无头 SwiftShader 结果只能代表

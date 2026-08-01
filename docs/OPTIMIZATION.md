@@ -1015,4 +1015,12 @@ GPU、规模、质量和场景。当前 Apple Silicon 两项要求均有 `develo
 随后审计发现 Stage 的 64 项 Renderer 指标上限会截掉 Cards 的资源与 Program 失败计数，
 旧结果因此只能证明已实际保存的资源趋势，不能作为完整长稳证据。上限已扩至 96，长稳
 判定升级为 v2：必要样本或关键计数缺失时直接失败，覆盖工具也拒绝旧版 `passed`。提交后
-从干净 SHA 重采 v2 证据，并继续采集四类目标设备；在覆盖完整前不调整默认 Profile。
+从干净 SHA `28cacd5664b2` 重采的 300 秒 v2 证据包含 16 个稳定窗口浏览器样本和 301 个
+Renderer 样本：334 次操作、60.0 FPS、P95/P99 18.26/18.60ms、0 长帧；Heap、DOM、
+Canvas、GPU/纹理 bytes、Geometry build、资源与 Program 失败均零增长。结果保存在
+`benchmarks/results/2026-08-02-apple-m4-transition-stability-300s-v2.json`。
+
+随后从干净 SHA `b4ce488c7824` 采集 10 秒 steady：60.0 FPS、P95/P99 18.10/18.45ms、
+0 长帧、2000 resident/submitted、主体 1 Draw Call。该结果与 v2 soak 共同使
+`apple-silicon-desktop` 达到 `qualified`。Intel、Windows、Android 与 iOS 仍缺真实设备
+证据；在覆盖完整前不调整默认 Profile，也不把 UA/viewport 模拟当作实机结论。
