@@ -1,6 +1,7 @@
 import { drawDefaultCell } from './DefaultCardPainter.js'
 import {
   createArrayAtlasLayout,
+  resolveArrayAtlasBatchLayout,
   type ArrayAtlasLayout,
 } from './ArrayAtlasStore.js'
 import type {
@@ -14,10 +15,11 @@ interface DefaultCardWorkerScope {
 }
 
 const scope = globalThis as unknown as DefaultCardWorkerScope
-const ARRAY_RASTER_BATCH_BYTES = 8 * 1024 * 1024
+const ARRAY_RASTER_BATCH_BYTES = 2 * 1024 * 1024
 
 scope.onmessage = (event) => {
   const images = event.data.images
+  const workerRenderStartedAt = now()
   try {
     const request = event.data
     const array = request.arrayMaxTextureLayers
@@ -39,6 +41,8 @@ scope.onmessage = (event) => {
       arrayPageColumns: array?.layout.pageColumns,
       arrayPageRows: array?.layout.pageRows,
       arrayPackMs: array?.packMs ?? 0,
+      workerRenderMs: now() - workerRenderStartedAt,
+      pixelBufferPeakBytes: array?.pixelBufferPeakBytes ?? single?.data.byteLength ?? 0,
       cellRenderMs: array?.cellRenderMs ?? single?.cellRenderMs ?? 0,
       readbackMs: array?.readbackMs ?? single?.readbackMs ?? 0,
     }, transfer)
@@ -59,7 +63,7 @@ function renderSingleAtlas(request: DefaultCardWorkerRequest): {
   readbackMs: number
 } {
   const canvas = new OffscreenCanvas(request.width, request.height)
-  const context = getContext(canvas)
+  const context = getContext(canvas, false)
   const cellRenderStartedAt = now()
   request.items.forEach((item, index) => {
     drawItem(context, request, item, index % request.columns, Math.floor(index / request.columns))
@@ -80,6 +84,7 @@ function renderArrayPages(request: DefaultCardWorkerRequest): {
   cellRenderMs: number
   readbackMs: number
   packMs: number
+  pixelBufferPeakBytes: number
 } | null {
   const layout = createArrayAtlasLayout(request.items.length, {
     sourceWidth: request.width,
@@ -94,31 +99,26 @@ function renderArrayPages(request: DefaultCardWorkerRequest): {
   })
   if (!layout) return null
 
-  const maximumBatchLayers = Math.min(
-    layout.depth,
-    Math.max(1, Math.floor(ARRAY_RASTER_BATCH_BYTES / layout.layerByteLength)),
-  )
-  const batchColumns = Math.min(
-    maximumBatchLayers,
-    Math.max(1, Math.ceil(Math.sqrt(
-      maximumBatchLayers * layout.height / layout.width,
-    ))),
-  )
-  const batchRows = Math.max(1, Math.floor(maximumBatchLayers / batchColumns))
-  const layersPerBatch = batchColumns * batchRows
+  const balancedBatch = resolveArrayAtlasBatchLayout(layout, ARRAY_RASTER_BATCH_BYTES)
+  const batch = {
+    columns: 1,
+    rows: balancedBatch.layersPerBatch,
+    layersPerBatch: balancedBatch.layersPerBatch,
+  }
   const canvas = new OffscreenCanvas(
-    batchColumns * layout.width,
-    batchRows * layout.height,
+    batch.columns * layout.width,
+    batch.rows * layout.height,
   )
-  const context = getContext(canvas)
+  const context = getContext(canvas, true)
   const data = new Uint8Array(layout.layerByteLength * layout.depth)
   let cellRenderMs = 0
   let readbackMs = 0
   let packMs = 0
-  for (let firstLayer = 0; firstLayer < layout.depth; firstLayer += layersPerBatch) {
-    const batchLayerCount = Math.min(layersPerBatch, layout.depth - firstLayer)
-    const readColumns = Math.min(batchColumns, batchLayerCount)
-    const readRows = Math.ceil(batchLayerCount / batchColumns)
+  let maximumReadbackBytes = 0
+  for (let firstLayer = 0; firstLayer < layout.depth; firstLayer += batch.layersPerBatch) {
+    const batchLayerCount = Math.min(batch.layersPerBatch, layout.depth - firstLayer)
+    const readColumns = Math.min(batch.columns, batchLayerCount)
+    const readRows = Math.ceil(batchLayerCount / batch.columns)
     const readWidth = readColumns * layout.width
     const readHeight = readRows * layout.height
     context.clearRect(0, 0, readWidth, readHeight)
@@ -127,41 +127,50 @@ function renderArrayPages(request: DefaultCardWorkerRequest): {
       const layer = firstLayer + batchLayer
       const firstItem = layer * layout.pageCapacity
       const lastItem = Math.min(request.items.length, firstItem + layout.pageCapacity)
-      const pageX = (batchLayer % batchColumns) * layout.width
-      const pageY = Math.floor(batchLayer / batchColumns) * layout.height
-      for (let index = firstItem; index < lastItem; index += 1) {
-        const pageSlot = index - firstItem
-        drawItem(
-          context,
-          request,
-          request.items[index],
-          pageSlot % layout.pageColumns,
-          Math.floor(pageSlot / layout.pageColumns),
-          pageX,
-          pageY,
-        )
+      const pageY = batchLayer * layout.height
+      context.save()
+      try {
+        context.translate(0, pageY + layout.height)
+        context.scale(1, -1)
+        for (let index = firstItem; index < lastItem; index += 1) {
+          const pageSlot = index - firstItem
+          drawItem(
+            context,
+            request,
+            request.items[index],
+            pageSlot % layout.pageColumns,
+            Math.floor(pageSlot / layout.pageColumns),
+            0,
+            0,
+          )
+        }
+      } finally {
+        context.restore()
       }
     }
     cellRenderMs += now() - cellRenderStartedAt
 
     const readbackStartedAt = now()
     const pixels = context.getImageData(0, 0, readWidth, readHeight).data
+    maximumReadbackBytes = Math.max(maximumReadbackBytes, pixels.byteLength)
     readbackMs += now() - readbackStartedAt
     const packStartedAt = now()
     for (let batchLayer = 0; batchLayer < batchLayerCount; batchLayer += 1) {
       const layer = firstLayer + batchLayer
-      const pageX = (batchLayer % batchColumns) * layout.width
-      const pageY = Math.floor(batchLayer / batchColumns) * layout.height
-      for (let row = 0; row < layout.height; row += 1) {
-        const sourceOffset = ((pageY + row) * readWidth + pageX) * 4
-        const targetOffset = layer * layout.layerByteLength
-          + (layout.height - 1 - row) * layout.width * 4
-        data.set(pixels.subarray(sourceOffset, sourceOffset + layout.width * 4), targetOffset)
-      }
+      const sourceOffset = batchLayer * layout.layerByteLength
+      const targetOffset = layer * layout.layerByteLength
+      data.set(pixels.subarray(sourceOffset, sourceOffset + layout.layerByteLength), targetOffset)
     }
     packMs += now() - packStartedAt
   }
-  return { data, layout, cellRenderMs, readbackMs, packMs }
+  return {
+    data,
+    layout,
+    cellRenderMs,
+    readbackMs,
+    packMs,
+    pixelBufferPeakBytes: data.byteLength + maximumReadbackBytes,
+  }
 }
 
 function drawItem(
@@ -187,8 +196,13 @@ function drawItem(
   )
 }
 
-function getContext(canvas: OffscreenCanvas): OffscreenCanvasRenderingContext2D {
-  const context = canvas.getContext('2d')
+function getContext(
+  canvas: OffscreenCanvas,
+  willReadFrequently: boolean,
+): OffscreenCanvasRenderingContext2D {
+  const context = willReadFrequently
+    ? canvas.getContext('2d', { willReadFrequently: true })
+    : canvas.getContext('2d')
   if (!context) throw new Error('Offscreen Canvas 2D context is unavailable')
   return context
 }

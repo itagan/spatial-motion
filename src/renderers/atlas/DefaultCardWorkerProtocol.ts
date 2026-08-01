@@ -30,6 +30,8 @@ export interface DefaultCardWorkerResponse {
   arrayPageColumns?: number
   arrayPageRows?: number
   arrayPackMs?: number
+  workerRenderMs?: number
+  pixelBufferPeakBytes?: number
   cellRenderMs: number
   readbackMs: number
   error?: string

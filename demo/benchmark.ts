@@ -17,6 +17,8 @@ import {
   tunnel,
   vortex,
   type BenchmarkResult,
+  type CardContentRenderer,
+  type DrawCard,
   type Layout,
   type MotionItem,
   type QualityMode,
@@ -57,6 +59,12 @@ const container = document.querySelector<HTMLElement>('#benchmark-stage')
 if (!container) throw new Error('Benchmark stage container not found')
 
 const benchmarkParameters = new URLSearchParams(window.location.search)
+type BenchmarkContentMode = 'default' | 'template' | 'canvas'
+const contentParameter = benchmarkParameters.get('content')
+const requestedContentMode: BenchmarkContentMode = contentParameter === 'template'
+  || contentParameter === 'canvas'
+  ? contentParameter
+  : 'default'
 const requestedResolution = resolveBenchmarkResolution(benchmarkParameters.get('resolution'))
 const mipmapsParameter = benchmarkParameters.get('mipmaps')
 const requestedMipmaps = mipmapsParameter === '1'
@@ -72,6 +80,83 @@ const requestedAtlasMode = atlasParameter === 'single'
   || atlasParameter === 'auto'
   ? atlasParameter
   : 'auto'
+let benchmarkTemplate: CardContentRenderer | undefined
+if (requestedContentMode === 'template') {
+  const { defineCardTemplate, html } = await import('@spatial-motion/card-template')
+  benchmarkTemplate = defineCardTemplate((item) => html`
+    <div class="benchmark-card">
+      <img src=${item.image} style="height:70%;object-fit:cover;object-position:50% 35%" />
+      <div class="benchmark-copy">
+        <span class="benchmark-title">${item.title}</span>
+        <span class="benchmark-rank">PARTICIPANT</span>
+      </div>
+    </div>
+  `, {
+    styles: {
+      'benchmark-card': {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        padding: 3,
+        overflow: 'hidden',
+        background: 'linear-gradient(145deg, #082f49, #155e75)',
+      },
+      'benchmark-copy': {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 1,
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+      },
+      'benchmark-title': {
+        color: '#ffffff',
+        fontSize: 8,
+        fontWeight: 800,
+        lineClamp: 1,
+        textAlign: 'center',
+      },
+      'benchmark-rank': {
+        color: '#a5f3fc',
+        fontSize: 5,
+        fontWeight: 700,
+        lineClamp: 1,
+        textAlign: 'center',
+      },
+    },
+  })
+}
+const benchmarkCanvasDraw: DrawCard = (context, item, bounds) => {
+  const gradient = context.createLinearGradient(
+    bounds.x,
+    bounds.y,
+    bounds.x + bounds.width,
+    bounds.y + bounds.height,
+  )
+  gradient.addColorStop(0, '#312e81')
+  gradient.addColorStop(1, '#7e22ce')
+  context.fillStyle = gradient
+  context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height)
+  context.fillStyle = 'rgba(255,255,255,.18)'
+  context.beginPath()
+  context.arc(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height * 0.38,
+    bounds.width * 0.2,
+    0,
+    Math.PI * 2,
+  )
+  context.fill()
+  context.fillStyle = '#ffffff'
+  context.font = `800 ${Math.max(7, bounds.width * 0.16)}px sans-serif`
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  context.fillText(
+    item.title ?? item.id,
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height * 0.72,
+  )
+}
 const stage = new MotionStage({
   container,
   renderer: cardsRenderer({
@@ -79,6 +164,8 @@ const stage = new MotionStage({
     mipmaps: requestedMipmaps,
     texturePrewarm: requestedTexturePrewarm,
     atlasMode: requestedAtlasMode,
+    content: requestedContentMode === 'template' ? benchmarkTemplate : undefined,
+    draw: requestedContentMode === 'canvas' ? benchmarkCanvasDraw : undefined,
   }),
   quality: 'auto',
   qualityProfiles: requestedHighMaxVisibleItems === undefined
@@ -416,6 +503,7 @@ function benchmarkExtensionStats() {
 
 function renderResult(result: BenchmarkResult): void {
   const summary = {
+    contentMode: requestedContentMode,
     configuration: result.configuration,
     durationMs: Math.round(result.durationMs),
     sampleCount: result.sampleCount,
@@ -464,6 +552,26 @@ function renderResult(result: BenchmarkResult): void {
       imageLoadWallMs: Number(result.atlasImageLoadWallMs.toFixed(2)),
       cellRenderMs: Number(result.atlasCellRenderMs.toFixed(2)),
       readbackMs: Number(result.atlasReadbackMs.toFixed(2)),
+      arrayPackMs: Number((result.atlasArrayPackMs ?? 0).toFixed(2)),
+      workerRenderMs: Number((result.atlasWorkerRenderMs ?? 0).toFixed(2)),
+      workerRoundTripMs: Number((result.atlasWorkerRoundTripMs ?? 0).toFixed(2)),
+      workerRuntimeLoadMs: Number((result.atlasWorkerRuntimeLoadMs ?? 0).toFixed(2)),
+      workerConstructMs: Number((result.atlasWorkerConstructMs ?? 0).toFixed(2)),
+      workerRequestPrepareMs: Number((result.atlasWorkerRequestPrepareMs ?? 0).toFixed(2)),
+      workerPrePostMs: Number((result.atlasWorkerPrePostMs ?? 0).toFixed(2)),
+      lastBuildMs: Number((result.atlasLastBuildMs ?? 0).toFixed(2)),
+      lastPrepareMs: Number((result.atlasLastPrepareMs ?? 0).toFixed(2)),
+      lastImageLoadWallMs: Number((result.atlasLastImageLoadWallMs ?? 0).toFixed(2)),
+      lastCellRenderMs: Number((result.atlasLastCellRenderMs ?? 0).toFixed(2)),
+      lastReadbackMs: Number((result.atlasLastReadbackMs ?? 0).toFixed(2)),
+      lastArrayPackMs: Number((result.atlasLastArrayPackMs ?? 0).toFixed(2)),
+      lastWorkerRenderMs: Number((result.atlasLastWorkerRenderMs ?? 0).toFixed(2)),
+      lastWorkerRoundTripMs: Number((result.atlasLastWorkerRoundTripMs ?? 0).toFixed(2)),
+      lastWorkerRuntimeLoadMs: Number((result.atlasLastWorkerRuntimeLoadMs ?? 0).toFixed(2)),
+      lastWorkerConstructMs: Number((result.atlasLastWorkerConstructMs ?? 0).toFixed(2)),
+      lastWorkerRequestPrepareMs:
+        Number((result.atlasLastWorkerRequestPrepareMs ?? 0).toFixed(2)),
+      lastWorkerPrePostMs: Number((result.atlasLastWorkerPrePostMs ?? 0).toFixed(2)),
       workerRenders: result.atlasWorkerRenders,
       imageBitmapDecodeMs: Number(result.atlasImageBitmapDecodeMs.toFixed(2)),
       texturePrewarms: result.atlasTexturePrewarms,
@@ -474,6 +582,20 @@ function renderResult(result: BenchmarkResult): void {
       imageRequests: result.imageRequests,
       imageFailures: result.imageFailures,
       estimatedUploadBytes: result.estimatedTextureUploadBytes,
+      cpuResidentBytes: result.samples.at(-1)?.stats.renderer.metrics.atlasCpuBytes ?? 0,
+      gpuResidentBytes: result.samples.at(-1)?.stats.renderer.metrics.atlasGpuBytes ?? 0,
+      buildPixelBufferPeakBytes:
+        result.samples.at(-1)?.stats.renderer.metrics.atlasBuildPixelBufferPeakBytes ?? 0,
+      maxBuildPixelBufferBytes:
+        result.samples.at(-1)?.stats.renderer.metrics.maxAtlasBuildPixelBufferBytes ?? 0,
+      mainThreadRasterYields:
+        result.samples.at(-1)?.stats.renderer.metrics.mainThreadRasterYields ?? 0,
+      mainThreadRasterYieldMs:
+        Number((result.samples.at(-1)?.stats.renderer.metrics.mainThreadRasterYieldMs ?? 0).toFixed(2)),
+      totalMainThreadRasterYields:
+        result.samples.at(-1)?.stats.renderer.metrics.totalMainThreadRasterYields ?? 0,
+      totalMainThreadRasterYieldMs:
+        Number((result.samples.at(-1)?.stats.renderer.metrics.totalMainThreadRasterYieldMs ?? 0).toFixed(2)),
       resolution: result.samples.at(-1)?.stats.renderer.metrics.atlasResolution ?? 0,
       mipmaps: Boolean(result.samples.at(-1)?.stats.renderer.metrics.atlasMipmaps),
       requestedResolution,
@@ -484,6 +606,8 @@ function renderResult(result: BenchmarkResult): void {
       uploadedAtlasLayers: result.samples.at(-1)?.stats.renderer.metrics.uploadedLayers ?? 0,
       pendingAtlasLayers: result.samples.at(-1)?.stats.renderer.metrics.pendingLayers ?? 0,
       atlasLayerUploadFrames: result.samples.at(-1)?.stats.renderer.metrics.layerUploadFrames ?? 0,
+      totalAtlasLayerUploadFrames:
+        result.samples.at(-1)?.stats.renderer.metrics.totalLayerUploadFrames ?? 0,
       arrayUploadBudgetBytes:
         result.samples.at(-1)?.stats.renderer.metrics.arrayUploadBudgetBytes ?? 0,
       arrayUploadPeakBudgetBytes:

@@ -90,6 +90,16 @@ export interface TextureAtlasMetrics {
   workerRenders?: number
   imageBitmapDecodeMs?: number
   arrayPackMs?: number
+  workerRenderMs?: number
+  workerRoundTripMs?: number
+  workerRuntimeLoadMs?: number
+  workerConstructMs?: number
+  workerRequestPrepareMs?: number
+  workerPrePostMs?: number
+  /** Peak live TypedArray pixel storage during this build; excludes Canvas backing stores. */
+  pixelBufferPeakBytes?: number
+  mainThreadRasterYields?: number
+  mainThreadRasterYieldMs?: number
 }
 
 interface ArrayAtlasPatcher {
@@ -190,10 +200,50 @@ export async function createTextureAtlas<TMeta = unknown>(
         workerRenders: 1,
         imageBitmapDecodeMs: workerResult.imageBitmapDecodeMs,
         arrayPackMs: workerResult.array?.packMs ?? 0,
+        workerRenderMs: workerResult.workerRenderMs,
+        workerRoundTripMs: workerResult.workerRoundTripMs,
+        workerRuntimeLoadMs: workerResult.workerRuntimeLoadMs,
+        workerConstructMs: workerResult.workerConstructMs,
+        workerRequestPrepareMs: workerResult.workerRequestPrepareMs,
+        workerPrePostMs: workerResult.workerPrePostMs,
+        pixelBufferPeakBytes: workerResult.pixelBufferPeakBytes,
       },
       workerResult.array,
       useArrayAtlas,
     )
+  }
+
+  if (useArrayAtlas) {
+    const { rasterizeMainThreadArrayAtlas } = await import(
+      './atlas/MainThreadArrayRasterizer.js'
+    )
+    const array = await rasterizeMainThreadArrayAtlas(
+      items,
+      {
+        sourceWidth: width,
+        sourceHeight: height,
+        sourceColumns: columns,
+        sourceStrideX: strideX,
+        sourceStrideY: strideY,
+        cellSize: resolvedCellSize,
+        cellWidth,
+        cellHeight,
+        padding,
+      },
+      options,
+      workerAttempt.resources,
+    )
+    if (array) {
+      return createAtlasResult(
+        array.data,
+        rects,
+        metrics,
+        options,
+        array.metrics,
+        array.array,
+        true,
+      )
+    }
   }
 
   const canvas = document.createElement('canvas')
@@ -222,6 +272,7 @@ export async function createTextureAtlas<TMeta = unknown>(
     uploadRanges: 1,
     workerRenders: 0,
     imageBitmapDecodeMs: 0,
+    pixelBufferPeakBytes: data.byteLength,
   }
   return createAtlasResult(data, rects, metrics, options, patch.metrics, undefined, useArrayAtlas)
 }
@@ -304,6 +355,9 @@ async function createAtlasResult<TMeta>(
           ...atlasMetrics,
           uploadBytes: array.data.byteLength,
           arrayPackMs: prepackedArray?.packMs ?? now() - arrayStartedAt,
+          pixelBufferPeakBytes: prepackedArray
+            ? atlasMetrics.pixelBufferPeakBytes ?? array.data.byteLength
+            : data.byteLength + array.data.byteLength,
         },
       }
       texture.onUpdate = () => {

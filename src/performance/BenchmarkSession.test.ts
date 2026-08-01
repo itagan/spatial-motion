@@ -45,6 +45,25 @@ function stats(overrides: Partial<StagePerformanceStats> = {}): StagePerformance
         atlasImageLoadWallMs: 0,
         atlasCellRenderMs: 6,
         atlasReadbackMs: 1,
+        atlasArrayPackMs: 4,
+        atlasWorkerRenderMs: 7,
+        atlasWorkerRoundTripMs: 10,
+        atlasWorkerRuntimeLoadMs: 2,
+        atlasWorkerConstructMs: 1,
+        atlasWorkerRequestPrepareMs: 2,
+        atlasWorkerPrePostMs: 6,
+        atlasLastBuildMs: 10,
+        atlasLastPrepareMs: 1,
+        atlasLastImageLoadWallMs: 0,
+        atlasLastCellRenderMs: 6,
+        atlasLastReadbackMs: 1,
+        atlasLastArrayPackMs: 4,
+        atlasLastWorkerRenderMs: 7,
+        atlasLastWorkerRoundTripMs: 10,
+        atlasLastWorkerRuntimeLoadMs: 2,
+        atlasLastWorkerConstructMs: 1,
+        atlasLastWorkerRequestPrepareMs: 2,
+        atlasLastWorkerPrePostMs: 6,
         atlasWorkerRenders: 1,
         atlasImageBitmapDecodeMs: 2,
         atlasTexturePrewarms: 1,
@@ -128,9 +147,29 @@ describe('BenchmarkSession', () => {
         submittedInstanceCount: 600,
         gpuBytes: 2_000_000,
         metrics: {
+          atlasBuilds: 2,
           atlasPatches: 1,
           atlasCellsUpdated: 601,
           atlasPatchMs: 3,
+          atlasArrayPackMs: 9,
+          atlasWorkerRenderMs: 17,
+          atlasWorkerRoundTripMs: 25,
+          atlasWorkerRuntimeLoadMs: 7,
+          atlasWorkerConstructMs: 3,
+          atlasWorkerRequestPrepareMs: 6,
+          atlasWorkerPrePostMs: 18,
+          atlasLastBuildMs: 20,
+          atlasLastPrepareMs: 2,
+          atlasLastImageLoadWallMs: 3,
+          atlasLastCellRenderMs: 12,
+          atlasLastReadbackMs: 5,
+          atlasLastArrayPackMs: 6,
+          atlasLastWorkerRenderMs: 16,
+          atlasLastWorkerRoundTripMs: 22,
+          atlasLastWorkerRuntimeLoadMs: 5,
+          atlasLastWorkerConstructMs: 2,
+          atlasLastWorkerRequestPrepareMs: 4,
+          atlasLastWorkerPrePostMs: 14,
           estimatedTextureUploadBytes: 4_000_000,
         },
       },
@@ -158,6 +197,7 @@ describe('BenchmarkSession', () => {
       maximumExtensions: 2,
       transformCalculationMs: 4,
       transformCalculations: 2,
+      atlasBuilds: 1,
       atlasPatches: 1,
       atlasCellsUpdated: 1,
       atlasPatchMs: 3,
@@ -165,6 +205,25 @@ describe('BenchmarkSession', () => {
       atlasImageLoadWallMs: 0,
       atlasCellRenderMs: 0,
       atlasReadbackMs: 0,
+      atlasArrayPackMs: 5,
+      atlasWorkerRenderMs: 10,
+      atlasWorkerRoundTripMs: 15,
+      atlasWorkerRuntimeLoadMs: 5,
+      atlasWorkerConstructMs: 2,
+      atlasWorkerRequestPrepareMs: 4,
+      atlasWorkerPrePostMs: 12,
+      atlasLastBuildMs: 20,
+      atlasLastPrepareMs: 2,
+      atlasLastImageLoadWallMs: 3,
+      atlasLastCellRenderMs: 12,
+      atlasLastReadbackMs: 5,
+      atlasLastArrayPackMs: 6,
+      atlasLastWorkerRenderMs: 16,
+      atlasLastWorkerRoundTripMs: 22,
+      atlasLastWorkerRuntimeLoadMs: 5,
+      atlasLastWorkerConstructMs: 2,
+      atlasLastWorkerRequestPrepareMs: 4,
+      atlasLastWorkerPrePostMs: 14,
       atlasWorkerRenders: 0,
       atlasImageBitmapDecodeMs: 0,
       atlasTexturePrewarms: 0,
@@ -184,7 +243,13 @@ describe('BenchmarkSession', () => {
 
   it('returns zero aggregates for a session without samples', () => {
     const result = new BenchmarkSession({ itemCount: 100, qualityMode: 'auto', layout: 'grid' }, 0).finish(500)
-    expect(result).toMatchObject({ sampleCount: 0, averageFps: 0, minimumFps: 0, renderedItems: 0 })
+    expect(result).toMatchObject({
+      sampleCount: 0,
+      averageFps: 0,
+      minimumFps: 0,
+      renderedItems: 0,
+      atlasLastBuildMs: 0,
+    })
   })
 
   it('compares compatible benchmark results without hiding regressions', () => {
@@ -258,7 +323,41 @@ describe('BenchmarkSession', () => {
     const result = new BenchmarkSession({ itemCount: 100, qualityMode: 'high', layout: 'grid' }, 0).finish(10)
     const parsed = parseBenchmarkResult(JSON.stringify({ ...result, version: undefined }))
     expect(parsed.version).toBe(1)
+    const {
+      atlasArrayPackMs: _legacyArrayPack,
+      atlasWorkerRenderMs: _legacyWorkerRender,
+      atlasWorkerRoundTripMs: _legacyWorkerRoundTrip,
+      atlasWorkerPrePostMs: _legacyWorkerPrePost,
+      atlasLastBuildMs: _legacyLastBuild,
+      atlasLastPrepareMs: _legacyLastPrepare,
+      atlasLastImageLoadWallMs: _legacyLastImageLoadWall,
+      atlasLastCellRenderMs: _legacyLastCellRender,
+      atlasLastReadbackMs: _legacyLastReadback,
+      atlasLastArrayPackMs: _legacyLastArrayPack,
+      atlasLastWorkerRenderMs: _legacyLastWorkerRender,
+      atlasLastWorkerRoundTripMs: _legacyLastWorkerRoundTrip,
+      atlasLastWorkerPrePostMs: _legacyLastWorkerPrePost,
+      ...legacyResult
+    } = result
+    const parsedLegacy = parseBenchmarkResult(JSON.stringify(legacyResult))
+    expect(parsedLegacy.atlasArrayPackMs).toBeUndefined()
+    expect(parsedLegacy.atlasWorkerRenderMs).toBeUndefined()
+    expect(parsedLegacy.atlasWorkerRoundTripMs).toBeUndefined()
+    expect(parsedLegacy.atlasWorkerPrePostMs).toBeUndefined()
+    expect(parsedLegacy.atlasLastBuildMs).toBeUndefined()
     expect(() => parseBenchmarkResult({ ...result, averageFps: Number.NaN })).toThrow('benchmark.averageFps')
+    expect(() => parseBenchmarkResult({ ...result, atlasArrayPackMs: -1 })).toThrow(
+      'benchmark.atlasArrayPackMs',
+    )
+    expect(() => parseBenchmarkResult({ ...result, atlasWorkerRoundTripMs: -1 })).toThrow(
+      'benchmark.atlasWorkerRoundTripMs',
+    )
+    expect(() => parseBenchmarkResult({ ...result, atlasLastBuildMs: -1 })).toThrow(
+      'benchmark.atlasLastBuildMs',
+    )
+    expect(() => parseBenchmarkResult({ ...result, atlasLastWorkerPrePostMs: -1 })).toThrow(
+      'benchmark.atlasLastWorkerPrePostMs',
+    )
     expect(() => parseBenchmarkResult({ ...result, version: 2 })).toThrow('benchmark version')
     expect(() => evaluateBenchmarkRegression(result, result, {
       averageFps: { maxRegressionPercent: -1 },

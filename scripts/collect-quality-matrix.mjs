@@ -17,6 +17,7 @@ if (options.highMaxVisibleItems !== undefined) {
 if (options.resolution !== undefined) {
   benchmarkUrl.searchParams.set('resolution', String(options.resolution))
 }
+benchmarkUrl.searchParams.set('content', options.contentMode)
 const baseUrl = benchmarkUrl.href
 let server = null
 let browser = null
@@ -43,6 +44,14 @@ try {
     deviceScaleFactor: options.deviceScaleFactor,
   })
   const page = await context.newPage()
+  if (options.disableAtlasWorker) {
+    await page.addInitScript(() => {
+      Object.defineProperty(globalThis, 'Worker', {
+        configurable: true,
+        value: undefined,
+      })
+    })
+  }
   const pageErrors = []
   page.on('console', (message) => {
     if (message.type() === 'error') {
@@ -100,12 +109,16 @@ try {
           configuration: result.configuration,
           firstRenderSubmitMs: diagnostics?.firstRenderSubmitMs ?? 0,
           operations: diagnostics?.operations ?? 0,
+          residentItems: result.renderedItems,
+          submittedItems: result.submittedItems,
         })
         assertNoPageErrors(pageErrors)
         console.log([
           itemCount,
           quality,
           scenario,
+          `${result.renderedItems}/${itemCount} resident`,
+          `${result.submittedItems}/${itemCount} submitted`,
           `${result.averageFps.toFixed(1)} FPS`,
           `P95 ${result.maximumFrameTimeP95.toFixed(1)} ms`,
         ].join(' · '))
@@ -137,6 +150,8 @@ try {
       deviceScaleFactor: options.deviceScaleFactor,
       highMaxVisibleItems: options.highMaxVisibleItems ?? null,
       resolution: options.resolution ?? 'auto',
+      disableAtlasWorker: options.disableAtlasWorker,
+      contentMode: options.contentMode,
     },
     results,
     runDiagnostics,
@@ -146,6 +161,12 @@ try {
   await mkdir(dirname(outputPath), { recursive: true })
   await writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`)
   console.log(`Quality matrix written to ${outputPath}`)
+  if (options.screenshot) {
+    const screenshotPath = resolve(root, options.screenshot)
+    await mkdir(dirname(screenshotPath), { recursive: true })
+    await page.locator('#benchmark-stage canvas').screenshot({ path: screenshotPath })
+    console.log(`Benchmark screenshot written to ${screenshotPath}`)
+  }
   calibration.recommendations.forEach(({ itemCount, recommendedQuality, environmentKey }) => {
     console.log(`${itemCount} items · ${recommendedQuality ?? 'no passing quality'} · ${environmentKey}`)
   })
@@ -183,6 +204,11 @@ function parseArguments(args) {
       '--high-max-visible-items',
     ),
     resolution: optionalPositiveInteger(read('--resolution', undefined), '--resolution'),
+    disableAtlasWorker: args.includes('--disable-atlas-worker'),
+    contentMode: enumValue(read('--content', 'default'), '--content', [
+      'default', 'template', 'canvas',
+    ]),
+    screenshot: read('--screenshot', undefined),
   }
 }
 
@@ -197,6 +223,12 @@ function enumList(value, name, allowed) {
     throw new TypeError(`${name} contains an unsupported value`)
   }
   return [...new Set(values)]
+}
+
+function enumValue(value, name, allowed) {
+  const normalized = String(value).trim()
+  if (!allowed.includes(normalized)) throw new TypeError(`${name} is unsupported`)
+  return normalized
 }
 
 function parseViewport(value) {

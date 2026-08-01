@@ -69,7 +69,26 @@ const EMPTY_ATLAS_METRICS = {
   atlasImageLoadWallMs: 0,
   atlasCellRenderMs: 0,
   atlasReadbackMs: 0,
+  atlasArrayPackMs: 0,
+  atlasWorkerRenderMs: 0,
+  atlasWorkerRoundTripMs: 0,
+  atlasWorkerRuntimeLoadMs: 0,
+  atlasWorkerConstructMs: 0,
+  atlasWorkerRequestPrepareMs: 0,
+  atlasWorkerPrePostMs: 0,
   atlasWorkerRenders: 0,
+  atlasLastBuildMs: 0,
+  atlasLastPrepareMs: 0,
+  atlasLastImageLoadWallMs: 0,
+  atlasLastCellRenderMs: 0,
+  atlasLastReadbackMs: 0,
+  atlasLastArrayPackMs: 0,
+  atlasLastWorkerRenderMs: 0,
+  atlasLastWorkerRoundTripMs: 0,
+  atlasLastWorkerRuntimeLoadMs: 0,
+  atlasLastWorkerConstructMs: 0,
+  atlasLastWorkerRequestPrepareMs: 0,
+  atlasLastWorkerPrePostMs: 0,
   atlasImageBitmapDecodeMs: 0,
   atlasTexturePrewarms: 0,
   atlasTexturePrewarmMs: 0,
@@ -80,6 +99,8 @@ const EMPTY_ATLAS_METRICS = {
   imageFailures: 0,
   estimatedTextureUploadBytes: 0,
   atlasUploadRanges: 0,
+  totalMainThreadRasterYields: 0,
+  totalMainThreadRasterYieldMs: 0,
 } as const
 
 export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TMeta> {
@@ -96,6 +117,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private nextLayer = 0
   private skipUploadFrames = 0
   private layerUploadFrames = 0
+  private totalLayerUploadFrames = 0
   private atlas: TextureAtlasResult | null = null
   private atlasMetrics: CardAtlasMetrics | undefined
   private arrayUploadPolicy: ArrayAtlasUploadPolicy | undefined
@@ -413,11 +435,18 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
         ...(this.atlasMetrics?.snapshot() ?? EMPTY_ATLAS_METRICS),
         atlasMode: this.atlas?.mode === 'array' ? 1 : 0,
         atlasLayers: this.atlas?.depth ?? 0,
+        atlasCpuBytes: this.atlas?.data.byteLength ?? 0,
+        atlasGpuBytes: textureBytes,
+        atlasBuildPixelBufferPeakBytes:
+          this.atlas?.metrics.pixelBufferPeakBytes ?? this.atlas?.data.byteLength ?? 0,
+        mainThreadRasterYields: this.atlas?.metrics.mainThreadRasterYields ?? 0,
+        mainThreadRasterYieldMs: this.atlas?.metrics.mainThreadRasterYieldMs ?? 0,
         uploadedLayers: this.atlas?.mode === 'array' ? this.nextLayer : 0,
         pendingLayers: this.atlas?.mode === 'array'
           ? Math.max(0, this.atlas.depth - this.nextLayer)
           : 0,
         layerUploadFrames: this.layerUploadFrames,
+        totalLayerUploadFrames: this.totalLayerUploadFrames,
         ...this.arrayUploadPolicy?.snapshot(),
         capacity: this.mesh ? this.instanceCapacity : 0,
         geometryBuilds: this.geometryBuilds,
@@ -485,6 +514,7 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
   private prepareAtlasUploads(atlas: TextureAtlasResult): void {
     this.nextLayer = 0
     this.skipUploadFrames = 0
+    this.layerUploadFrames = 0
     this.atlasBackend.clearPatchQueue(atlas)
     if (atlas.mode !== 'array' || !('layerUpdates' in atlas.texture)) return
     atlas.texture.layerUpdates.clear()
@@ -523,7 +553,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     )
     this.nextLayer = end
     this.setCommonUniform('uLayers', end)
-    if (uploaded) this.layerUploadFrames += 1
+    if (uploaded) {
+      this.layerUploadFrames += 1
+      this.totalLayerUploadFrames += 1
+    }
   }
 
   private layersPerUpload(atlas: TextureAtlasResult, byteBudget: number): number {
@@ -540,6 +573,9 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     this.instanceCapacity = 0
     this.itemCount = 0
     this.itemFingerprints = []
+    this.nextLayer = 0
+    this.skipUploadFrames = 0
+    this.layerUploadFrames = 0
     this.atlasMetrics!.resetTexture()
     this.atlas = null
   }

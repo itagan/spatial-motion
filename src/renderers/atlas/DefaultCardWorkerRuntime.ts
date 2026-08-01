@@ -1,6 +1,5 @@
 import type { MotionItem } from '../../core/types.js'
 import type { TextureAtlasOptions } from '../textureAtlas.js'
-import defaultCardWorkerUrl from './DefaultCardWorker.ts?worker&url'
 import { resolveCardStyle } from './DefaultCardPainter.js'
 import type {
   DefaultCardWorkerAttempt,
@@ -19,18 +18,10 @@ export async function renderDefaultAtlasInWorkerRuntime<TMeta>(
   items: readonly MotionItem<TMeta>[],
   dimensions: Omit<DefaultCardWorkerRequest, 'items' | 'images'>,
   options: TextureAtlasOptions<TMeta>,
+  worker: Worker,
+  runtimeStartedAt: number,
+  workerConstructMs: number,
 ): Promise<DefaultCardWorkerAttempt> {
-  let worker: Worker
-  try {
-    const workerUrl = new URL(defaultCardWorkerUrl, import.meta.url)
-    worker = new Worker(workerUrl, {
-      type: 'module',
-      name: 'spatial-motion-card-atlas',
-    })
-  } catch {
-    return { result: null }
-  }
-
   const imageUrls = [...new Set(items
     .map((item) => item.image)
     .filter((url): url is string => Boolean(url)))]
@@ -66,6 +57,7 @@ export async function renderDefaultAtlasInWorkerRuntime<TMeta>(
     return { result: null, resources }
   }
   const imageBitmapDecodeMs = now() - bitmapDecodeStartedAt
+  const requestPrepareStartedAt = now()
   const request: DefaultCardWorkerRequest = {
     ...dimensions,
     items: items.map((item) => ({
@@ -76,7 +68,8 @@ export async function renderDefaultAtlasInWorkerRuntime<TMeta>(
     })),
     images: bitmaps,
   }
-  const result = await runWorker(worker, request, bitmaps, options.signal)
+  const workerRequestPrepareMs = now() - requestPrepareStartedAt
+  const result = await runWorker(worker, request, bitmaps, options.signal, runtimeStartedAt)
   return {
     result: result
       ? {
@@ -86,6 +79,9 @@ export async function renderDefaultAtlasInWorkerRuntime<TMeta>(
           imageLoadMs: resources.totalLoadTimeMs,
           imageRequests: resources.requests,
           imageFailures: resources.failures,
+          workerRuntimeLoadMs: 0,
+          workerConstructMs,
+          workerRequestPrepareMs,
         }
       : null,
     resources,
@@ -134,18 +130,29 @@ function runWorker(
   request: DefaultCardWorkerRequest,
   bitmaps: ImageBitmap[],
   signal: AbortSignal | undefined,
+  runtimeStartedAt: number,
 ): Promise<Pick<
   DefaultCardWorkerResult,
   'data' | 'cellRenderMs' | 'readbackMs'
-  | 'array'
+  | 'workerRenderMs' | 'workerRoundTripMs' | 'workerPrePostMs'
+  | 'pixelBufferPeakBytes' | 'array'
 > | null> {
   return new Promise((resolve, reject) => {
     let settled = false
     let transferred = false
+    let roundTripStartedAt = 0
+    let workerPrePostMs = 0
+    if (signal?.aborted) {
+      worker.terminate()
+      bitmaps.forEach(closeBitmap)
+      reject(signal.reason)
+      return
+    }
     const finish = (
       result: Pick<
         DefaultCardWorkerResult,
-        'data' | 'cellRenderMs' | 'readbackMs' | 'array'
+        'data' | 'cellRenderMs' | 'readbackMs' | 'workerRenderMs'
+        | 'workerRoundTripMs' | 'workerPrePostMs' | 'pixelBufferPeakBytes' | 'array'
       > | null,
     ): void => {
       if (settled) return
@@ -190,12 +197,18 @@ function runWorker(
           : new Uint8ClampedArray(response.data),
         cellRenderMs: response.cellRenderMs,
         readbackMs: response.readbackMs,
+        workerRenderMs: response.workerRenderMs ?? 0,
+        workerRoundTripMs: Math.max(0, now() - roundTripStartedAt),
+        workerPrePostMs,
+        pixelBufferPeakBytes: response.pixelBufferPeakBytes ?? response.data.byteLength,
         array,
       })
     }
     worker.onerror = () => finish(null)
     signal?.addEventListener('abort', abort, { once: true })
     try {
+      workerPrePostMs = Math.max(0, now() - runtimeStartedAt)
+      roundTripStartedAt = now()
       worker.postMessage(request, bitmaps)
       transferred = true
     } catch {

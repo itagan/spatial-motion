@@ -31,6 +31,43 @@
   自定义 backend 不下载默认 Canvas/Worker backend。
 - Renderer capability 编译结果收敛为纯方法表并只保留运行期需要的 patch 标记，
   继续降低 Core 固定成本。
+- Cards 的 Effect Program Loader、生命周期、缓存和材质切换改为首次特效或显式
+  Program 预热时加载；基础 Cards 与仅纹理预热不下载 Effect Runtime。
+- Array Atlas 的 `layerUploadFrames` 改为只统计当前 Atlas 上传 generation；新增
+  `totalLayerUploadFrames` 保留渲染器生命周期累计值，重建、context restore 与销毁
+  不再把历史上传帧误报为当前资源成本。
+- Atlas 诊断新增当前 CPU/GPU 常驻像素、当前构建 TypedArray 峰值与生命周期最大峰值；
+  默认 Array Worker 的 readback 批次由 8 MiB 收紧到 2 MiB，降低默认 2000 项构建峰值。
+- Worker 不可用以及 `drawCard`/`cardContent` 路径改为在主线程直接分页栅格化 Array
+  Atlas；默认、模板、自定义 Canvas 分别使用 4 MiB、1 MiB、512 KiB 临时批次上限，
+  准备会话跨批复用图片与内容，并移除完整 2D readback 到最终 array 的双缓冲。
+- 主线程 Array 栅格使用 8ms/最多两批的可取消 RAF 时间片；当前构建与生命周期累计
+  让出指标分离，防止大图集 fallback 在同一任务内形成长帧。
+- 模板与自定义 Canvas 的完整 Array 构建改为顺序复用单个隔离单元 Canvas，绘制后立即
+  合入当前批次；异步回调、异常回退与取消语义保持不变，局部 patch 仍返回独立 Canvas。
+- Benchmark 新增 `default`、真实 ES6 模板与自定义 Canvas 内容模式、同步截图采集和像素
+  有效性门禁；浏览器回归同时约束内容正确性、临时像素峰值与主线程响应性。
+- Single/Array 局部 patch 现在把 Canvas readback 计入 `atlasReadbackMs`；需要立即读回的
+  独立单元 Canvas 使用 `willReadFrequently`，真实模板/Canvas 连续更新门禁同时约束
+  patch 次数、读回成本、长帧与视觉有效性。
+- 默认 Worker 的 Array 批次 OffscreenCanvas 启用读频繁提示，降低冷启动 build/readback；
+  Worker Single 和主线程批次保持原上下文策略，避免软件绘制导致 fallback 构建回退。
+- Benchmark v1 向后兼容地新增可选 `atlasArrayPackMs`，区分 Array 页面翻转/行复制与
+  Canvas readback；实测 pack 仅占默认冷启动约一成，因此保持现有零额外缓冲算法。
+- Worker 协议、Renderer 指标与 Benchmark v1 新增可选 `atlasWorkerRenderMs` 和
+  `atlasWorkerRoundTripMs`；正式冷启动数据表明启动、调度与传输差值不足 5ms，因此
+  保持一次性 Worker、失败回退和转移所有权语义，不引入常驻 Worker。
+- Worker Array 的 2 MiB 批次在 5000/10000 项全量 High 下继续完整上传；相对 4 MiB
+  对照，readback 分别降低约 32%/22%，未引入容量自适应分支或大规模构建回退。
+- 质量矩阵终端摘要和运行诊断现在显式报告 resident/submitted 与请求项数，避免把质量
+  Profile 裁剪后的大输入误读为全量 Atlas 扩展性结果。
+- 默认 Worker Array 批次改为单列连续页面，绘制阶段预翻转页面后按层连续复制，避免
+  pack 的逐层逐行翻转；2000/5000/10000 项均降低 Worker 内部耗时且保持 patch 契约。
+- Renderer 与 Benchmark v1 向后兼容地新增最后一次完整 Atlas build 的精确分段快照；
+  cold-start 可区分目标构建与累计 delta，无完整构建的 steady/update 窗口输出 0。
+- Worker 冷启动诊断进一步区分 Runtime 加载、Worker 构造、请求准备与发送前墙钟；
+  默认路径在保留 Runtime lazy chunk 的同时并行启动 Worker，Apple M4 三轮 2000/high
+  cold-start 的 Atlas build 中位数由 43.2ms 降至 40.6ms。
 
 ### Added
 
@@ -70,9 +107,11 @@
 - Cards 可自适应预热首次 Atlas 纹理上传；默认仅预热不超过 16 MiB 的像素缓冲，避免大图集预热本身形成长帧，也可通过 `texturePrewarm` 显式覆盖。
 - Cards 的稳定内容指纹改为逐项保存；局部 `updateItem(s)` 只序列化去重后的变化索引，不再为单卡 Atlas patch 扫描完整名单。
 - Array Atlas 根据设备层数限制和项目数量选择平衡页尺寸，最多规划 256 层；首次约 3 MiB、后续每帧约 768 KiB 的上传预算避免大纹理一次提交，context restore 会从首层重新协调。
-- 默认卡片的 Array Worker 改为约 8 MiB 的平衡分页批次直接绘制和 readback，不再同时保留完整 2D Atlas 像素与最终数组缓冲。
+- 默认卡片的 Array Worker 改为最多约 2 MiB 的平衡分页批次直接绘制和 readback，不再同时保留完整 2D Atlas 像素与最终数组缓冲。
 - 指针拾取改为固定向量/屏幕缓冲、保守投影粗筛和在线最佳命中选择，不再为每项创建角点/候选对象或排序；焦点 id 同步使用稳定索引。
 - Array Atlas 的首次分层上传与局部 patch 统一受每帧预算协调；连续更新按层去重，尚未显示的层只更新 CPU 数据并在首次可见时上传最新内容。
+- Worker 请求在注册中止监听器前会再次检查已中止的 signal，避免图片解码结束与发送之间
+  的竞态留下悬挂 Promise；Client/Runtime 的 Worker 与 ImageBitmap 所有权保持单次释放。
 - Single Atlas 局部 patch 改为按卡片行扫描连续上传 run，移除逐像素行 Map、数组和区间对象；单卡更新同时跳过无意义的 cell 列表复制与排序。
 
 ### Compatibility

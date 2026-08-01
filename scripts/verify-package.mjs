@@ -645,6 +645,25 @@ try {
       contents.includes(defaultAtlasBackendMarker)),
     'Cards consumer is missing the lazy default Atlas backend chunk',
   )
+  const mainThreadArrayRasterizerMarker = 'spatial-motion-main-thread-array-rasterizer'
+  assert(
+    !cardsOnlyConsumer.contents.includes(mainThreadArrayRasterizerMarker),
+    'Cards-only entry eagerly contains the main-thread Array rasterizer',
+  )
+  assert(
+    cardsOnlyConsumer.lazyChunks.some((contents) =>
+      contents.includes(mainThreadArrayRasterizerMarker)),
+    'Cards consumer is missing the lazy main-thread Array rasterizer chunk',
+  )
+  const effectRuntimeMarker = 'spatial-motion-card-effect-runtime'
+  assert(
+    !cardsOnlyConsumer.contents.includes(effectRuntimeMarker),
+    'Cards-only entry eagerly contains the optional Effect Runtime',
+  )
+  assert(
+    cardsOnlyConsumer.lazyChunks.some((contents) => contents.includes(effectRuntimeMarker)),
+    'Cards consumer is missing the lazy Effect Runtime chunk',
+  )
   const effectChunkMarkers = [
     'program_tunnel_',
     'program_shooter_',

@@ -241,13 +241,230 @@ Array 首帧上传预算约 3 MiB，后续 Stage RAF 从 768 KiB 起步；连续
 
 17 次局部更新下，自适应页面累计估算上传约 1.71 MiB，相比固定 4×4 页面约 3.41 MiB 减半；single 仍只需约 0.16 MiB，验证了默认不切换 array 的取舍。Array Store 与 GLSL3 Shader 通过动态模块隔离，默认 Cards 消费包不包含 `sampler2DArray`。完整包检查为 root 37,093 bytes、Core 13,048 bytes、Cards 12,227 bytes gzip，tarball 100,875 bytes，均在既有预算内。
 
-Array 默认卡片 Worker 随后移除“完整 2D Atlas readback 后再逐单元重排”的中间路径，改为最多约 8 MiB 的平衡分页批次直接绘制、批量 readback 并写入最终 layer 缓冲。2000 项 48px/250 层只需约 3 次 readback；估算瞬时像素缓冲由完整 2D Canvas、完整 ImageData 和最终数组同时驻留的约 62 MiB，降低到最终数组加单批 Canvas/ImageData 的约 41 MiB。
+Array 默认卡片 Worker 随后移除“完整 2D Atlas readback 后再逐单元重排”的中间路径，改为平衡分页批次直接绘制、批量 readback 并写入最终 layer 缓冲。批次上限最初约 8 MiB，先在内存指标验证后收紧到 4 MiB，再经正式批次矩阵收紧到 2 MiB；最终 array、局部 patch 与 context restore 所需的 CPU 权威缓冲保持不变。2000 项 48px/250 层的 TypedArray 构建峰值由 31.39 MiB 降至 25.27 MiB，减少 19.5%；Canvas backing store 同样随批次缩小，但不计入该 TypedArray 指标。
+
+完整批次随后单独验证 Canvas `willReadFrequently`，没有把局部 patch 的结论直接推广到
+所有路径。2026-08-01 Chromium 151 / Apple M4 / 2000/high/cold-start、10 秒四路对照：
+
+| 路径 | Build 基线 → 提示 | Readback 基线 → 提示 | 结论 |
+| --- | ---: | ---: | --- |
+| 默认 Worker Array | 81.6 → 52.3ms | 26.1 → 20.3ms | 保留 |
+| 默认主线程 fallback | 53.0 → 99.9ms | 38.0 → 42.1ms | 回退 |
+| ES6 模板主线程 | 407.9 → 409.5ms | 198.3 → 207.0ms | 回退 |
+| 自定义 Canvas 主线程 | 522.1 → 524.2ms | 288.0 → 304.4ms | 回退 |
+
+四组均约 60 FPS 且无 24/33/50ms 长帧。最终只在默认 Worker 的 Array 分页
+OffscreenCanvas 创建时传入提示，Worker Single 仍使用原上下文；主线程直接绘制默认卡时，
+软件 Canvas 的绘制与额外 RAF 让出成本明显超过读回收益，因此确定性保持原策略。结果：
+
+- `benchmarks/results/2026-08-01-apple-m4-worker-readback-baseline.json`
+- `benchmarks/results/2026-08-01-apple-m4-worker-readback-hint.json`
+- `benchmarks/results/2026-08-01-apple-m4-main-thread-readback-baseline.json`
+- `benchmarks/results/2026-08-01-apple-m4-main-thread-readback-hint.json`
+- `benchmarks/results/2026-08-01-apple-m4-template-readback-hint.json`
+- `benchmarks/results/2026-08-01-apple-m4-canvas-readback-hint.json`
+
+`arrayPackMs` 原先已经从 Worker/Main-thread rasterizer 返回，但在 Renderer 生命周期统计
+和 Benchmark delta 之间丢失。现在新增 `atlasArrayPackMs`；Benchmark v1 将该字段定义为
+可选，旧 JSON 仍可严格解析，新结果会验证非负数并输出当前采样窗口的增量。
+
+同环境 2000/high/cold-start、10 秒正式分解中，Worker build 69.4ms 包含 cell render
+2.7ms、readback 17.6ms、pack 8.0ms；显式禁用 Worker 时 build 73.7ms，包含 cell
+render 6.9ms、readback 41.5ms、pack 7.1ms。pack 分别只占 build 约 11.5%/9.6%，
+两组均约 60 FPS、P95 17.5ms且无 24/33/50ms 长帧。它在 Worker 中不阻塞 Stage，
+现有逐层倒序行复制只保留最终权威 buffer 和一个有界 readback，不为约 7–8ms 成本引入
+第二份 layer 缓冲、WASM 或复杂分支。后续应先分解 Worker 启动、消息传输与主线程资源
+提交墙钟。结果：
+
+- `benchmarks/results/2026-08-01-apple-m4-worker-pack-breakdown.json`
+- `benchmarks/results/2026-08-01-apple-m4-main-thread-pack-breakdown.json`
+
+Worker 协议随后把成功响应中的内部渲染墙钟作为 `workerRenderMs` 返回，主线程从发送
+请求前到收到响应记录 `workerRoundTripMs`；Renderer 生命周期和 Benchmark v1 分别以
+`atlasWorkerRenderMs`、`atlasWorkerRoundTripMs` 累积，两个新字段继续保持可选，旧 JSON
+无需迁移。内部计时覆盖单元绘制、readback、Array pack 和少量循环开销，往返还覆盖新建
+Worker 的启动/调度以及请求和最终 ArrayBuffer 的转移。
+
+同环境 2000/high/cold-start、10 秒正式样本为 Atlas build 64.0ms、Worker 往返 49.5ms、
+Worker 内部 44.6ms；其中 cell render 3.9ms、readback 28.4ms、pack 10.9ms，三段合计
+43.2ms。往返与内部差值仅 4.9ms，占 build 7.7%、占往返 9.9%；内部未分段部分约
+1.4ms。该上限不足以抵消常驻 Worker 所增加的空闲资源、取消、代际和位图所有权复杂度，
+因此保持每次完整默认 Atlas 构建独立创建、成功/失败/取消后终止 Worker 的策略，并继续
+优先优化已量化的 readback。样本约 60 FPS、P95 17.5ms，0 个 24/33/50ms 长帧；结果
+保存在 `benchmarks/results/2026-08-01-apple-m4-worker-timing-breakdown.json`。
+
+随后固定 `willReadFrequently` 和其余环境，对 Worker Array readback 批次执行
+1/2/8 MiB 各三轮、4 MiB 复用三份同口径样本的 2000/high/cold-start 对照。中位数：
+
+| Worker 批次 | Atlas build | Readback | Worker 内部 | TypedArray 构建峰值 |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 MiB | 52.6ms | 21.2ms | 32.3ms | 24.88 MiB |
+| 2 MiB | 48.6ms | 19.5ms | 29.2ms | 25.27 MiB |
+| 4 MiB | 64.0ms | 20.3ms | 29.2–44.6ms | 27.75 MiB |
+| 8 MiB | 57.1ms | 22.7ms | 35.4ms | 31.39 MiB |
+
+所有运行约 60 FPS、P95 17.5–17.7ms 且无 24/33/50ms 长帧。2 MiB 相对 8 MiB 的
+build/Worker 内部中位数分别降低约 14.9%/17.5%，构建峰值降低约 19.5%；继续缩到
+1 MiB 只再减少 0.39 MiB 峰值，却使 build/readback/Worker 内部增加约
+8.2%/8.7%/10.6%，已经越过拐点。因此默认 Worker 固化为 2 MiB；主线程默认、模板与
+自定义 Canvas 仍分别维持其独立验证过的 4 MiB/1 MiB/512 KiB 策略。样本保存在
+`benchmarks/results/2026-08-01-apple-m4-worker-batch-{1,2,4,8}mib-*.json`。
+
+为排除 2000 项最优但批次数在大容量回退的可能，随后显式把 High resident 上限提高到
+10000，对 5000/10000 项各复跑两轮 10 秒全量 cold-start。2 MiB 的 5000 项两轮
+build/readback 为 102.9/41.6ms 与 100.8/40.8ms，10000 项为 138.0/82.8ms 与
+139.5/84.4ms；两档均提交全部实例、上传完整 250 层、约 60 FPS、P95 17.5–17.6ms，
+且无 24/33/50ms 长帧。相对既有 4 MiB 的 5000 项 101.8/60.7ms，build 持平而
+readback 降低约 32%；相对 10000 项 161.0/106.6ms，build/readback 分别降低约
+14%/22%。构建峰值也由 63.40/123.46 MiB 降至 61.73/121.06 MiB。因此固定 2 MiB
+在默认和大容量范围都成立，不为未观察到的收益增加容量判断。结果保存在
+`benchmarks/results/2026-08-01-apple-m4-worker-batch-2mib-large-full*-10s.json`。
+
+首次大容量采集未覆盖 `--high-max-visible-items`，5000/10000 输入实际都被默认 High
+Profile 裁为 2000 resident；这组无效样本已删除，未进入上述结论。为防止终端的请求
+项数再次掩盖实际容量，质量矩阵摘要和 `runDiagnostics` 现在同时输出 resident/submitted
+与请求项数；固定质量校准仍按 Profile 上限判断覆盖率，全量扩展性采集则必须显式覆盖
+High 上限并核对两个数值。
+
+在 2 MiB 固定后继续针对 pack 做结构优化。默认 Worker 的批次页面从平衡二维网格改为
+等层数的单列排列；每页绘制时在 Canvas context 内预先垂直镜像，readback 后的数据已经
+符合现有 `DataArrayTexture`、rect 和 patch 使用的底向上行序，因此最终缓冲从“每层逐行
+倒序 `set`”变为“每层一次连续 `set`”。Shader、Atlas rect、主线程 fallback、局部 patch
+和 context restore 的 CPU 权威格式均未改变；页面绘制使用 `try/finally` 恢复 transform。
+
+同环境 2000/high/cold-start 三轮对照中，pack 中位数由 6.3 降至 2.4ms（约 -62%），
+readback 由 19.5 降至 16.9ms，Worker 内部由 29.2 降至 23.3ms（约 -20%），往返由
+34.2 降至 29.6ms；TypedArray 峰值仍为 25.27 MiB，约 60 FPS 且无长帧。Benchmark 的
+累计 `atlasBuildMs` 当时还不能直接区分窗口内多个完整构建，三轮出现 61.1–67.8ms
+波动；目标 Worker 的内部与往返三轮均一致下降，后续以单次 build 快照继续拆分总墙钟。
+
+全量 High 扩展性复验中，5000 项 pack/Worker/build 从两轮约 10.4/57.3/101.9ms 降至
+5.1/52.1/95.8ms；10000 项从约 18.1/113.2/138.8ms 降至 10.4/104.7/130.0ms。
+readback、25.27/61.73/121.06 MiB 构建峰值、完整 250 层上传和 P95 均无回退。
+Chromium 门禁同时通过默认 Worker、主线程 fallback、真实模板/Canvas 冷启动及局部
+patch，确认预翻转没有改变画面或更新方向。结果保存在
+`benchmarks/results/2026-08-01-apple-m4-worker-contiguous-pack*.json`。
+
+为消除上述累计口径歧义，Renderer 指标新增最后一次完整构建的 build、prepare、图片
+墙钟、cell render、readback、Array pack、Worker render 与 Worker round-trip 快照。
+Benchmark v1 对应 `atlasLast*` 字段保持可选；只有首尾样本间 `atlasBuilds` 增加时才从
+末样本读取，否则统一输出 0，避免 steady 或只有 patch 的窗口复用历史构建。旧 JSON
+缺少这些字段时仍可严格解析。
+
+2000/high/cold-start 三轮正式样本中，窗口都包含两次完整构建，但累计/最后一次 build
+分别为 60.4/60.0、66.4/66.0、68.9/68.5ms，说明清空数据产生的额外构建仅约 0.4ms，
+此前总墙钟波动不是累计污染。目标 build 的 Worker 往返为 29.4/29.7/30.5ms，内部为
+22.5/22.5/23.7ms；`lastBuild - lastWorkerRoundTrip` 仍有 30.6/36.3/38.0ms。由此把下一
+瓶颈明确收敛到 postMessage 之前的动态模块加载、Worker 构造、资源/样式与 request
+准备，而不是已经降至 1.7–1.8ms 的 pack。三轮约 60 FPS、P95 17.5–18.4ms，0 个
+24/33/50ms 长帧；结果保存在
+`benchmarks/results/2026-08-01-apple-m4-atlas-last-build-breakdown*.json`。
+
+Renderer 指标同时报告 `atlasCpuBytes`、`atlasGpuBytes`、当前
+`atlasBuildPixelBufferPeakBytes` 和生命周期 `maxAtlasBuildPixelBufferBytes`。
+这里的构建峰值只统计可确定的 TypedArray 像素存储，不把浏览器内部 Canvas backing
+store 伪装成精确值。CPU Atlas 是局部 patch 和 context restore 的权威副本，因此当前
+不能在首次上传后释放；CPU/GPU 常驻值相等是明确的恢复能力成本，而不是重复复制缺陷。
+
+2026-08-01 Chromium 151 / Apple M4 / 1250×625 实际内容视口 / DPR 2 的 10 秒
+全量 High cold-start 复测如下：
+
+| 实例数 | CPU / GPU 常驻 | TypedArray 构建峰值 | Atlas build / readback | 首次提交 | 上传帧 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 2000 | 23.93 / 23.93 MiB | 27.75 MiB | 79.5 / 25.7ms | 1.8ms | 9 |
+| 5000 | 59.81 / 59.81 MiB | 63.40 MiB | 101.8 / 60.7ms | 1.7ms | 21 |
+| 10000 | 119.63 / 119.63 MiB | 123.46 MiB | 161.0 / 106.6ms | 1.7ms | 42 |
+
+三档均约 60 FPS、P95 18.2–18.25ms、P99 18.55–18.7ms，0 个
+24/33/50ms 长帧并完整上传 250 层。后续 2 MiB 矩阵完成后，Chromium WebGL 门禁要求
+默认 2000 项的构建峰值不超过常驻 CPU buffer 加 2 MiB。此前 4 MiB 结果保存在
+`benchmarks/results/2026-08-01-apple-m4-atlas-memory-4mib-10s.json`；8 MiB 对照保存在
+`benchmarks/results/2026-08-01-apple-m4-atlas-memory-baseline.json`。
+
+主线程 fallback 随后复用同一 Array 页面规划。默认内容保持 4 MiB 上限；需要隔离单元
+Canvas 的 `cardContent`/模板收紧为 1 MiB，自定义 `drawCard` 收紧为 512 KiB。卡片样式、
+模板内容和图片只准备一次；内置默认卡片直接绘入批次 Canvas，自定义内容则在完整构建
+中复用一个单元 Canvas。旧路径的完整 2D ImageData 与最终
+DataArrayTexture 像素同时存活被移除。以 48px 全量 High 计算，2000/5000/10000 项旧
+TypedArray 峰值约为 48.15/120.12/239.26 MiB，新路径为 27.75/63.40/123.46 MiB，
+分别降低约 42.4%/47.2%/48.4%；完整 2D Canvas backing store 也被 4 MiB 批次替代。
+
+主线程栅格随后采用 8ms 或最多两批的可取消时间片并让出到下一 RAF，避免减峰后仍把
+所有 readback 连续塞进同一任务，也避免小批次机械地逐批等待一帧。
+`mainThreadRasterYields`/`mainThreadRasterYieldMs` 表示当前 Atlas 构建，
+`totalMainThreadRasterYields`/`totalMainThreadRasterYieldMs` 保留 Renderer 生命周期累计值。
+
+模板与 `drawCard` 的完整 Array 构建进一步不再为批次内每张卡并发创建单元 Canvas。
+同一个隔离单元 Canvas 在异步回调完成后立即合入批次、重置状态并服务下一张卡；因此
+最大回调并发为 1，浏览器只需保留一份单元 backing store。异常仍在当前单元内回退默认
+卡片，AbortSignal 可在单元之间及 RAF 让出处中止；局部 patch 继续返回独立 Canvas，
+没有改变公共更新契约。
+
+Chromium 151 禁用 `Worker` 后的 10 秒 cold-start 实测仍完整上传 250 层：2000/5000/
+10000 项分别为 60.01/60.00/60.00 FPS，P95 18.06/18.35/18.25ms，首次提交均约
+1.9ms；Atlas build/readback 为 90.7/39.0、268.1/107.5、516.2/193.0ms，单次构建
+分别让出 6/16/31 帧。三档均为 0 个 24/33/50ms 长帧；相较协作让出前 2000 项的一次
+33ms 峰值和 5000 项的一次 50ms 峰值，响应性边界得到修复，代价是 fallback 总构建
+墙钟增加。主线程路径解决的是不支持 Worker 环境的正确性、峰值内存和响应性，支持
+Worker 时仍默认优先使用 Worker。浏览器门禁同时覆盖正常 Worker 和显式禁用 Worker
+两条路径。结果保存在
+`benchmarks/results/2026-08-01-apple-m4-main-thread-array-fallback.json`。
+
+Benchmark 随后增加 `content=template|canvas`，分别调用真实按需 `card-template` 与公共
+`draw` 回调；采集 CLI 可用 `--content` 选择内容、用 `--screenshot` 保存同次运行画面。
+Chromium 门禁会把 WebGL Canvas 复制到小型 2D probe，检查非透明像素、色彩像素与颜色
+桶，同时断言完整上传、单 Draw Call、主线程让出以及对应临时峰值，避免只测到空纹理。
+
+2026-08-01 Chromium 151 / Apple M4 / 1250×625 实际内容视口 / DPR 2、2000/high/
+cold-start、10 秒正式复测：模板为 60.00 FPS、P95/P99 18.66/18.75ms，Atlas build/
+readback 407.9/198.3ms，当前峰值 24.88 MiB（常驻 23.93 MiB + 0.96 MiB），24 次
+协作让出；自定义 Canvas 为 60.01 FPS、P95/P99 18.60/18.70ms，build/readback
+522.1/288.0ms，当前峰值 24.31 MiB（常驻 + 0.38 MiB），31 次让出。两组均为 0 个
+24/33/50ms 长帧、1 Draw Call、250 层完整上传且 Worker renders 为 0。结果与同步截图：
+
+- `benchmarks/results/2026-08-01-apple-m4-template-content-cold-start.json`
+- `benchmarks/results/2026-08-01-apple-m4-template-content.png`
+- `benchmarks/results/2026-08-01-apple-m4-canvas-content-cold-start.json`
+- `benchmarks/results/2026-08-01-apple-m4-canvas-content.png`
+
+调参过程中，模板从 4 MiB 收紧到 1 MiB 后消除了 24/33/50ms 长帧；Canvas 使用
+512 KiB 后同样清零长帧，而“两批或 8ms”时间片把逐批让出的约 1.03s 构建墙钟降回
+约 0.52s。复用单元 Canvas 后，模板/Canvas 的 cell render 分别从 107.9/34.7ms 降至
+68.1/10.7ms，约减少 36.9%/69.2%；节省出的 CPU 预算通过更保守的 8ms 时间片换成帧
+响应余量，因此总构建墙钟基本持平。该策略只改变主线程 fallback 的临时内存和调度，
+不影响 Worker 默认路径。
 
 同环境三轮 2000/high/cold-start 的 Atlas build 为 51.7/74.6/55.0ms，中位数 55.0ms；readback 为 30.7/39.5/31.8ms，中位数 31.8ms。P95 为 18.55–18.60ms，均为 0 个 24/33/50ms 长帧、主体 1 Draw Call，首次提交 4.2–6.5ms。默认 root/Core/Cards 消费体积保持 37,093/13,048/12,227 bytes gzip，新增实现只进入按需 Worker/Array chunk；tarball 约 99.1 KiB，仍低于既有预算。
 
 ## Atlas 局部上传低分配化
 
 Single Atlas patch 不再为每个像素行建立 Map 项、范围数组和 `{ start, end }` 对象。变化单元按稳定 index 扫描，同一卡片行内相邻单元合并为连续 run，再直接生成 Three.js update range；分离单元保持独立范围。最常见的单卡 patch 直接复用输入列表，不再执行 `slice().sort()`。像素 readback 与逐行写入语义保持不变。
+
+后续真实模板/Canvas `atlas-update` 基准发现，局部 patch 的 `getImageData()` 一直包含在
+apply 总耗时中，却没有累计到 `atlasReadbackMs`，导致诊断错误显示为 0。Single 与 Array
+Store 现在只围绕实际 `getImageData()` 计时并在 patch 提交时累计；apply 总耗时减去
+readback 即为像素复制、上传范围整理和纹理标记成本，不新增冻结后的公共配置 API。
+
+2026-08-01 Chromium 151 / Apple M4 / 1250×625 / DPR 2、2000/high、10 秒连续 56 次
+单卡更新的修正后基线显示：模板/Canvas patch 总成本为 213.6/176.2ms，其中 readback
+为 154.7/150.0ms，而除读回外的 apply 仅 1.7/2.1ms。瓶颈约 99% 位于 Canvas 读回，
+因此没有继续微调 TypedArray 行复制。对绘制后必定立即读回的独立单元 Canvas 设置
+`willReadFrequently` 后，正式复测如下：
+
+| 内容 | Patch 总耗时 | Cell render | Readback | 相对基线 |
+| --- | ---: | ---: | ---: | ---: |
+| ES6 模板 | 110.5ms | 84.2ms | 16.5ms | -48.3% |
+| 自定义 Canvas | 76.6ms | 59.8ms | 11.6ms | -56.5% |
+
+提示使软件绘制阶段变慢，但模板/Canvas readback 分别减少约 89.3%/92.3%，净 patch 成本
+仍下降约 48%/57%。两组均约 60 FPS、P95 18.30/18.26ms；模板为 0 个长帧，Canvas
+记录 1 个 24/33ms、0 个 50ms 长帧，主体保持 1 Draw Call且画面像素门禁通过。
+基线与正式结果保存在：
+
+- `benchmarks/results/2026-08-01-apple-m4-template-atlas-update.json`
+- `benchmarks/results/2026-08-01-apple-m4-canvas-atlas-update.json`
+- `benchmarks/results/2026-08-01-apple-m4-template-atlas-update-readback.json`
+- `benchmarks/results/2026-08-01-apple-m4-canvas-atlas-update-readback.json`
 
 2026-07-27 Chromium 150 / Apple M4 / 2000 Cards/high/single/48px 的 3 秒连续更新三轮均完成 17 次 patch、保持约 60 FPS、1 Draw Call 和 0 个 24/33/50ms 长帧。P95 为 18.30–18.60ms；patch 累计耗时中位数 73.3ms，与优化前 73.0ms 基本持平，说明当前墙钟成本主要仍在 Canvas readback，但逐行临时对象已经移除。完整验证为 25 个测试文件、312 项测试；root/Core/Cards-only 为 37,628/13,509/12,276 bytes gzip，均未提高预算。
 
@@ -566,6 +783,12 @@ Renderer 公共协议：预算从 768 KiB 起步，连续稳定帧按 1×/2×/4�
 证明慢环境不会为了追求完成速度强制升档。策略确定性单测覆盖升档、退避、冷却与重置，
 浏览器门禁在无退避升至 3 MiB 时要求不超过 12 个上传帧。
 
+上传帧指标随后按资源代际收敛：`layerUploadFrames` 只表示当前 Atlas 自准备完成后的
+实际渐进上传帧数，在 Atlas 重建、WebGL context restore 和 dispose 时归零；
+`totalLayerUploadFrames` 保留同一 Renderer 生命周期累计值。Benchmark 同时输出两者，
+避免连续场景或资源恢复后把历史帧数误判为本次冷启动成本。单测固定了首次上传、恢复后
+重新计数和销毁后当前资源指标清零的行为。
+
 最终 `npm run verify` 为 36 个测试文件、395 项测试，Library/Demo/Examples、真实
 tarball 消费和 Chromium WebGL 门禁全部通过。root/Core/Cards-only 为
 37,065/15,251/9,888 bytes gzip，layout-only 为 7,956 bytes，tarball 为
@@ -645,16 +868,19 @@ P99 18.60–18.65ms、0 个 24/33/50ms 长帧、1 Draw Call，并完整 resident
 
 | 实例数 | Atlas build / readback | 首次提交 | 纹理 | 上传帧 |
 | ---: | ---: | ---: | ---: | ---: |
-| 2000 | 81.8 / 28.0ms | 1.9ms | 23.93 MiB | 18 |
-| 5000 | 97.8 / 56.8ms | 1.9ms | 59.81 MiB | 60 |
-| 10000 | 173.2 / 111.6ms | 2.0ms | 119.63 MiB | 144 |
+| 2000 | 62.5 / 29.6ms | 2.3ms | 23.93 MiB | 9 |
+| 5000 | 98.6 / 56.5ms | 2.0ms | 59.81 MiB | 22 |
+| 10000 | 172.6 / 107.2ms | 2.0ms | 119.63 MiB | 42 |
 
-三档均约 60 FPS、P95 17.6–17.7ms、P99 17.65–17.70ms、0 个 24/33/50ms 长帧，
+修正上传帧的资源代际口径后复测，三档均约 60 FPS、P95 18.6–18.7ms、
+P99 18.7–18.75ms、0 个 24/33/50ms 长帧，
 并在采样结束前完整上传、resident/submitted 全量实例。Worker 隔离了随容量增长的绘制与
-readback，分页上传也把首次提交稳定在 2ms 内；当前无需改动提交策略。下一轮针对大容量
+readback，分页上传也把首次提交稳定在 2.3ms 内；当前无需改动提交策略。先前表格的
+18/60/144 混入了配置切换与 cold-start 重建的历史帧数，并非单个 Atlas generation；
+本轮生命周期累计值 18/62/146 仅作为诊断保留。下一轮针对大容量
 内存应评估更低的自动 resolution 或业务侧内容分页，但必须以清晰度验收为前提，不能仅
 为 10000 项非默认场景牺牲默认 2000 项画质。结果保存在
-`benchmarks/results/2026-08-01-apple-m4-uncapped-cold-start-matrix.json`。
+`benchmarks/results/2026-08-01-apple-m4-atlas-upload-metrics.json`。
 
 10000 项全量 High 随后显式对照 48/40/32px，每组运行 10 秒 cold-start；该参数只作用于
 Benchmark 页面，不改变 Cards 的默认 `auto` 分辨率。
@@ -670,3 +896,59 @@ Benchmark 页面，不改变 Cards 的默认 `auto` 分辨率。
 的小字号编号与细边缘已经明显变软，页面无 warning/error。结论是 40px 可作为业务明确
 接受画质折中后的超大容量显式选项，32px 不进入自动策略；默认 High/2000 项继续使用
 现有 auto→48px，不因非默认 10000 项场景降低画质。
+
+## Cards Effect Runtime 按需化
+
+基础 Cards 入口只保留 Base Material、公共 Uniform 同步和自定义 Motion Program 上传；
+Effect Program Loader、生命周期、编译缓存、材质切换与失败统计移入首次
+`streamingEffects.enable()` 或显式 Program prewarm 才加载的 `CardEffectRuntime` chunk。
+空 Program 列表和仅纹理 prewarm 不触发下载。动态 import 期间的 disable、Atlas 重建和
+destroy 通过 generation、共享 ResourceScheduler 与绑定身份继续阻止旧结果提交。
+
+真实 tgz 消费者门禁验证 Effect Runtime marker 不存在于 Cards 基础 bundle、只存在于
+lazy chunk，四个内置 Effect Program 仍保持各自独立 chunk。加入后续 Atlas 诊断后，
+Cards-only 从 9,888 降至 8,889 bytes gzip，减少 999 bytes；距 10 KiB 上限的余量
+由 352 增至 1,351 bytes。root consumer 从 37,065 降至 36,285 bytes gzip；Core-only
+保持 15,251 bytes，tarball 在加入独立主线程 fallback chunk、内容基准与单元 Canvas
+复用、readback/pack/Worker 时序诊断、批次矩阵、连续 pack、单次 build 快照与冷启动
+重叠后为 140,114 bytes，仍低于
+150 KiB 上限。
+模块总量略增是独立 lazy 模块、诊断与 sourcemap 的代价，不代表基础消费者下载回退。
+
+2026-08-01 Chromium 151 / Apple M4 / 1250×625 实际内容视口 / DPR 2 的 2000/high
+10 秒回归：steady 为 59.99 FPS、P95/P99 17.7/17.7ms，Program load/switch/cache 均为
+0，证明基础场景没有激活可选运行时；transition-stress 为 60.00 FPS、P95/P99
+17.7/17.7ms，12 次操作触发 4 次 Program load、5 次切换并缓存 4 个内置 Program，
+失败为 0。两组均为 0 个 24/33/50ms 长帧、主体 1 Draw Call，最大 Stage CPU 0.1ms、
+最大提交 0.4/0.3ms。结果保存在
+`benchmarks/results/2026-08-01-apple-m4-effect-runtime-split.json`。
+
+完整 `npm run verify` 为 36 个测试文件、400 项测试；Library/Demo/Examples、真实 tgz、
+严格 TypeScript、冻结 exports 与消费者浏览器构建全部通过。四项 Chromium WebGL 门禁
+覆盖默认 Worker、显式禁用 Worker、模板/Canvas 冷启动，以及两类真实内容的连续局部
+更新。该阶段不执行版本、Tag、npm publish 或 Release。
+
+## Worker 冷启动分解与启动重叠
+
+最后一次 Atlas build 快照继续细分为 Runtime 动态加载、`Worker` 构造、请求对象准备和
+进入 Runtime 到 `postMessage()` 的总墙钟；所有字段在 Benchmark v1 中保持可选，旧结果
+仍可解析。发送前新增 already-aborted 检查，覆盖图片位图异步解码完成后、监听器挂载前
+发生中止的窗口，确保 Worker 和未转移的 `ImageBitmap` 只释放一次且 Promise 不悬挂。
+
+2026-08-01 Chromium 151 / Apple M4 / 1250×625 / DPR 2 的 2000/high/cold-start
+三轮对照如下（均为中位数）：
+
+| Runtime 策略 | Atlas build | Runtime load | pre-post | round-trip | Worker render |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 动态串行基线 | 43.2ms | 11.2ms | 13.1ms | 30.6ms | 25.6ms |
+| 静态合并实验 | 40.2ms | 0ms | 11.7ms | 28.1ms | 26.2ms |
+| lazy + Worker 提前启动 | 40.6ms | 11.3ms | 12.8ms | 27.8ms | 25.9ms |
+
+静态合并把约 11ms 首次成本转移到 Worker 启动期间的主线程准备，并没有等量消除，且会
+放弃独立 Runtime 边界，因此不采用。最终方案先发起 Runtime `import()`，在等待期间构造
+Worker，再把已启动的 Worker 交给 Runtime；Atlas build 相对串行基线降低约 6%，同时
+保留默认 Atlas backend 和 Worker Runtime 的按需边界。三轮最终方案均为 60.0 FPS、
+P95 18.6ms、0 个 24/33/50ms 长帧并完整 resident/submitted 2000 项。原始结果保存在
+`benchmarks/results/2026-08-01-apple-m4-worker-pre-post-breakdown-run1.json` 至 `run3`、
+`benchmarks/results/2026-08-01-apple-m4-worker-runtime-static-run1.json` 至 `run3`，以及
+`benchmarks/results/2026-08-01-apple-m4-worker-runtime-overlap-run1.json` 至 `run3`。

@@ -15,6 +15,7 @@ export function applyAtlasPatch(
   let runY = -1
   let runStart = 0
   let runEnd = 0
+  let readbackMs = 0
   const cells = patch.cells.length < 2
     ? patch.cells
     : patch.cells.slice().sort((left, right) => left.index - right.index)
@@ -23,9 +24,11 @@ export function applyAtlasPatch(
   for (const { index, canvas } of cells) {
     const x = (index % atlas.columns) * atlas.strideX + atlas.padding
     const y = Math.floor(index / atlas.columns) * atlas.strideY + atlas.padding
-    const imageData = canvas.getContext('2d')
-      ?.getImageData(0, 0, atlas.cellWidth, atlas.cellHeight)
-    if (!imageData) throw new Error('Canvas 2D image data is unavailable')
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Canvas 2D image data is unavailable')
+    const readbackStartedAt = now()
+    const imageData = context.getImageData(0, 0, atlas.cellWidth, atlas.cellHeight)
+    readbackMs += now() - readbackStartedAt
     for (let row = 0; row < atlas.cellHeight; row += 1) {
       const sourceOffset = row * rowLength
       const targetOffset = ((y + row) * atlas.width + x) * 4
@@ -59,6 +62,7 @@ export function applyAtlasPatch(
     patch.metrics.uploadRanges = uploadRanges
   }
   patch.metrics.uploadBytes = uploadBytes
+  patch.metrics.readbackMs = readbackMs
   texture.needsUpdate = true
   return now() - startedAt
 }
