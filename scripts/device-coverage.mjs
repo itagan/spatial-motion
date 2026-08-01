@@ -43,7 +43,7 @@ function flattenArtifact(artifact) {
       path: artifact.path,
       browserName: artifact.data.browser?.name ?? '',
       sourceRevision,
-      cleanRevision: sourceRevision.length > 0 && !sourceRevision.endsWith('-dirty'),
+      cleanRevision: /^[0-9a-f]{7,40}$/i.test(sourceRevision),
       configuration: result.configuration,
       durationSeconds: Number(result.durationMs ?? 0) / 1000,
       stabilityPassed: stability?.evaluation?.version === 2

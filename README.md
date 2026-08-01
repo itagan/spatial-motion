@@ -574,6 +574,8 @@ npm run benchmark:matrix -- --preview --stability --stability-interval 5 \
   --scenarios transition-stress --duration 60 --headed
 npm run benchmark:coverage
 npm run benchmark:coverage -- --strict
+npm run benchmark:import-device -- ~/Downloads/device-capture.json \
+  --output benchmarks/results/device-evidence.json
 ```
 
 矩阵按 GPU、视口和设备 DPR 隔离，完整保存运行环境与原始结果。判定边界与默认
@@ -588,6 +590,9 @@ npm run benchmark:coverage -- --strict
 跨设备目标声明在 `benchmarks/device-targets.json`。`benchmark:coverage` 自动扫描已保存
 结果，区分正式提交上的 `qualified`、dirty/缺 SHA 的 `development-only` 和 `missing`；
 `--strict` 仅在全部桌面与移动目标都有正式 steady 与 300 秒长稳证据时通过。
+真实手机无法由本机 Playwright 代表时，可在设备浏览器打开 production Benchmark，完成
+采样后点击“导出设备证据”；`benchmark:import-device` 会在仓库端重算 v2 稳定性、质量建议
+和源码状态，再生成可被覆盖报告识别的正式 JSON。
 
 默认阈值覆盖 FPS、最大帧时间、P95/P99、33ms 长帧、Stage CPU、WebGL 提交、Atlas build/patch、纹理内存与估算上传量。配置不兼容或超过阈值时命令返回非零退出码；自定义阈值可对每个指标设置 `maxRegressionPercent`、`maxRegressionAbsolute` 或两者。随包提供的六个 `--preset` 覆盖 100/500/1000/2000 实例、low/medium/high/auto 质量和四类固定场景，CLI 会拒绝与预设不一致的结果。
 

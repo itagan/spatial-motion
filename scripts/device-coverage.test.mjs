@@ -23,14 +23,14 @@ test('distinguishes missing, development-only, and clean qualified evidence', ()
   assert.equal(missing[0].status, 'missing')
 
   const unknownRevision = evaluateDeviceCoverage(targets, [
-    artifact('steady-unknown.json', '', 'steady', 10),
-    artifact('soak-unknown.json', '', 'transition-stress', 300, true),
+    artifact('steady-unknown.json', 'unknown', 'steady', 10),
+    artifact('soak-unknown.json', 'unknown', 'transition-stress', 300, true),
   ])
   assert.equal(unknownRevision[0].status, 'development-only')
 
   const development = evaluateDeviceCoverage(targets, [
-    artifact('steady.json', 'abc-dirty', 'steady', 10),
-    artifact('soak.json', 'abc-dirty', 'transition-stress', 300, true),
+    artifact('steady.json', 'abc1234-dirty', 'steady', 10),
+    artifact('soak.json', 'abc1234-dirty', 'transition-stress', 300, true),
   ])
   assert.equal(development[0].status, 'development-only')
   assert.deepEqual(development[0].requirements.map(({ status }) => status), [
@@ -39,17 +39,17 @@ test('distinguishes missing, development-only, and clean qualified evidence', ()
   ])
 
   const qualified = evaluateDeviceCoverage(targets, [
-    artifact('steady-clean.json', 'abc', 'steady', 10),
-    artifact('soak-clean.json', 'abc', 'transition-stress', 300, true),
+    artifact('steady-clean.json', 'abc1234', 'steady', 10),
+    artifact('soak-clean.json', 'abc1234', 'transition-stress', 300, true),
   ])
   assert.equal(qualified[0].status, 'qualified')
 })
 
 test('rejects the wrong GPU, short duration, and failed stability evidence', () => {
   const coverage = evaluateDeviceCoverage(targets, [
-    artifact('intel.json', 'abc', 'steady', 10, false, 'Intel'),
-    artifact('short.json', 'abc', 'transition-stress', 60, true),
-    artifact('failed.json', 'abc', 'transition-stress', 300, false),
+    artifact('intel.json', 'abc1234', 'steady', 10, false, 'Intel'),
+    artifact('short.json', 'abc1234', 'transition-stress', 60, true),
+    artifact('failed.json', 'abc1234', 'transition-stress', 300, false),
   ])
 
   assert.equal(coverage[0].status, 'missing')
@@ -58,7 +58,7 @@ test('rejects the wrong GPU, short duration, and failed stability evidence', () 
 })
 
 test('rejects legacy stability evidence that did not prove diagnostic coverage', () => {
-  const legacy = artifact('legacy.json', 'abc', 'transition-stress', 300, true)
+  const legacy = artifact('legacy.json', 'abc1234', 'transition-stress', 300, true)
   legacy.data.stabilityDiagnostics[0].evaluation = { passed: true }
 
   const coverage = evaluateDeviceCoverage(targets, [legacy])

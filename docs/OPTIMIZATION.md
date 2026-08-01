@@ -911,7 +911,7 @@ Cards-only 从 9,888 降至 8,889 bytes gzip，减少 999 bytes；距 10 KiB 上
 由 352 增至 1,351 bytes。root consumer 从 37,065 降至 36,285 bytes gzip；Core-only
 保持 15,251 bytes，tarball 在加入独立主线程 fallback chunk、内容基准与单元 Canvas
 复用、readback/pack/Worker 时序诊断、批次矩阵、连续 pack、单次 build 快照与冷启动
-重叠后为 140,910 bytes，仍低于
+重叠后为 141,313 bytes，仍低于
 150 KiB 上限。
 模块总量略增是独立 lazy 模块、诊断与 sourcemap 的代价，不代表基础消费者下载回退。
 
@@ -1024,3 +1024,9 @@ Canvas、GPU/纹理 bytes、Geometry build、资源与 Program 失败均零增�
 0 长帧、2000 resident/submitted、主体 1 Draw Call。该结果与 v2 soak 共同使
 `apple-silicon-desktop` 达到 `qualified`。Intel、Windows、Android 与 iOS 仍缺真实设备
 证据；在覆盖完整前不调整默认 Profile，也不把 UA/viewport 模拟当作实机结论。
+
+真实移动端采集入口随后补齐：Benchmark 页在任意设备浏览器中每 5 秒保存 Heap（可用时）、
+DOM/Canvas，同时保留 500ms Renderer 样本和运行操作数；独立“导出设备证据”不会改变原有
+单结果导出与基线比较格式。仓库端 `benchmark:import-device` 验证 UA 与环境一致、矩阵与
+结果一致、时长和采样间隔有效，再绑定当前代码 SHA、重算 v2 稳定门禁及质量建议。这样
+Android/iOS 可以用真实 GPU/WebKit/Chromium 数据进入同一覆盖报告，不依赖桌面设备模拟。

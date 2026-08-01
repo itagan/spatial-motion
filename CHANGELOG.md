@@ -76,6 +76,9 @@
   场景和长稳结果，区分正式、dirty 开发与缺失证据，并提供严格 CI 退出码。
 - Renderer 诊断指标上限由 64 扩至 96，确保 Cards 的 Program 与资源失败计数不会被
   Atlas 指标截断；长稳 v2 判定拒绝缺少必要样本或关键计数的历史证据。
+- Benchmark 页面新增真实设备证据导出；`benchmark:import-device` 校验浏览器、矩阵和时长，
+  校验构建指纹与当前代码 SHA，并在仓库端生成 v2 稳定性与质量校准结果，支持 Android/iOS
+  实机闭环且拒绝旧缓存或错版本 capture。
 
 ### Added
 

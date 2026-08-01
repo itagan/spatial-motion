@@ -29,6 +29,8 @@ import { createGsapExtension, createNativeThreeExtension } from './extensions'
 import './style.css'
 import './benchmark.css'
 
+declare const __SPATIAL_MOTION_SOURCE_REVISION__: string
+
 const avatarPool = Array.from({ length: 24 }, (_, index) => createAvatar(index))
 const createItems = (count: number): MotionItem[] => Array.from({ length: count }, (_, index) => ({
   id: `benchmark-${index + 1}`,
@@ -183,6 +185,34 @@ let itemCount = 500
 let qualityMode: QualityMode = 'auto'
 let layoutName = 'sphere'
 let lastResult: BenchmarkResult | null = null
+interface BrowserStabilitySample {
+  elapsedMs: number
+  usedJSHeapBytes: number | null
+  totalJSHeapBytes: number | null
+  domNodes: number
+  canvases: number
+}
+interface DeviceBenchmarkCapture {
+  version: 1
+  kind: 'spatial-motion-device-capture'
+  generatedAt: string
+  sourceRevision: string
+  browser: { name: string; version: string; userAgent: string }
+  matrix: {
+    durationSeconds: number
+    itemCounts: number[]
+    qualities: QualityMode[]
+    scenarios: string[]
+    contentMode: BenchmarkContentMode
+    serverMode: 'device-browser'
+    stability: boolean
+    stabilityIntervalSeconds: number
+  }
+  result: BenchmarkResult
+  diagnostics: { firstRenderSubmitMs: number; operations: number }
+  browserSamples: BrowserStabilitySample[]
+}
+let lastDeviceCapture: DeviceBenchmarkCapture | null = null
 declare global {
   interface Window {
     __spatialMotionBenchmarkResult?: BenchmarkResult
@@ -199,6 +229,7 @@ declare global {
 let baselineResult: BenchmarkResult | null = null
 let runTimer = 0
 let sampleTimer = 0
+let stabilitySampleTimer = 0
 let stressTimer = 0
 let stressOperations = 0
 let runGeneration = 0
@@ -269,6 +300,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-benchmark-extension]').forEa
 document.querySelector('#run-benchmark')?.addEventListener('click', () => void runBenchmark())
 document.querySelector('#run-stress')?.addEventListener('click', () => void runBenchmark('transition-stress'))
 document.querySelector('#export-result')?.addEventListener('click', exportResult)
+document.querySelector('#export-device-evidence')?.addEventListener('click', exportDeviceEvidence)
 document.querySelector<HTMLInputElement>('#import-baseline')?.addEventListener('change', importBaseline)
 
 const metricsTimer = window.setInterval(updateMetrics, 500)
@@ -348,6 +380,9 @@ async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
   cancelRun()
   const generation = runGeneration
   window.__spatialMotionBenchmarkDiagnostics = undefined
+  lastDeviceCapture = null
+  const deviceExportButton = document.querySelector<HTMLButtonElement>('#export-device-evidence')
+  if (deviceExportButton) deviceExportButton.disabled = true
   const durationSeconds = Number((document.querySelector<HTMLSelectElement>('#duration'))?.value ?? 10)
   const scenario = forcedScenario
     ?? (document.querySelector<HTMLSelectElement>('#scenario')?.value ?? 'steady') as BenchmarkScenario
@@ -361,6 +396,13 @@ async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
   })
   stressOperations = 0
   coldStartRenderSubmitMs = 0
+  const browserSamples: BrowserStabilitySample[] = []
+  const runStartedAt = performance.now()
+  const recordBrowserSample = (): void => {
+    browserSamples.push(captureBrowserSample(runStartedAt))
+  }
+  recordBrowserSample()
+  stabilitySampleTimer = window.setInterval(recordBrowserSample, 5_000)
   setRunButtonsDisabled(true)
   setStatus(`正在运行 ${durationSeconds} 秒${scenarioLabel(scenario)}…`)
   sampleTimer = window.setInterval(() => session.record(
@@ -383,8 +425,10 @@ async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
   session.record(stage.getPerformanceStats(), performance.now(), benchmarkExtensionStats())
   runTimer = window.setTimeout(() => {
     window.clearInterval(sampleTimer)
+    window.clearInterval(stabilitySampleTimer)
     window.clearInterval(stressTimer)
     sampleTimer = 0
+    stabilitySampleTimer = 0
     stressTimer = 0
     runTimer = 0
     session.record(stage.getPerformanceStats(), performance.now(), benchmarkExtensionStats())
@@ -394,10 +438,18 @@ async function runBenchmark(forcedScenario?: BenchmarkScenario): Promise<void> {
       firstRenderSubmitMs: coldStartRenderSubmitMs,
       operations: stressOperations,
     }
+    recordBrowserSample()
+    lastDeviceCapture = createDeviceCapture(
+      lastResult,
+      durationSeconds,
+      scenario,
+      browserSamples,
+    )
     renderResult(lastResult)
     setRunButtonsDisabled(false)
     const exportButton = document.querySelector<HTMLButtonElement>('#export-result')
     if (exportButton) exportButton.disabled = false
+    if (deviceExportButton) deviceExportButton.disabled = false
     setStatus(`采样完成：平均 ${lastResult.averageFps.toFixed(1)} FPS，P95 ${lastResult.maximumFrameTimeP95.toFixed(2)} ms${stressOperations ? `，完成 ${stressOperations} 次操作` : ''}`)
   }, durationSeconds * 1000)
 }
@@ -460,9 +512,11 @@ function cancelRun(message?: string): void {
   runGeneration += 1
   if (runTimer) window.clearTimeout(runTimer)
   if (sampleTimer) window.clearInterval(sampleTimer)
+  if (stabilitySampleTimer) window.clearInterval(stabilitySampleTimer)
   if (stressTimer) window.clearInterval(stressTimer)
   runTimer = 0
   sampleTimer = 0
+  stabilitySampleTimer = 0
   stressTimer = 0
   setRunButtonsDisabled(false)
   if (message) setStatus(message)
@@ -680,6 +734,86 @@ function exportResult(): void {
   link.download = `spatial-motion-${itemCount}-${qualityMode}-${layoutName}-${extensionMode}.json`
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function exportDeviceEvidence(): void {
+  if (!lastDeviceCapture) return
+  downloadJson(
+    lastDeviceCapture,
+    `spatial-motion-device-${itemCount}-${qualityMode}-${lastResult?.configuration.scenario ?? layoutName}.json`,
+  )
+}
+
+function downloadJson(value: unknown, filename: string): void {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function captureBrowserSample(startedAt: number): BrowserStabilitySample {
+  const memory = (performance as Performance & {
+    memory?: { usedJSHeapSize?: number; totalJSHeapSize?: number }
+  }).memory
+  return {
+    elapsedMs: Math.max(0, performance.now() - startedAt),
+    usedJSHeapBytes: Number.isFinite(memory?.usedJSHeapSize)
+      ? memory!.usedJSHeapSize!
+      : null,
+    totalJSHeapBytes: Number.isFinite(memory?.totalJSHeapSize)
+      ? memory!.totalJSHeapSize!
+      : null,
+    domNodes: document.getElementsByTagName('*').length,
+    canvases: document.querySelectorAll('canvas').length,
+  }
+}
+
+function createDeviceCapture(
+  result: BenchmarkResult,
+  durationSeconds: number,
+  scenario: BenchmarkScenario,
+  browserSamples: BrowserStabilitySample[],
+): DeviceBenchmarkCapture {
+  const browser = detectBrowser(navigator.userAgent)
+  return {
+    version: 1,
+    kind: 'spatial-motion-device-capture',
+    generatedAt: new Date().toISOString(),
+    sourceRevision: __SPATIAL_MOTION_SOURCE_REVISION__,
+    browser: { ...browser, userAgent: navigator.userAgent },
+    matrix: {
+      durationSeconds,
+      itemCounts: [itemCount],
+      qualities: [qualityMode],
+      scenarios: [scenario],
+      contentMode: requestedContentMode,
+      serverMode: 'device-browser',
+      stability: durationSeconds >= 20,
+      stabilityIntervalSeconds: 5,
+    },
+    result,
+    diagnostics: {
+      firstRenderSubmitMs: coldStartRenderSubmitMs,
+      operations: stressOperations,
+    },
+    browserSamples: browserSamples.map((sample) => ({ ...sample })),
+  }
+}
+
+function detectBrowser(userAgent: string): { name: string; version: string } {
+  const candidates: Array<[string, RegExp]> = [
+    ['chromium', /(?:Chrome|Chromium|CriOS)\/([\d.]+)/],
+    ['firefox', /(?:Firefox|FxiOS)\/([\d.]+)/],
+    ['safari', /Version\/([\d.]+).*Safari/],
+  ]
+  for (const [name, pattern] of candidates) {
+    const match = userAgent.match(pattern)
+    if (match) return { name, version: match[1] ?? 'unknown' }
+  }
+  return { name: 'unknown', version: 'unknown' }
 }
 
 function setActive(selector: string, active: HTMLButtonElement): void {

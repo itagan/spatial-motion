@@ -176,6 +176,12 @@ high/medium/low steady 矩阵；准备调整默认档位时增加
 `benchmarks/device-targets.json`，不要通过改名或手工汇总把不同 GPU、浏览器、平台和
 源码状态的证据混为一组。dirty 或缺 SHA 的采集只用于开发判断。
 
+真实 Android/iOS 使用 Benchmark 页面的“导出设备证据”，再运行
+`npm run benchmark:import-device -- <capture> --output <result>`。原始 capture 应保存在仓库
+外；导入器从当前干净代码 SHA 建立正式证据，并重新执行 v2 样本完整性和资源趋势门禁。
+手机必须访问该 SHA 的 production preview，不能使用 UA 模拟、远端旧缓存或开发服务器
+结果替代实机结论。
+
 ## 文档维护
 
 - `README.md`：已经实现、可供使用者依赖的能力。

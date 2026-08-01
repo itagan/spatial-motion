@@ -60,10 +60,38 @@ npm run benchmark:coverage -- --strict
 Windows 主流桌面 GPU、Android 中端机和 iOS Safari；桌面要求 2000/high，移动端要求
 1000/medium，均包含 10 秒 steady 与通过稳定性门禁的 300 秒 transition-stress。
 普通报告允许缺口存在，便于逐台采集；`--strict` 要求每项目标均为 `qualified`。
-dirty 或缺少 `sourceRevision` 的结果只记作 `development-only`，不会满足正式门禁。
+dirty、缺少 `sourceRevision` 或不是 7–40 位 Git 十六进制 SHA 的结果只记作
+`development-only`，不会满足正式门禁。
 Apple Silicon 当前正式证据为 `2026-08-02-apple-m4-steady-qualified.json` 与
 `2026-08-02-apple-m4-transition-stability-300s-v2.json`；二者均从采集开始时的干净 SHA
 生成。其他目标必须在对应真实硬件上采集，不接受仅修改 UA、视口或设备缩放的模拟结果。
+
+## 真实 Android / iOS 设备采集
+
+从干净提交构建并让同一局域网中的手机访问 production preview：
+
+```bash
+npm run build:demo
+npx vite preview --host 0.0.0.0 --port 4173
+```
+
+在手机打开 `http://<电脑局域网地址>:4173/benchmark.html`。Android 与 iOS 均先采集
+1000/medium/steady/10 秒，再采集 1000/medium/transition-stress/300 秒；第二项使用
+“运行切换压力测试”。每次完成后点击“导出设备证据”，把下载文件保留在仓库外，然后导入：
+
+```bash
+npm run benchmark:import-device -- ~/Downloads/android-soak.json \
+  --output benchmarks/results/2026-08-02-android-soak.json
+```
+
+页面每 5 秒保存 Heap（平台支持时）、DOM 和 Canvas，并保留既有 500ms Renderer 样本。
+导入器验证浏览器身份、矩阵配置和时长，在仓库端重新执行 v2 门禁；失败证据仍写盘但返回
+非零退出码。浏览器样本还必须覆盖至少 90% 的运行时长，任意相邻样本间隔不得超过声明
+间隔的 2.5 倍，页面切后台或计时器被长期节流不会被误判为稳定。导入时除
+`benchmarks/results` 外的代码工作区必须干净，否则结果会标记
+`-dirty`。production 构建会把源码指纹嵌入 capture；导入时必须与当前仓库指纹完全一致，
+旧缓存、错分支或 dirty/clean 状态不一致都会被拒绝。这保证同批设备证据可以连续导入，
+同时不会把其他版本或未提交代码标成正式基线。
 
 `--headed` 用于采集真实有界面 GPU 环境；默认无头模式适合自动化和软件渲染基线。
 不同 `gpuRenderer`、视口或 DPR 的结果不会合并推荐。无头 SwiftShader 结果只能代表

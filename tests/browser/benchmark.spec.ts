@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
 
 interface BenchmarkSummary {
   contentMode: 'default' | 'template' | 'canvas'
@@ -340,4 +341,40 @@ test('template and canvas partial updates keep readback bounded and visual outpu
   }
 
   expect(errors).toEqual([])
+})
+
+test('exports a repository-importable real-device capture', async ({ page }) => {
+  await page.goto('/benchmark.html')
+  await expect(page.getByText('READY', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '1000', exact: true }).click()
+  await page.getByRole('button', { name: 'MEDIUM', exact: true }).click()
+  await page.locator('#duration').selectOption('3')
+  await page.locator('#scenario').selectOption('steady')
+  await page.getByRole('button', { name: '运行性能采样', exact: true }).click()
+  await expect(page.getByText(/采样完成：/)).toBeVisible({ timeout: 20_000 })
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出设备证据', exact: true }).click()
+  const download = await downloadPromise
+  const path = await download.path()
+  if (!path) throw new Error('Device evidence download path is unavailable')
+  const capture = JSON.parse(await readFile(path, 'utf8'))
+
+  expect(capture).toMatchObject({
+    version: 1,
+    kind: 'spatial-motion-device-capture',
+    sourceRevision: expect.any(String),
+    browser: { name: 'chromium' },
+    matrix: {
+      durationSeconds: 3,
+      itemCounts: [1000],
+      qualities: ['medium'],
+      scenarios: ['steady'],
+      stability: false,
+    },
+    result: {
+      configuration: { itemCount: 1000, qualityMode: 'medium', scenario: 'steady' },
+    },
+  })
+  expect(capture.browserSamples).toHaveLength(2)
 })
