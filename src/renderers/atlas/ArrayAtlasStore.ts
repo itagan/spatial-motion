@@ -38,6 +38,30 @@ export interface ArrayAtlasData {
   pageRows: number
 }
 
+export interface ArrayAtlasBatchLayout {
+  columns: number
+  rows: number
+  layersPerBatch: number
+}
+
+export function resolveArrayAtlasBatchLayout(
+  layout: Pick<ArrayAtlasLayout, 'width' | 'height' | 'depth' | 'layerByteLength'>,
+  byteBudget: number,
+): ArrayAtlasBatchLayout {
+  const maximumBatchLayers = Math.min(
+    layout.depth,
+    Math.max(1, Math.floor(byteBudget / layout.layerByteLength)),
+  )
+  const columns = Math.min(
+    maximumBatchLayers,
+    Math.max(1, Math.ceil(Math.sqrt(
+      maximumBatchLayers * layout.height / layout.width,
+    ))),
+  )
+  const rows = Math.max(1, Math.floor(maximumBatchLayers / columns))
+  return { columns, rows, layersPerBatch: columns * rows }
+}
+
 export function resolveArrayAtlasPageSize(
   itemCount: number,
   options: Pick<
@@ -164,14 +188,17 @@ export function applyArrayAtlasPatch(
   const pageCapacity = atlas.columns * atlas.rows
   const layerByteLength = atlas.width * atlas.height * 4
   const updatedLayers = new Set<number>()
+  let readbackMs = 0
   patch.cells.forEach(({ index, canvas }) => {
     const pageIndex = Math.floor(index / pageCapacity)
     const pageSlot = index % pageCapacity
     const x = (pageSlot % atlas.columns) * atlas.strideX + atlas.padding
     const y = Math.floor(pageSlot / atlas.columns) * atlas.strideY + atlas.padding
-    const imageData = canvas.getContext('2d')
-      ?.getImageData(0, 0, atlas.cellWidth, atlas.cellHeight)
-    if (!imageData) throw new Error('Canvas 2D image data is unavailable')
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Canvas 2D image data is unavailable')
+    const readbackStartedAt = now()
+    const imageData = context.getImageData(0, 0, atlas.cellWidth, atlas.cellHeight)
+    readbackMs += now() - readbackStartedAt
     for (let row = 0; row < atlas.cellHeight; row += 1) {
       const sourceOffset = row * atlas.cellWidth * 4
       const targetRow = atlas.height - 1 - (y + row)
@@ -190,6 +217,7 @@ export function applyArrayAtlasPatch(
   }
   patch.metrics.uploadRanges = updatedLayers.size
   patch.metrics.uploadBytes = updatedLayers.size * layerByteLength
+  patch.metrics.readbackMs = readbackMs
   return now() - startedAt
 }
 

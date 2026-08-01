@@ -89,6 +89,37 @@
   公共协议，真实 tgz 消费者覆盖运行、类型、资源释放与内部路径封锁，并冻结子路径白名单。
 - [x] **质量矩阵采集基础**：自动遍历固定质量/实例规模，按 GPU、视口和 DPR 保存
   完整 Benchmark，并以线上降级边界生成最高稳定档建议，不扩展冻结后的库 API。
+- [x] **Cards Effect Runtime 按需化**：基础 Cards 只保留公共材质与 Motion Program，
+  Effect Loader、生命周期、缓存和材质切换在首次特效/Program 预热时加载。
+- [x] **Atlas 上传指标分代**：当前 Atlas 上传帧与渲染器生命周期累计值分离，
+  重建、context restore 和 dispose 的指标语义由单测固定。
+- [x] **Atlas 内存可观测与减峰**：区分 CPU/GPU 常驻、构建 TypedArray 峰值，
+  Array Worker readback 批次由 8 MiB 收紧到 2 MiB，并以硬性单测限制临时像素缓冲。
+- [x] **主线程 Array 直接分页**：Worker fallback、`drawCard` 与 `cardContent` 共用栅格
+  准备会话和分页批次，不再构建完整 2D 中间像素缓冲。
+- [x] **主线程栅格协作调度**：Array 批次间可取消地让出到下一 RAF，并分别报告当前
+  构建与 Renderer 生命周期累计让出成本。
+- [x] **真实内容栅格门禁**：Benchmark 覆盖 ES6 模板与自定义 Canvas，按内容成本采用
+  1 MiB/512 KiB 临时批次和 8ms/两批时间片，并用截图、像素与长帧门禁验证结果。
+- [x] **自定义内容单元复用**：模板与 `drawCard` 完整 Array 构建顺序复用一个单元
+  Canvas，消除批次内并发 backing store；patch 的独立 Canvas 契约保持不变。
+- [x] **真实内容 patch 读回**：Single/Array patch 分别统计 Canvas readback，并对必读回
+  的单元 Canvas 启用读频繁提示；模板/Canvas 连续更新纳入浏览器性能与视觉门禁。
+- [x] **Worker Array 读回提示**：仅在分页 OffscreenCanvas 启用 `willReadFrequently`；
+  通过四路对照排除 Worker Single 与主线程批次，避免为局部收益扩大软件绘制成本。
+- [x] **Array pack 成本分解**：Renderer 与 Benchmark 可选报告页面翻转/行复制耗时；
+  Worker/main-thread 正式数据证明其约占一成，暂不引入额外缓冲或复杂复制实现。
+- [x] **Worker 墙钟分解**：协议、Renderer 与 Benchmark 可选区分 Worker 内部渲染和
+  postMessage 往返；正式数据证明外部调度/传输不足 5ms，保持当前按构建创建/终止策略。
+- [x] **Worker readback 批次矩阵**：1/2/4/8 MiB 同环境对照确认 2 MiB 为耗时/内存拐点；
+  相对 8 MiB 同时降低内部渲染约 17.5% 和 TypedArray 构建峰值约 19.5%，并通过
+  5000/10000 项全量 High 扩展性复验，无需增加按容量自适应分支。
+- [x] **Worker Array 连续 pack**：页面在单列批次 Canvas 内预翻转，最终 layer 使用
+  连续块复制；默认与大容量实测降低 pack/Worker 墙钟，视觉和局部 patch 契约保持。
+- [x] **Atlas 单次 build 口径**：Renderer 保存最后一次完整构建分段，Benchmark 仅在
+  窗口内 build generation 增加时输出可选快照，排除累计指标对 cold-start 的歧义。
+- [x] **Worker 冷启动重叠**：分解 Runtime 加载、Worker 构造、请求准备与发送前墙钟，
+  保留 lazy chunk 并让 Worker 启动与 Runtime 加载并行；同时封闭发送前中止竞态。
 
 - [x] 建立可比较的 steady、cold-start、atlas-update 与 transition-stress 基准。
 - [x] 暴露 P50/P95/P99、长帧、CPU/提交、图集和图片加载指标。
@@ -139,6 +170,7 @@
 - [x] Atlas 冷启动增加分阶段指标，默认绘制移除逐卡临时 Canvas，并移除整图像素缓冲二次复制。
 - [x] 完成默认 Atlas 的离主线程绘制/readback，以及 Texture2DArray 分页与自适应渐进首传；默认 auto 在未显式要求 mipmap 的大型图集启用 array，压力帧会降低后续上传预算。
 - [x] 收集自定义 Renderer/Layout 案例，完成发布候选 API freeze。
+- [x] 将 Cards Effect Runtime 拆为独立 lazy chunk，恢复 Cards-only 包体积余量。
 
 ### CSS3D 可选渲染器
 

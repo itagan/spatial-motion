@@ -522,6 +522,8 @@ describe('InstancedCardRenderer item loading', () => {
     arrayResult.columns = 4
     arrayResult.rows = 4
     arrayResult.mipmaps = false
+    arrayResult.metrics.mainThreadRasterYields = 2
+    arrayResult.metrics.mainThreadRasterYieldMs = 18
     atlasMock.create.mockResolvedValueOnce(arrayResult)
     const scene = new Scene()
     const renderer = new InstancedCardRenderer(scene, { atlasMode: 'array' })
@@ -535,9 +537,18 @@ describe('InstancedCardRenderer item loading', () => {
     ))
     renderer.capabilities.frame?.update(1 / 60)
     expect(renderer.getStats().metrics).toMatchObject({
+      atlasCpuBytes: texture.image.data.byteLength,
+      atlasGpuBytes: texture.image.data.byteLength,
+      atlasBuildPixelBufferPeakBytes: texture.image.data.byteLength,
+      maxAtlasBuildPixelBufferBytes: texture.image.data.byteLength,
+      mainThreadRasterYields: 2,
+      mainThreadRasterYieldMs: 18,
+      totalMainThreadRasterYields: 2,
+      totalMainThreadRasterYieldMs: 18,
       uploadedLayers: 12,
       pendingLayers: 8,
       layerUploadFrames: 0,
+      totalLayerUploadFrames: 0,
     })
     texture.layerUpdates.clear()
     renderer.capabilities.frame?.update(1 / 60)
@@ -548,19 +559,56 @@ describe('InstancedCardRenderer item loading', () => {
       uploadedLayers: 18,
       pendingLayers: 2,
       layerUploadFrames: 1,
+      totalLayerUploadFrames: 1,
       arrayUploadBudgetBytes: 1_572_864,
       arrayUploadPeakBudgetBytes: 1_572_864,
       arrayUploadBackoffs: 0,
     })
     renderer.capabilities.frame?.update(1 / 60)
     expect(mesh.material.uniforms.uLayers.value).toBe(20)
+    expect(renderer.getStats().metrics).toMatchObject({
+      layerUploadFrames: 2,
+      totalLayerUploadFrames: 2,
+    })
     texture.layerUpdates.clear()
     renderer.capabilities.resourceRecovery?.refreshResources()
     expect(texture.layerUpdates).toEqual(new Set(
       Array.from({ length: 12 }, (_value, index) => index),
     ))
     expect(mesh.material.uniforms.uLayers.value).toBe(12)
+    expect(renderer.getStats().metrics).toMatchObject({
+      uploadedLayers: 12,
+      pendingLayers: 8,
+      layerUploadFrames: 0,
+      totalLayerUploadFrames: 2,
+    })
+    renderer.capabilities.frame?.update(1 / 60)
+    renderer.capabilities.frame?.update(1 / 60)
+    expect(renderer.getStats().metrics).toMatchObject({
+      layerUploadFrames: 1,
+      totalLayerUploadFrames: 3,
+    })
     renderer.dispose()
+    expect(renderer.getStats()).toMatchObject({
+      instanceCount: 0,
+      submittedInstanceCount: 0,
+      gpuBytes: 0,
+      metrics: {
+        textureBytes: 0,
+        atlasCpuBytes: 0,
+        atlasGpuBytes: 0,
+        atlasBuildPixelBufferPeakBytes: 0,
+        maxAtlasBuildPixelBufferBytes: texture.image.data.byteLength,
+        mainThreadRasterYields: 0,
+        mainThreadRasterYieldMs: 0,
+        totalMainThreadRasterYields: 2,
+        totalMainThreadRasterYieldMs: 18,
+        uploadedLayers: 0,
+        pendingLayers: 0,
+        layerUploadFrames: 0,
+        totalLayerUploadFrames: 3,
+      },
+    })
   })
 
   it('coordinates array patches through the bounded layer uploader', async () => {
@@ -793,6 +841,35 @@ describe('InstancedCardRenderer item loading', () => {
       activeCount: 1,
       payload: null,
     })).resolves.toBe(false)
+    renderer.dispose()
+  })
+
+  it('keeps the optional Effect runtime idle for base Cards and texture-only prewarm', async () => {
+    const currentAtlas = atlas(1)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const loader = vi.fn(async () => defineCardEffectProgram<null>({
+      kind: 'unused-effect',
+      prefix: 'program_unused_',
+      vertexBody: 'center.x += 0.0;',
+      upload() {},
+    }))
+    const prepareTexture = vi.fn(() => 1)
+    const renderer = new InstancedCardRenderer(new Scene(), {
+      effectPrograms: { 'unused-effect': loader },
+      prepareTexture,
+      texturePrewarm: false,
+    })
+
+    await renderer.setItems([{ id: 'a' }])
+    await expect(renderer.prewarm({ textures: true })).resolves.toBe(true)
+
+    expect(loader).not.toHaveBeenCalled()
+    expect(prepareTexture).toHaveBeenCalledOnce()
+    expect(renderer.getStats().metrics).toMatchObject({
+      programLoads: 0,
+      programSwitches: 0,
+      cachedPrograms: 0,
+    })
     renderer.dispose()
   })
 
@@ -1179,7 +1256,10 @@ describe('InstancedCardRenderer item loading', () => {
     }
     first.resolve(emptyPatch)
     expect(await firstUpdate).toBe(false)
-    second.resolve(emptyPatch)
+    second.resolve({
+      ...emptyPatch,
+      metrics: { ...emptyPatch.metrics, readbackMs: 2 },
+    })
     expect(await secondUpdate).toBe(true)
 
     expect(atlasMock.applyPatch).toHaveBeenCalledOnce()
@@ -1188,6 +1268,7 @@ describe('InstancedCardRenderer item loading', () => {
         atlasBuilds: 1,
         atlasPatches: 1,
         atlasDiscardedPatches: 1,
+        atlasReadbackMs: 2.5,
       },
     })
     expect(scene.children[0]).toBe(mesh)

@@ -58,6 +58,29 @@ export interface BenchmarkResult {
   atlasImageLoadWallMs: number
   atlasCellRenderMs: number
   atlasReadbackMs: number
+  /** Optional in version 1 for compatibility with benchmark files created before Array pack timing. */
+  atlasArrayPackMs?: number
+  /** Optional in version 1 for compatibility with benchmark files created before Worker timing. */
+  atlasWorkerRenderMs?: number
+  /** Optional in version 1 for compatibility with benchmark files created before Worker timing. */
+  atlasWorkerRoundTripMs?: number
+  atlasWorkerRuntimeLoadMs?: number
+  atlasWorkerConstructMs?: number
+  atlasWorkerRequestPrepareMs?: number
+  atlasWorkerPrePostMs?: number
+  /** Exact last complete Atlas build in this sample window; optional for version 1 compatibility. */
+  atlasLastBuildMs?: number
+  atlasLastPrepareMs?: number
+  atlasLastImageLoadWallMs?: number
+  atlasLastCellRenderMs?: number
+  atlasLastReadbackMs?: number
+  atlasLastArrayPackMs?: number
+  atlasLastWorkerRenderMs?: number
+  atlasLastWorkerRoundTripMs?: number
+  atlasLastWorkerRuntimeLoadMs?: number
+  atlasLastWorkerConstructMs?: number
+  atlasLastWorkerRequestPrepareMs?: number
+  atlasLastWorkerPrePostMs?: number
   atlasWorkerRenders: number
   atlasImageBitmapDecodeMs: number
   atlasTexturePrewarms: number
@@ -167,6 +190,10 @@ export class BenchmarkSession {
       .filter((frameMs) => frameMs > 0)
     const latest = this.samples.at(-1)?.stats
     const first = this.samples[0]?.stats
+    const atlasBuilds = rendererCounterDelta(first, latest, 'atlasBuilds')
+    const lastBuildMetric = (key: string): number => atlasBuilds > 0
+      ? latest?.renderer.metrics[key] ?? 0
+      : 0
     return {
       version: 1,
       configuration: {
@@ -199,7 +226,7 @@ export class BenchmarkSession {
       transformCalculations: counterDelta(first, latest, 'transformCalculations'),
       pickingMs: counterDelta(first, latest, 'pickingMs'),
       pickOperations: counterDelta(first, latest, 'pickOperations'),
-      atlasBuilds: rendererCounterDelta(first, latest, 'atlasBuilds'),
+      atlasBuilds,
       atlasPatches: rendererCounterDelta(first, latest, 'atlasPatches'),
       atlasDiscardedBuilds: rendererCounterDelta(first, latest, 'atlasDiscardedBuilds'),
       atlasDiscardedPatches: rendererCounterDelta(first, latest, 'atlasDiscardedPatches'),
@@ -211,6 +238,29 @@ export class BenchmarkSession {
       atlasImageLoadWallMs: rendererCounterDelta(first, latest, 'atlasImageLoadWallMs'),
       atlasCellRenderMs: rendererCounterDelta(first, latest, 'atlasCellRenderMs'),
       atlasReadbackMs: rendererCounterDelta(first, latest, 'atlasReadbackMs'),
+      atlasArrayPackMs: rendererCounterDelta(first, latest, 'atlasArrayPackMs'),
+      atlasWorkerRenderMs: rendererCounterDelta(first, latest, 'atlasWorkerRenderMs'),
+      atlasWorkerRoundTripMs: rendererCounterDelta(first, latest, 'atlasWorkerRoundTripMs'),
+      atlasWorkerRuntimeLoadMs: rendererCounterDelta(first, latest, 'atlasWorkerRuntimeLoadMs'),
+      atlasWorkerConstructMs: rendererCounterDelta(first, latest, 'atlasWorkerConstructMs'),
+      atlasWorkerRequestPrepareMs: rendererCounterDelta(
+        first,
+        latest,
+        'atlasWorkerRequestPrepareMs',
+      ),
+      atlasWorkerPrePostMs: rendererCounterDelta(first, latest, 'atlasWorkerPrePostMs'),
+      atlasLastBuildMs: lastBuildMetric('atlasLastBuildMs'),
+      atlasLastPrepareMs: lastBuildMetric('atlasLastPrepareMs'),
+      atlasLastImageLoadWallMs: lastBuildMetric('atlasLastImageLoadWallMs'),
+      atlasLastCellRenderMs: lastBuildMetric('atlasLastCellRenderMs'),
+      atlasLastReadbackMs: lastBuildMetric('atlasLastReadbackMs'),
+      atlasLastArrayPackMs: lastBuildMetric('atlasLastArrayPackMs'),
+      atlasLastWorkerRenderMs: lastBuildMetric('atlasLastWorkerRenderMs'),
+      atlasLastWorkerRoundTripMs: lastBuildMetric('atlasLastWorkerRoundTripMs'),
+      atlasLastWorkerRuntimeLoadMs: lastBuildMetric('atlasLastWorkerRuntimeLoadMs'),
+      atlasLastWorkerConstructMs: lastBuildMetric('atlasLastWorkerConstructMs'),
+      atlasLastWorkerRequestPrepareMs: lastBuildMetric('atlasLastWorkerRequestPrepareMs'),
+      atlasLastWorkerPrePostMs: lastBuildMetric('atlasLastWorkerPrePostMs'),
       atlasWorkerRenders: rendererCounterDelta(first, latest, 'atlasWorkerRenders'),
       atlasImageBitmapDecodeMs: rendererCounterDelta(first, latest, 'atlasImageBitmapDecodeMs'),
       atlasTexturePrewarms: rendererCounterDelta(first, latest, 'atlasTexturePrewarms'),
@@ -340,6 +390,29 @@ export function parseBenchmarkResult(value: unknown): BenchmarkResult {
   if (!Array.isArray(parsed.samples)) throw new TypeError('Invalid benchmark samples')
   if (!Array.isArray(parsed.extensionStats)) throw new TypeError('Invalid extensionStats')
   for (const key of benchmarkNumberFields) assertNonNegativeNumber(parsed[key], `benchmark.${key}`)
+  for (const key of [
+    'atlasArrayPackMs',
+    'atlasWorkerRenderMs',
+    'atlasWorkerRoundTripMs',
+    'atlasWorkerRuntimeLoadMs',
+    'atlasWorkerConstructMs',
+    'atlasWorkerRequestPrepareMs',
+    'atlasWorkerPrePostMs',
+    'atlasLastBuildMs',
+    'atlasLastPrepareMs',
+    'atlasLastImageLoadWallMs',
+    'atlasLastCellRenderMs',
+    'atlasLastReadbackMs',
+    'atlasLastArrayPackMs',
+    'atlasLastWorkerRenderMs',
+    'atlasLastWorkerRoundTripMs',
+    'atlasLastWorkerRuntimeLoadMs',
+    'atlasLastWorkerConstructMs',
+    'atlasLastWorkerRequestPrepareMs',
+    'atlasLastWorkerPrePostMs',
+  ] as const) {
+    if (parsed[key] !== undefined) assertNonNegativeNumber(parsed[key], `benchmark.${key}`)
+  }
   return { ...parsed, version: 1 } as unknown as BenchmarkResult
 }
 

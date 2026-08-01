@@ -6,10 +6,23 @@ import {
   createArrayAtlasData,
   createArrayAtlasLayout,
   createArrayAtlasPatcher,
+  resolveArrayAtlasBatchLayout,
   resolveArrayAtlasPageSize,
 } from './ArrayAtlasStore'
 
 describe('ArrayAtlasStore', () => {
+  it('fits balanced raster batches within the requested pixel budget', () => {
+    const batch = resolveArrayAtlasBatchLayout({
+      width: 256,
+      height: 256,
+      depth: 32,
+      layerByteLength: 256 * 256 * 4,
+    }, 4 * 1024 * 1024)
+
+    expect(batch).toEqual({ columns: 4, rows: 4, layersPerBatch: 16 })
+    expect(batch.layersPerBatch * 256 * 256 * 4).toBeLessThanOrEqual(4 * 1024 * 1024)
+  })
+
   it('chooses the smallest balanced page that fits the device layer limit', () => {
     expect(resolveArrayAtlasPageSize(2000, {
       sourceWidth: 48 * 45,
@@ -162,6 +175,7 @@ describe('ArrayAtlasStore', () => {
     expect(texture.layerUpdates).toEqual(new Set([0, 1]))
     expect(patch.metrics.uploadRanges).toBe(2)
     expect(patch.metrics.uploadBytes).toBe(8 * 8 * 2 * 4)
+    expect(patch.metrics.readbackMs).toBeGreaterThanOrEqual(0)
     expect(atlas.data[((8 - 1 - 1) * 8 + 1) * 4]).toBe(7)
   })
 

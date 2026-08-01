@@ -35,6 +35,7 @@ function createContext() {
     fill: vi.fn(),
     clip: vi.fn(),
     stroke: vi.fn(),
+    reset: vi.fn(),
     clearRect: vi.fn(),
     drawImage: vi.fn(),
     getImageData: vi.fn((_x: number, _y: number, width: number, height: number) => ({
@@ -130,6 +131,7 @@ describe('texture atlas card rendering', () => {
     expect(Math.floor(atlas.rects[8 * 4])).toBe(0)
     expect(Math.floor(atlas.rects[9 * 4])).toBe(1)
     expect(atlas.metrics.arrayPackMs).toBeGreaterThanOrEqual(0)
+    expect(atlas.metrics.pixelBufferPeakBytes).toBe(atlas.data.byteLength * 2)
     atlas.texture.dispose()
 
     const singleLayer = await createTextureAtlas(items, 32, {
@@ -151,6 +153,119 @@ describe('texture atlas card rendering', () => {
       rows: 2,
     })
     capped.texture.dispose()
+  })
+
+  it('bounds main-thread drawCard and prepared content array readbacks', async () => {
+    let frameId = 0
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      const id = ++frameId
+      queueMicrotask(() => callback(performance.now()))
+      return id
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const readbackBytes: number[] = []
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockImplementation(function (
+      this: HTMLCanvasElement,
+    ) {
+      let context = contexts.get(this)
+      if (!context) {
+        context = createContext()
+        context.getImageData.mockImplementation((_x, _y, width, height) => {
+          readbackBytes.push(width * height * 4)
+          return {
+            data: new Uint8ClampedArray(width * height * 4),
+            width,
+            height,
+            colorSpace: 'srgb',
+          }
+        })
+        contexts.set(this, context)
+      }
+      return context as unknown as CanvasRenderingContext2D
+    })
+    const items = Array.from({ length: 512 }, (_value, index) => ({ id: String(index) }))
+    const customContexts = new Set<CanvasRenderingContext2D>()
+    let activeDraws = 0
+    let maximumActiveDraws = 0
+    const drawCard = vi.fn(async (
+      context: CanvasRenderingContext2D,
+      item: { id: string },
+    ) => {
+      customContexts.add(context)
+      activeDraws += 1
+      maximumActiveDraws = Math.max(maximumActiveDraws, activeDraws)
+      await Promise.resolve()
+      activeDraws -= 1
+      if (item.id === '3') throw new Error('expected fallback')
+    })
+    const custom = await createTextureAtlas(items, 64, {
+      atlasMode: 'array',
+      drawCard,
+    })
+    const customReadbacks = readbackBytes.splice(0)
+
+    expect(drawCard).toHaveBeenCalledTimes(items.length)
+    expect(customContexts.size).toBe(1)
+    expect(maximumActiveDraws).toBe(1)
+    expect([...customContexts][0].reset).toHaveBeenCalledTimes(items.length)
+    expect(customReadbacks.length).toBeGreaterThan(1)
+    expect(Math.max(...customReadbacks)).toBeLessThanOrEqual(512 * 1024)
+    expect(custom.metrics.pixelBufferPeakBytes).toBe(
+      custom.data.byteLength + Math.max(...customReadbacks),
+    )
+    expect(custom.metrics.mainThreadRasterYields).toBeGreaterThan(0)
+    expect(custom.metrics.mainThreadRasterYields).toBeLessThan(customReadbacks.length)
+    expect(custom.metrics.mainThreadRasterYieldMs).toBeGreaterThanOrEqual(0)
+    custom.texture.dispose()
+
+    const contentContexts = new Set<CanvasRenderingContext2D>()
+    const contentDraw = vi.fn(({ context }: { context: CanvasRenderingContext2D }) => {
+      contentContexts.add(context)
+    })
+    const prepare = vi.fn(() => ({ draw: contentDraw }))
+    const prepared = await createTextureAtlas(items, 64, {
+      atlasMode: 'array',
+      cardContent: { prepare },
+    })
+    const preparedReadbacks = readbackBytes.splice(0)
+
+    expect(prepare).toHaveBeenCalledTimes(items.length)
+    expect(contentDraw).toHaveBeenCalledTimes(items.length)
+    expect(contentContexts.size).toBe(1)
+    expect(preparedReadbacks.length).toBeGreaterThan(1)
+    expect(Math.max(...preparedReadbacks)).toBeLessThanOrEqual(1024 * 1024)
+    expect(prepared.metrics.pixelBufferPeakBytes).toBe(
+      prepared.data.byteLength + Math.max(...preparedReadbacks),
+    )
+    expect(prepared.metrics.mainThreadRasterYields).toBeGreaterThan(0)
+    expect(prepared.metrics.mainThreadRasterYields).toBeLessThan(preparedReadbacks.length)
+    prepared.texture.dispose()
+  })
+
+  it('cancels main-thread array rasterization while yielding between batches', async () => {
+    let pendingFrame: FrameRequestCallback | undefined
+    const cancelAnimationFrame = vi.fn()
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      pendingFrame = callback
+      return 7
+    }))
+    vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrame)
+    const controller = new AbortController()
+    const pending = createTextureAtlas(
+      Array.from({ length: 512 }, (_value, index) => ({ id: String(index) })),
+      64,
+      {
+        atlasMode: 'array',
+        drawCard: vi.fn(),
+        signal: controller.signal,
+      },
+    )
+
+    await vi.waitFor(() => expect(pendingFrame).toBeTypeOf('function'))
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(7)
   })
 
   it('selects an array atlas automatically for large uploads unless mipmaps are explicit', async () => {
@@ -280,6 +395,7 @@ describe('texture atlas card rendering', () => {
       imageRequests: 0,
       uploadRanges: 1,
       workerRenders: 1,
+      pixelBufferPeakBytes: atlas.data.byteLength,
     })
     atlas.texture.dispose()
   })
@@ -478,6 +594,7 @@ describe('texture atlas card rendering', () => {
     }
     const bitmap = { width: 64, height: 64, close: vi.fn() } as unknown as ImageBitmap
     const decoding = deferred<ImageBitmap>()
+    const createBitmap = vi.fn(() => decoding.promise)
     const workers: WaitingWorker[] = []
     class WaitingWorker {
       onmessage: ((event: MessageEvent) => void) | null = null
@@ -487,7 +604,7 @@ describe('texture atlas card rendering', () => {
       constructor() { workers.push(this) }
     }
     vi.stubGlobal('Image', ImmediateImage)
-    vi.stubGlobal('createImageBitmap', vi.fn(() => decoding.promise))
+    vi.stubGlobal('createImageBitmap', createBitmap)
     vi.stubGlobal('Worker', WaitingWorker)
     vi.stubGlobal('OffscreenCanvas', class {})
     const controller = new AbortController()
@@ -499,7 +616,8 @@ describe('texture atlas card rendering', () => {
       32,
       { signal: controller.signal },
     )
-    await vi.waitFor(() => expect(workers).toHaveLength(1))
+    await vi.waitFor(() => expect(createBitmap).toHaveBeenCalledOnce())
+    expect(workers).toHaveLength(1)
     controller.abort()
     decoding.resolve(bitmap)
 
@@ -614,6 +732,10 @@ describe('texture atlas card rendering', () => {
     )
 
     const context = contexts.get(patch.cells[0].canvas)!
+    expect(HTMLCanvasElement.prototype.getContext).toHaveBeenCalledWith(
+      '2d',
+      { willReadFrequently: true },
+    )
     expect(drawCard).toHaveBeenCalledWith(context, { id: 'one', title: 'One' }, {
       x: 0,
       y: 0,

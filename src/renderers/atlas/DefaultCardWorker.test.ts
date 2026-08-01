@@ -12,13 +12,14 @@ describe('default card atlas worker', () => {
 
   it('draws transferred images, returns the pixel buffer, and closes worker-owned bitmaps', async () => {
     const context = createContext()
+    const getContext = vi.fn(() => context)
     const postMessage = vi.fn()
     class TestOffscreenCanvas {
       constructor(
         readonly width: number,
         readonly height: number,
       ) {}
-      getContext() { return context }
+      getContext = getContext
     }
     const bitmap = {
       width: 64,
@@ -65,22 +66,25 @@ describe('default card atlas worker', () => {
       32,
       32,
     )
+    expect(getContext).toHaveBeenCalledWith('2d')
     expect(bitmap.close).toHaveBeenCalledOnce()
     const [response, transfer] = postMessage.mock.calls[0] as [
       DefaultCardWorkerResponse,
       Transferable[],
     ]
     expect(response.data).toBeInstanceOf(ArrayBuffer)
+    expect(response.workerRenderMs).toBeGreaterThanOrEqual(0)
     expect(transfer).toEqual([response.data])
   })
 
   it('draws array pages directly into the final layer buffer', async () => {
     const context = createContext()
+    const getContext = vi.fn(() => context)
     context.getImageData.mockImplementation(
       (_x: number, _y: number, width: number, height: number) => {
         const data = new Uint8ClampedArray(width * height * 4)
         data[(width + 1) * 4] = 11
-        data[(width + 13) * 4] = 22
+        data[((12 + 1) * width + 1) * 4] = 22
         return { data, width, height, colorSpace: 'srgb' }
       },
     )
@@ -93,7 +97,7 @@ describe('default card atlas worker', () => {
       ) {
         canvases.push(this)
       }
-      getContext() { return context }
+      getContext = getContext
     }
     vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas)
     vi.stubGlobal('postMessage', postMessage)
@@ -134,17 +138,81 @@ describe('default card atlas worker', () => {
       arrayDepth: 2,
       arrayPageColumns: 3,
       arrayPageRows: 3,
+      pixelBufferPeakBytes: 2 * 12 * 12 * 4 + 24 * 12 * 4,
     })
+    expect(response.workerRenderMs).toBeGreaterThanOrEqual(0)
     expect(canvases).toHaveLength(1)
-    expect(canvases[0]).toMatchObject({ width: 24, height: 12 })
+    expect(getContext).toHaveBeenCalledWith('2d', { willReadFrequently: true })
+    expect(canvases[0]).toMatchObject({ width: 12, height: 24 })
     expect(context.clearRect).toHaveBeenCalledOnce()
     expect(context.getImageData).toHaveBeenCalledOnce()
-    expect(context.getImageData).toHaveBeenCalledWith(0, 0, 24, 12)
+    expect(context.getImageData).toHaveBeenCalledWith(0, 0, 12, 24)
+    expect(context.translate).toHaveBeenNthCalledWith(1, 0, 12)
+    expect(context.translate).toHaveBeenNthCalledWith(2, 0, 24)
+    expect(context.scale).toHaveBeenCalledTimes(2)
+    expect(context.scale).toHaveBeenCalledWith(1, -1)
+    expect(context.save).toHaveBeenCalledTimes(context.restore.mock.calls.length)
     const pixels = new Uint8Array(response.data!)
-    const firstLayerOffset = ((12 - 1 - 1) * 12 + 1) * 4
+    const firstLayerOffset = (12 + 1) * 4
     expect(pixels[firstLayerOffset]).toBe(11)
     expect(pixels[12 * 12 * 4 + firstLayerOffset]).toBe(22)
     expect(transfer).toEqual([response.data, response.rects])
+  })
+
+  it('bounds array readback batches to two MiB while retaining the final layer buffer', async () => {
+    const context = createContext()
+    const getContext = vi.fn(() => context)
+    const postMessage = vi.fn()
+    const canvases: TestOffscreenCanvas[] = []
+    class TestOffscreenCanvas {
+      constructor(
+        readonly width: number,
+        readonly height: number,
+      ) {
+        canvases.push(this)
+      }
+      getContext = getContext
+    }
+    vi.stubGlobal('OffscreenCanvas', TestOffscreenCanvas)
+    vi.stubGlobal('postMessage', postMessage)
+    await import('./DefaultCardWorker.js')
+    const scope = globalThis as unknown as {
+      onmessage: (event: MessageEvent<DefaultCardWorkerRequest>) => void
+    }
+    const items = Array.from({ length: 32 }, (_value, index) => ({
+      id: String(index),
+      style: {
+        imageFit: 'cover' as const,
+        imagePosition: { x: 0.5, y: 0.5 },
+        contentPadding: 0,
+      },
+    }))
+
+    scope.onmessage({
+      data: {
+        width: 512,
+        height: 4096,
+        columns: 2,
+        cellWidth: 256,
+        cellHeight: 256,
+        padding: 0,
+        strideX: 256,
+        strideY: 256,
+        items,
+        images: [],
+        arrayMaxTextureLayers: 256,
+      },
+    } as unknown as MessageEvent<DefaultCardWorkerRequest>)
+
+    const [response] = postMessage.mock.calls[0] as [DefaultCardWorkerResponse]
+    const finalBytes = response.data!.byteLength
+    expect(canvases[0]).toMatchObject({ width: 256, height: 1536 })
+    expect(getContext).toHaveBeenCalledWith('2d', { willReadFrequently: true })
+    expect(context.getImageData).toHaveBeenCalledTimes(6)
+    for (const [, , width, height] of context.getImageData.mock.calls) {
+      expect(width * height * 4).toBeLessThanOrEqual(2 * 1024 * 1024)
+    }
+    expect(response.pixelBufferPeakBytes).toBe(finalBytes + 768 * 512 * 4)
   })
 })
 
@@ -158,6 +226,8 @@ function createContext() {
     rect: vi.fn(),
     moveTo: vi.fn(),
     lineTo: vi.fn(),
+    translate: vi.fn(),
+    scale: vi.fn(),
     quadraticCurveTo: vi.fn(),
     fill: vi.fn(),
     clip: vi.fn(),
