@@ -569,12 +569,15 @@ npx spatial-motion-benchmark baseline.json current.json --preset transition-stre
 ```bash
 npm run benchmark:matrix
 npm run benchmark:matrix -- --scenarios steady,transition-stress --duration 10 --headed
+npm run benchmark:matrix -- --preview --scenarios cold-start --duration 10 --headed
 ```
 
 矩阵按 GPU、视口和设备 DPR 隔离，完整保存运行环境与原始结果。判定边界与默认
 自适应降级策略一致，同时检查平均 FPS、P95、33ms 长帧比例、Draw Call 和有效提交；
 无头 SwiftShader 数据不会被当作本机原生 GPU 结论。采集规范和已保存结果见
-`benchmarks/README.md`。
+`benchmarks/README.md`。涉及动态 import、Worker asset 或首次 chunk 求值的 cold-start
+对照应使用 `--preview`，先构建生产 Demo 再从静态 preview 服务采集，避免把开发服务器
+按需 transform 误计为运行时成本。
 
 默认阈值覆盖 FPS、最大帧时间、P95/P99、33ms 长帧、Stage CPU、WebGL 提交、Atlas build/patch、纹理内存与估算上传量。配置不兼容或超过阈值时命令返回非零退出码；自定义阈值可对每个指标设置 `maxRegressionPercent`、`maxRegressionAbsolute` 或两者。随包提供的六个 `--preset` 覆盖 100/500/1000/2000 实例、low/medium/high/auto 质量和四类固定场景，CLI 会拒绝与预设不一致的结果。
 
