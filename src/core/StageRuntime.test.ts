@@ -94,6 +94,27 @@ describe('StageRuntime', () => {
     element.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
     expect(onContextLost).toHaveBeenCalledOnce()
   })
+
+  it('sleeps after an idle frame and wakes on demand without duplicate scheduling', () => {
+    const onFrame = vi.fn(() => false)
+    const runtime = createRuntime({ onFrame })
+
+    runtime.start()
+    expect(requestAnimationFrame).toHaveBeenCalledOnce()
+    ;(frame as unknown as FrameRequestCallback)(100)
+    expect(runtime.hasScheduledFrame()).toBe(false)
+    expect(requestAnimationFrame).toHaveBeenCalledOnce()
+
+    runtime.requestFrame()
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(2)
+    onFrame.mockImplementation(() => {
+      runtime.requestFrame()
+      return true
+    })
+    ;(frame as unknown as FrameRequestCallback)(116)
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(3)
+    runtime.dispose()
+  })
 })
 
 function createRuntime(overrides: Partial<ConstructorParameters<typeof StageRuntime>[0]> = {}) {

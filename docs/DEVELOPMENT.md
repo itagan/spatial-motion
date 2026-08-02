@@ -165,6 +165,23 @@ high/medium/low steady 矩阵；准备调整默认档位时增加
 构建，再启动静态 preview 服务，并在矩阵元数据写入 `serverMode: "preview"`；默认开发
 模式记录为 `development`。不要直接比较两种 server mode 的绝对 cold-start 数字。
 
+长时间稳定性使用 `--preview --stability --duration 60|300|1800`，transition-stress 验证
+布局/Effect/局部更新，atlas-update 验证高频内容 patch。采集器保留完整原始样本，只以
+后半段判断收敛后的 heap、DOM、Canvas、GPU/纹理容量、Geometry build 和失败趋势；
+失败结果仍写入 JSON，进程退出码为非零。正式发布证据至少运行 300 秒，30 分钟用于
+候选版本或资源所有权改动后的 soak，20 秒仅作为本地 smoke。
+
+提交设备结果前运行 `npm run benchmark:coverage` 查看缺口；准备发布基线时运行
+`npm run benchmark:coverage -- --strict`。设备匹配与场景要求集中维护在
+`benchmarks/device-targets.json`，不要通过改名或手工汇总把不同 GPU、浏览器、平台和
+源码状态的证据混为一组。dirty 或缺 SHA 的采集只用于开发判断。
+
+真实 Android/iOS 使用 Benchmark 页面的“导出设备证据”，再运行
+`npm run benchmark:import-device -- <capture> --output <result>`。原始 capture 应保存在仓库
+外；导入器从当前干净代码 SHA 建立正式证据，并重新执行 v2 样本完整性和资源趋势门禁。
+手机必须访问该 SHA 的 production preview，不能使用 UA 模拟、远端旧缓存或开发服务器
+结果替代实机结论。
+
 ## 文档维护
 
 - `README.md`：已经实现、可供使用者依赖的能力。

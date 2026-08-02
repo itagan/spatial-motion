@@ -23,6 +23,95 @@ npm run benchmark:matrix -- \
   --output benchmarks/results/device-name.json
 ```
 
+长时间稳定性门禁使用生产构建，并明确采样间隔：
+
+```bash
+npm run benchmark:matrix -- \
+  --preview \
+  --stability \
+  --stability-interval 5 \
+  --items 2000 \
+  --qualities high \
+  --scenarios transition-stress \
+  --duration 60 \
+  --headed \
+  --output benchmarks/results/device-transition-soak.json
+```
+
+`--stability` 至少需要 20 秒。顶层 `stabilityDiagnostics` 保存浏览器 heap、DOM/Canvas
+原始样本和自动判定；前半段允许 Atlas 与四个 Effect Program 预热，后半段作为稳定窗口。
+默认要求稳定窗口内 GPU bytes、纹理 bytes、Geometry build、Canvas 和失败计数零增长，
+DOM 最多增加 5 个节点；JS heap 使用前后分段低水位抵抗 GC 锯齿，保留量增长上限为
+16 MiB。平台不提供 `performance.memory` 时 heap 指标为 `null`，其余资源门禁仍执行。
+稳定窗口至少需要两个浏览器与两个 Renderer 样本，且 GPU、纹理、Geometry 和失败计数
+都必须实际存在；缺样本不会按零增长处理。`--stability-interval` 不得超过采样时长一半。
+任一运行不通过时结果仍会写盘，但命令返回非零退出码。只有 `evaluation.version: 2` 的完整
+诊断可以满足跨设备长稳覆盖，旧结果保留作历史参考但不进入正式判定。
+
+检查跨设备证据覆盖：
+
+```bash
+npm run benchmark:coverage
+npm run benchmark:coverage -- --json
+npm run benchmark:coverage -- --strict
+```
+
+目标与所需场景声明在 `device-targets.json`。当前覆盖 Apple Silicon、Intel 集成显卡、
+Windows 桌面、Android 移动端和 iOS Safari；桌面要求 2000/high，移动端要求
+1000/medium，均包含 10 秒 steady 与通过稳定性门禁的 300 秒 transition-stress。
+桌面目标要求至少 1200×600 CSS viewport；移动目标要求宽度不超过 600、高度至少 600、
+DPR 至少 2，并匹配真实 Adreno/Mali/PowerVR/Immortalis 或 Apple GPU。UA 模拟、桌面 GPU
+或错误 viewport 不会满足移动覆盖。
+普通报告允许缺口存在，便于逐台采集；`--strict` 要求每项目标均为 `qualified`。
+dirty、缺少 `sourceRevision` 或不是 7–40 位 Git 十六进制 SHA 的结果只记作
+`development-only`，不会满足正式门禁。报告还通过 `git cat-file` 确认证据 SHA 对应当前
+仓库中真实存在的 commit；格式正确但不存在的字符串同样不能成为正式基线。
+证据 SHA 到当前 HEAD 之间的 `src`、`demo`、依赖锁、Vite 构建配置、矩阵采集器、真实设备
+导入语义或质量/稳定性算法也必须无变化；任一相关路径改变会显示 `revision:stale` 并降为
+开发证据。这些相关路径存在未提交或暂存变更时同样视为 stale；文档、覆盖报告实现和
+`benchmarks/results` 的变化不会无意义地要求重采。
+同一目标的 steady 与长稳要求必须在同一个干净 SHA 上同时成立；各自都有干净结果、但
+没有共同 SHA 时报告 `mixed-revision`，严格门禁仍失败。采集器与真实设备导入器只忽略
+`benchmarks/results` 自身的变化，允许从同一代码提交连续写入整套证据；其他文件变化仍
+会产生 `-dirty`。
+每条结果还必须存在匹配的 `calibration.evaluations[].passed: true`；平均 FPS、P95、33ms
+长帧比例、主体 Draw Call 或 resident/submitted 实例覆盖任一失败，都不能仅凭资源趋势
+稳定而满足设备要求。覆盖扫描还会使用当前 `quality-calibration` 策略从原始 Benchmark
+重新计算；记录判定缺失、结构无效、阈值更新后不再通过或与原始指标冲突时同样拒绝。
+长稳判定同样不是只读取 `evaluation.passed`：覆盖扫描会从保存的 browser/Renderer 原始
+样本重新执行当前稳定性算法，记录版本、样本结构、资源增长或失败计数任一不再成立时拒绝。
+Apple Silicon 当前正式证据为 `2026-08-02-apple-m4-same-revision-steady.json` 与
+`2026-08-02-apple-m4-same-revision-stability-300s.json`；二者均来自同一干净 SHA
+`14e08574e821`。其他目标必须在对应真实硬件上采集，不接受仅修改 UA、视口或设备缩放的
+模拟结果。
+
+## 真实 Android / iOS 设备采集
+
+从干净提交构建并让同一局域网中的手机访问 production preview：
+
+```bash
+npm run build:demo
+npx vite preview --host 0.0.0.0 --port 4173
+```
+
+手机保持竖屏，在手机打开 `http://<电脑局域网地址>:4173/benchmark.html`。Android 与 iOS 均先采集
+1000/medium/steady/10 秒，再采集 1000/medium/transition-stress/300 秒；第二项使用
+“运行切换压力测试”。每次完成后点击“导出设备证据”，把下载文件保留在仓库外，然后导入：
+
+```bash
+npm run benchmark:import-device -- ~/Downloads/android-soak.json \
+  --output benchmarks/results/2026-08-02-android-soak.json
+```
+
+页面每 5 秒保存 Heap（平台支持时）、DOM 和 Canvas，并保留既有 500ms Renderer 样本。
+导入器验证浏览器身份、矩阵配置和时长，在仓库端重新执行 v2 门禁；失败证据仍写盘但返回
+非零退出码。浏览器样本还必须覆盖至少 90% 的运行时长，任意相邻样本间隔不得超过声明
+间隔的 2.5 倍，页面切后台或计时器被长期节流不会被误判为稳定。导入时除
+`benchmarks/results` 外的代码工作区必须干净，否则结果会标记
+`-dirty`。production 构建会把源码指纹嵌入 capture；导入时必须与当前仓库指纹完全一致，
+旧缓存、错分支或 dirty/clean 状态不一致都会被拒绝。这保证同批设备证据可以连续导入，
+同时不会把其他版本或未提交代码标成正式基线。
+
 `--headed` 用于采集真实有界面 GPU 环境；默认无头模式适合自动化和软件渲染基线。
 不同 `gpuRenderer`、视口或 DPR 的结果不会合并推荐。无头 SwiftShader 结果只能代表
 软件渲染环境，不能用于调整 Apple、Intel、NVIDIA、AMD 或移动 GPU 的默认档位。
@@ -47,3 +136,4 @@ High 结果混为一组发布基线。
 
 矩阵顶层 `runDiagnostics` 与 `results` 按索引对应，保存页面级、无法由 500ms 定时样本
 可靠还原的指标。当前包括 cold-start 重建后连续两个 RAF 内的首次提交峰值和场景操作数。
+`stabilityDiagnostics` 同样按配置对应，但只在显式启用 `--stability` 时生成。

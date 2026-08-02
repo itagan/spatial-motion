@@ -4,15 +4,17 @@
 
 ## v2 resident / submitted / visible 模型
 
-运行中从高档降到中、低档时，Stage 保留已经创建的 Renderer resident pool，并立即
-降低 Shader visible ratio 和实际特效提交量；布局卡片的 submitted pool 保持不变，
-避免非连续 rank 裁剪破坏空间分布、拾取索引和自定义 Program 数据顺序。降级不再在性能已经承压的时间点重建
-Atlas、Geometry 或 Attribute。局部 item patch 继续更新 resident pool，不会把质量
-裁剪误写成数据裁剪。
+运行中从高档降到中、低档时，Stage 先同步降低 Shader visible ratio 和流式特效提交量，
+保证当前帧立即减压；随后通过同一受 revision 保护的内容协调器，把布局
+resident/submitted pool 收敛到 Profile 上限。非连续 rank 只存在于协调完成前，提交新
+pool 后重新计算该规模的完整 Layout，因此空间分布、拾取索引和 Program 数据顺序一致。
 
-从低档启动后升级到更高档位时，Stage 才异步扩展 resident pool；revision 继续保证
-旧结果不能覆盖新质量或数据状态。后续基准需要分别记录 resident instance、
-submitted instance 和 visible instance，不能再用单个 item count 解释性能。
+Cards 若目标列表是当前 Atlas 内容的未变化前缀，只调整 active item/instance count 并
+重新上传必要的 Motion 属性；Atlas、Geometry、纹理和完整内容指纹继续保留。恢复到已
+保留的前缀范围同样无需 Atlas build，隐藏期间发生内容变化则由指纹不匹配触发正常重建。
+Points 在容量桶内复用 Attribute，自定义 Renderer 继续通过既有 `setItems()` 契约协调。
+后续基准仍需分别记录 resident、submitted、visible 与 GPU bytes，不能用单个 item count
+解释逻辑提交量和保留的纹理容量。
 
 ## v1.2 可观测性基线
 
@@ -911,7 +913,7 @@ Cards-only 从 9,888 降至 8,889 bytes gzip，减少 999 bytes；距 10 KiB 上
 由 352 增至 1,351 bytes。root consumer 从 37,065 降至 36,285 bytes gzip；Core-only
 保持 15,251 bytes，tarball 在加入独立主线程 fallback chunk、内容基准与单元 Canvas
 复用、readback/pack/Worker 时序诊断、批次矩阵、连续 pack、单次 build 快照与冷启动
-重叠后为 140,276 bytes，仍低于
+重叠后约为 141 KiB，仍低于
 150 KiB 上限。
 模块总量略增是独立 lazy 模块、诊断与 sourcemap 的代价，不代表基础消费者下载回退。
 
@@ -975,3 +977,84 @@ readback（17.1→17.9ms），也不保留。两项实验均约 60 FPS、P95 17.
 24/33/50ms 长帧；这证明当前约 17ms readback 无法再通过 Canvas context hint 稳定降低。
 下一步若继续攻击该段，需要评估不经 CPU `getImageData()` 的 GPU Array texture 上传链路，
 并先解决局部 patch、context restore 与 CPU 权威缓冲契约，不能把读回简单搬到主线程。
+
+## 长时间稳定性趋势门禁
+
+Atlas 微优化停止后，投入转向跨设备校准和长时间资源稳定性。质量矩阵新增
+`--stability`，在现有 steady/transition-stress/atlas-update 场景外不复制业务操作逻辑；
+浏览器每个配置按指定间隔采集 JS heap、DOM 和 Canvas，既有 500ms Benchmark 样本继续
+提供 GPU bytes、纹理 bytes、Geometry build、资源/Program 失败和 context loss。
+
+判定将前半段定义为预热窗口，允许 Atlas 与四个 Effect Program 按需建立；后半段必须
+收敛。Heap 使用稳定窗口首尾三分之一的低水位差抵抗 GC 锯齿，默认最多保留 16 MiB；
+GPU/纹理/Geometry/Canvas 和失败计数不得增长，DOM 最多增加 5 个节点。原始样本、阈值、
+指标和结构化失败原因全部写入 `stabilityDiagnostics`，失败时仍保存证据并返回非零退出码。
+
+2026-08-02 production preview / Chromium 151 / Apple M4 / 1250×625 / DPR 2 的
+2000/high/transition-stress 20 秒 smoke 完成 23 次操作：60.0 FPS、P95 17.4ms、0 个
+24/33/50ms 长帧。后半段 retained heap、DOM、Canvas、GPU bytes、纹理 bytes 与 Geometry
+build 均零增长，无 context loss 或图片失败。结果保存在
+`benchmarks/results/2026-08-02-apple-m4-transition-stability-smoke.json`；该短样本只验证
+门禁闭环，正式设备证据仍应运行 300 秒，候选版本资源改动运行 1800 秒。
+
+同环境随后完成 60 秒 transition-stress：67 次操作、60.0 FPS、P95/P99
+18.26/18.60ms、0 个长帧；稳定窗口 retained heap 增长约 0.63 MiB，其余资源与失败
+指标全部零增长。20 秒 atlas-update 完成 112 次真实 patch，60.0 FPS、P95 18.25ms、
+0 长帧；heap 低水位增长约 2.10 MiB，其余已采指标同样零增长。结果分别保存在
+`benchmarks/results/2026-08-02-apple-m4-transition-stability-60s.json` 和
+`benchmarks/results/2026-08-02-apple-m4-atlas-update-stability-smoke.json`。
+
+同日的 300 秒 production preview 正式时长运行完成 334 次 transition/patch 操作：平均
+60.0 FPS、最低窗口 59.98 FPS、P95/P99 17.60/17.75ms、主体 1 Draw Call，且没有
+24/33/50ms 长帧。稳定窗口 retained heap 仅增长 342,146 bytes，DOM、Canvas、GPU bytes、
+纹理 bytes 与 Geometry build 均零增长，无 context loss 或图片失败。
+结果保存在 `benchmarks/results/2026-08-02-apple-m4-transition-stability-300s.json`。
+
+为避免单机结果被误当成跨设备结论，`benchmarks/device-targets.json` 固化五类目标及其
+steady/300 秒长稳要求，`npm run benchmark:coverage` 自动扫描证据并匹配浏览器、平台、
+GPU、viewport、DPR、规模、质量和场景。审计发现 Stage 的 64 项 Renderer 指标上限会截掉
+Cards 的资源与 Program 失败计数，旧结果因此只能证明已保存的部分趋势。上限已扩至 96，
+长稳判定升级为 v2：必要样本或关键计数缺失时直接失败，覆盖工具也拒绝旧版 `passed`。
+
+覆盖门禁随后进一步要求同一目标的所有场景共享同一个干净源码 SHA，不能把不同代码版本的
+独立通过结果拼成 `qualified`。从干净 SHA `14e08574e821` 连续重采的 Apple M4 证据为：
+
+- 10 秒 steady：60.0 FPS、P95 17.4ms、0 长帧、2000 resident/submitted、1 Draw Call；
+- 300 秒 transition-stress：334 次操作、60.0 FPS、P95/P99 17.70/17.80ms、0 长帧；
+  稳定窗口包含 16 个浏览器样本与 301 个 Renderer 样本，Heap、DOM、Canvas、GPU/纹理
+  bytes、Geometry build、资源与 Program 失败均零增长。
+
+结果分别保存在 `benchmarks/results/2026-08-02-apple-m4-same-revision-steady.json` 与
+`benchmarks/results/2026-08-02-apple-m4-same-revision-stability-300s.json`，共同使
+`apple-silicon-desktop` 在 SHA `14e08574e821` 上达到 `qualified`。Intel、Windows、
+Android 与 iOS 仍缺真实设备证据；在覆盖完整前不调整默认 Profile，也不把 UA/viewport
+模拟当作实机结论。
+
+真实移动端采集入口随后补齐：Benchmark 页在任意设备浏览器中每 5 秒保存 Heap（可用时）、
+DOM/Canvas，同时保留 500ms Renderer 样本和运行操作数；独立“导出设备证据”不会改变原有
+单结果导出与基线比较格式。仓库端 `benchmark:import-device` 验证 UA 与环境一致、矩阵与
+结果一致、时长和采样间隔有效，再绑定当前代码 SHA、重算 v2 稳定门禁及质量建议。这样
+Android/iOS 可以用真实 GPU/WebKit/Chromium 数据进入同一覆盖报告，不依赖桌面设备模拟。
+
+## 自动降档提交池收敛
+
+2026-08-02 在本机 Headless Chromium 151、1265×633、DPR 1、ANGLE SwiftShader，用
+2000 items / auto / transition-stress / 10 秒对比 `32aa868` 与实现提交 `5cc15c4`。
+两组都从 high 自动降到 low，并通过公开配置入口等待 2000 项准备完成后再开始采样，
+避免 UI 点击的异步配置竞态：
+
+| 指标 | `32aa868` 保留 2000 submitted | `5cc15c4` 收敛到 500 submitted | 变化 |
+| --- | ---: | ---: | ---: |
+| 全窗口平均 FPS | 48.57 | 59.24 | +22.0% |
+| 最终 low 窗口 FPS | 51.29 | 63.84 | +24.5% |
+| 最终 low 窗口 P95 | 34.92ms | 33.13ms | -5.1% |
+| 24ms 长帧 | 142 | 93 | -34.5% |
+| 33ms 长帧 | 57 | 27 | -52.6% |
+| 50ms 长帧 | 4 | 4 | 不变 |
+| Benchmark 窗口 Atlas build | 0 | 0 | 不变 |
+
+直接让 Stage 收缩列表但重建 Atlas 的中间原型虽有相近稳态收益，却在两次降档中增加约
+188ms Atlas build，并出现额外资源尖峰，因此未采用。最终 Cards 路径保留完整 Atlas、
+Geometry、纹理和指纹，只把 active instance 从 2000→1000→500；内容未变化时恢复档位
+也不发 Worker 请求。真实 Chromium 回归会同时检查 low/high 的 submitted 数、Atlas build
+累计值、Worker 消息数和有效像素，防止后续把提交收益退化成隐藏但仍执行的顶点工作。

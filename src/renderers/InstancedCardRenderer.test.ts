@@ -297,6 +297,36 @@ describe('InstancedCardRenderer item loading', () => {
     renderer.dispose()
   })
 
+  it('shrinks and restores an unchanged item prefix without rebuilding its atlas', async () => {
+    const currentAtlas = atlas(4)
+    atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
+    const scene = new Scene()
+    const renderer = new InstancedCardRenderer(scene)
+    const items = ['a', 'b', 'c', 'd'].map((id) => ({ id, title: id }))
+
+    expect(await renderer.setItems(items)).toBe(true)
+    const mesh = scene.children[0] as Mesh<InstancedBufferGeometry, ShaderMaterial>
+    expect(await renderer.setItems(items.slice(0, 2))).toBe(true)
+    expect(renderer.getStats()).toMatchObject({
+      instanceCount: 2,
+      submittedInstanceCount: 2,
+      metrics: { atlasBuilds: 1, geometryBuilds: 1 },
+    })
+    expect(mesh.geometry.instanceCount).toBe(2)
+    expect(currentAtlas.dispose).not.toHaveBeenCalled()
+
+    expect(await renderer.setItems(items)).toBe(true)
+    expect(renderer.getStats()).toMatchObject({
+      instanceCount: 4,
+      submittedInstanceCount: 4,
+      metrics: { atlasBuilds: 1, geometryBuilds: 1 },
+    })
+    expect(scene.children[0]).toBe(mesh)
+    expect(currentAtlas.dispose).not.toHaveBeenCalled()
+    expect(atlasMock.create).toHaveBeenCalledOnce()
+    renderer.dispose()
+  })
+
   it('prewarms each accepted atlas texture and repeats preparation after context recovery', async () => {
     const currentAtlas = atlas(1)
     atlasMock.create.mockResolvedValueOnce(currentAtlas.result)
@@ -535,6 +565,7 @@ describe('InstancedCardRenderer item loading', () => {
     expect(texture.layerUpdates).toEqual(new Set(
       Array.from({ length: 12 }, (_value, index) => index),
     ))
+    expect(renderer.capabilities.frame?.needsUpdate?.()).toBe(true)
     renderer.capabilities.frame?.update(1 / 60)
     expect(renderer.getStats().metrics).toMatchObject({
       atlasCpuBytes: texture.image.data.byteLength,
@@ -566,6 +597,7 @@ describe('InstancedCardRenderer item loading', () => {
     })
     renderer.capabilities.frame?.update(1 / 60)
     expect(mesh.material.uniforms.uLayers.value).toBe(20)
+    expect(renderer.capabilities.frame?.needsUpdate?.()).toBe(false)
     expect(renderer.getStats().metrics).toMatchObject({
       layerUploadFrames: 2,
       totalLayerUploadFrames: 2,

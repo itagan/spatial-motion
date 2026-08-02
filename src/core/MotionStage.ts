@@ -284,6 +284,7 @@ export class MotionStage<TMeta = unknown> {
         this.contentRenderer.refreshResources()
         void this.effectController.restoreRendererState()
         this.extensionHost?.contextRestored()
+        this.runtime.requestFrame()
       },
       onContextChange: (state) => {
         this.invalidatePerformanceSnapshot()
@@ -330,6 +331,7 @@ export class MotionStage<TMeta = unknown> {
       isDestroyed: () => this.destroyed,
       setHighlightIndex: (index) =>
         this.contentRenderer.setHighlightIndex(index),
+      requestFrame: () => this.runtime.requestFrame(),
       onItemClick: (item, index) => this.events.emit('itemclick', { item, index }),
       onItemHover: (item, index) => this.events.emit('itemhover', { item, index }),
       onItemFocus: (item, index) => this.events.emit('itemfocus', { item, index }),
@@ -363,7 +365,7 @@ export class MotionStage<TMeta = unknown> {
     this.resizeInternal()
     this.runtime.start()
     this.ready = options.items
-      ? this.contentCoordinator.setItemsInternal(options.items)
+      ? this.wakeAfter(this.contentCoordinator.setItemsInternal(options.items))
       : Promise.resolve()
   }
 
@@ -372,7 +374,7 @@ export class MotionStage<TMeta = unknown> {
     this.invalidatePerformanceSnapshot()
     this.contentCoordinator.validateItems(items)
     this.motionCoordinator.invalidate()
-    return this.contentCoordinator.setItems(items)
+    return this.wakeAfter(this.contentCoordinator.setItems(items))
   }
 
   on<TKey extends keyof MotionStageEventMap<TMeta>>(
@@ -386,7 +388,7 @@ export class MotionStage<TMeta = unknown> {
   to(layout: Layout<TMeta>, options: TransitionOptions = {}): Promise<boolean> {
     this.assertActive()
     this.invalidatePerformanceSnapshot()
-    return this.motionCoordinator.transitionAndRemember(layout, options)
+    return this.wakeAfter(this.motionCoordinator.transitionAndRemember(layout, options))
   }
 
   startTransition(layout: Layout<TMeta>, options: TransitionOptions = {}): StageTransitionHandle {
@@ -396,6 +398,7 @@ export class MotionStage<TMeta = unknown> {
     if (options.signal?.aborted) controller.abort()
     else options.signal?.addEventListener('abort', forwardAbort, { once: true })
     const state: { status: StageTransitionStatus } = { status: 'running' }
+    this.runtime.requestFrame()
     const finished = this.motionCoordinator
       .transitionResult(layout, { ...options, signal: controller.signal })
       .then((result) => {
@@ -403,7 +406,10 @@ export class MotionStage<TMeta = unknown> {
         if (result.completed) this.contentState.lastLayout = layout
         return result
       })
-      .finally(() => options.signal?.removeEventListener('abort', forwardAbort))
+      .finally(() => {
+        options.signal?.removeEventListener('abort', forwardAbort)
+        this.runtime.requestFrame()
+      })
     return {
       get status() { return state.status },
       finished,
@@ -419,7 +425,7 @@ export class MotionStage<TMeta = unknown> {
   enterEffect(effect: StreamingEffect, options: TransitionOptions = {}): Promise<boolean> {
     this.assertActive()
     this.invalidatePerformanceSnapshot()
-    return this.motionCoordinator.enterEffect(effect, options)
+    return this.wakeAfter(this.motionCoordinator.enterEffect(effect, options))
   }
 
   updateItems(
@@ -430,7 +436,7 @@ export class MotionStage<TMeta = unknown> {
     this.invalidatePerformanceSnapshot()
     this.contentCoordinator.validateItems(items)
     this.motionCoordinator.invalidate()
-    return this.contentCoordinator.updateItems(items, options)
+    return this.wakeAfter(this.contentCoordinator.updateItems(items, options))
   }
 
   updateItem(
@@ -449,19 +455,19 @@ export class MotionStage<TMeta = unknown> {
     this.invalidatePerformanceSnapshot()
     this.contentCoordinator.validateUpdates(updates)
     this.motionCoordinator.invalidate()
-    return this.contentCoordinator.updateItemsById(updates, options)
+    return this.wakeAfter(this.contentCoordinator.updateItemsById(updates, options))
   }
 
   focusItems(ids: string[], options: FocusItemsOptions = {}): Promise<boolean> {
     this.assertActive()
     this.invalidatePerformanceSnapshot()
-    return this.motionCoordinator.focusItems(ids, options)
+    return this.wakeAfter(this.motionCoordinator.focusItems(ids, options))
   }
 
   restoreLayout(options: TransitionOptions = {}): Promise<boolean> {
     this.assertActive()
     this.invalidatePerformanceSnapshot()
-    return this.motionCoordinator.restoreLayout(options)
+    return this.wakeAfter(this.motionCoordinator.restoreLayout(options))
   }
 
   pick(
@@ -486,6 +492,7 @@ export class MotionStage<TMeta = unknown> {
   autoRotate(options: { x?: number; y?: number } = {}): void {
     this.assertActive()
     this.rotation.autoRotate(options, this.reducedMotion)
+    this.runtime.requestFrame()
   }
 
   setQuality(mode: QualityMode): void {
@@ -493,6 +500,7 @@ export class MotionStage<TMeta = unknown> {
     this.invalidatePerformanceSnapshot()
     const quality = this.qualityController.setMode(mode)
     if (quality) this.applyQuality(quality)
+    this.runtime.requestFrame()
   }
 
   getQualityMode(): QualityMode {
@@ -518,11 +526,16 @@ export class MotionStage<TMeta = unknown> {
   setRotation(x: number, y: number): void {
     this.assertActive()
     this.rotation.set(x, y)
+    this.runtime.requestFrame()
   }
 
   timeline(): Timeline {
     this.assertActive()
-    return new Timeline((duration) => this.stageClock.wait(duration))
+    return new Timeline((duration) => {
+      const wait = this.stageClock.wait(duration)
+      this.runtime.requestFrame()
+      return wait
+    })
   }
 
   async addExtension(extension: StageExtension): Promise<StageExtensionHandle> {
@@ -533,12 +546,14 @@ export class MotionStage<TMeta = unknown> {
   resize(): void {
     this.assertActive()
     this.resizeInternal()
+    this.runtime.requestFrame()
   }
 
   /** Explicitly prepares resident textures and renderer-specific lazy Programs. */
   async prewarm(request: MotionRendererPrewarmRequest = {}): Promise<boolean> {
     this.assertActive()
     const result = await this.contentRenderer.prewarm(request)
+    this.runtime.requestFrame()
     return !this.destroyed && result
   }
 
@@ -550,6 +565,7 @@ export class MotionStage<TMeta = unknown> {
     const viewport = this.extensionViewport()
     this.contentRenderer.resize(viewport)
     this.extensionHost?.resize(viewport)
+    this.runtime.requestFrame()
   }
 
   destroy(): void {
@@ -651,7 +667,7 @@ export class MotionStage<TMeta = unknown> {
     }
   }
 
-  private renderFrame(now: number, rawFrameMs: number, delta: number): void {
+  private renderFrame(now: number, rawFrameMs: number, delta: number): boolean {
     const frameCpuStartedAt = performance.now()
     this.stageClock.advance(rawFrameMs)
     const completedTransforms = this.motionController.advance(
@@ -677,6 +693,21 @@ export class MotionStage<TMeta = unknown> {
     this.renderSubmitMs = performance.now() - renderStartedAt
     this.extensionHost?.afterRender()
     this.invalidatePerformanceSnapshot()
+    return this.needsContinuousFrame()
+  }
+
+  private needsContinuousFrame(): boolean {
+    return this.motionController.hasActiveTransition()
+      || this.effectController.hasActive()
+      || this.rotation.isActive()
+      || this.stageClock.hasPendingWaits()
+      || this.contentRenderer.needsFrame()
+      || Boolean(this.extensionHost?.needsFrame())
+  }
+
+  private wakeAfter<TResult>(operation: Promise<TResult>): Promise<TResult> {
+    this.runtime.requestFrame()
+    return operation.finally(() => this.runtime.requestFrame())
   }
 
   private applyQuality(quality: QualityLevel): void {
@@ -701,12 +732,14 @@ export class MotionStage<TMeta = unknown> {
     this.events.emit('qualitychange', { quality, stats })
     if (
       this.contentState.sourceItems.length
-      && targetCount > this.contentState.items.length
+      && targetCount !== this.contentState.items.length
     ) {
       void this.contentCoordinator.updateItemsInternal(this.contentState.sourceItems, {
         layout: targetLayout ?? undefined,
         duration: 0,
-      }, true).catch((error) => console.error('Spatial Motion quality reconciliation failed', error))
+      }, true)
+        .catch((error) => console.error('Spatial Motion quality reconciliation failed', error))
+        .finally(() => this.runtime.requestFrame())
     }
   }
 
@@ -725,6 +758,7 @@ export class MotionStage<TMeta = unknown> {
     if (!this.reducedMotion) return
     this.stopRotation()
     this.motionCoordinator.settleReducedMotion()
+    this.runtime.requestFrame()
   }
 
   private assertActive(): void {
@@ -748,6 +782,7 @@ export class MotionStage<TMeta = unknown> {
           getReducedMotion: () => this.reducedMotion,
           isPaused: () => this.runtime.isPaused(),
           isDestroyed: () => this.destroyed,
+          requestFrame: () => this.runtime.requestFrame(),
           onError: (error, extension) =>
             this.events.emit('extensionerror', { error, extension }),
         })

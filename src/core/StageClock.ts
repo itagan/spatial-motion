@@ -35,6 +35,10 @@ export class StageClock {
     }
   }
 
+  hasPendingWaits(): boolean {
+    return this.waits.size > 0
+  }
+
   dispose(): void {
     for (const wait of this.waits) wait.complete(false)
     this.waits.clear()

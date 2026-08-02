@@ -18,7 +18,6 @@ import type {
 import {
   createItemFingerprint,
   createItemFingerprints,
-  equalFingerprints,
   resolveAspectRatio,
   resolveAtlasResolution,
   type CardRendererOptions,
@@ -160,7 +159,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       viewport: { resize: (viewport) => this.resize(viewport) },
       resourceRecovery: { refreshResources: () => this.refreshResources() },
       resourcePreparation: { prewarm: (request) => this.prewarm(request) },
-      frame: { update: (deltaSeconds) => this.advanceAtlasUploads(deltaSeconds) },
+      frame: {
+        update: (deltaSeconds) => this.advanceAtlasUploads(deltaSeconds),
+        needsUpdate: () => this.hasPendingAtlasUploads(),
+      },
       streamingEffects: {
         enable: (data) => this.enableEffect(data),
         disable: () => this.disableEffect(),
@@ -175,9 +177,15 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     const fingerprints = createItemFingerprints(items, this.atlasOptions)
     if (
       this.mesh
-      && equalFingerprints(fingerprints, this.itemFingerprints)
       && !this.resourceScheduler.isPending('cards-content')
-    ) return true
+      && matchesFingerprintPrefix(fingerprints, this.itemFingerprints)
+    ) {
+      if (items.length === this.itemCount) return true
+      this.itemCount = items.length
+      this.mesh.geometry.instanceCount = items.length
+      this.materialRuntime.uploadMotion(items)
+      return true
+    }
     const result = await this.resourceScheduler.scheduleLatest('cards-content', {
       prepare: (signal) => this.atlasBackend.build(
         items,
@@ -559,6 +567,14 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     }
   }
 
+  private hasPendingAtlasUploads(): boolean {
+    return Boolean(
+      this.atlas
+      && this.atlas.mode === 'array'
+      && this.nextLayer < this.atlas.depth,
+    )
+  }
+
   private layersPerUpload(atlas: TextureAtlasResult, byteBudget: number): number {
     return Math.max(1, Math.floor(byteBudget / (atlas.width * atlas.height * 4)))
   }
@@ -688,6 +704,15 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     scales[index] = buffer.scales[index]
     opacities[index] = buffer.opacities[index]
   }
+}
+
+function matchesFingerprintPrefix(
+  candidate: readonly string[],
+  retained: readonly string[],
+): boolean {
+  return candidate.length > 0
+    && candidate.length <= retained.length
+    && candidate.every((value, index) => value === retained[index])
 }
 
 function markAttributePair(

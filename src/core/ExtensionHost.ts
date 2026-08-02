@@ -52,6 +52,7 @@ interface ExtensionHostOptions {
   getReducedMotion: () => boolean
   isPaused: () => boolean
   isDestroyed: () => boolean
+  requestFrame: () => void
   onError?: (error: unknown, extension: StageExtension) => void
 }
 
@@ -126,6 +127,7 @@ export class ExtensionHost {
       extension.reducedMotionChange?.(this.options.getReducedMotion())
       extension.resize?.(this.options.getViewport())
       this.syncPaused(record)
+      this.options.requestFrame()
     } catch (error) {
       const cancelled = !record.active || this.options.isDestroyed()
       if (!cancelled) this.recordError(record, error)
@@ -223,6 +225,18 @@ export class ExtensionHost {
     return this.extensions.length
   }
 
+  needsFrame(): boolean {
+    return this.extensions.some((record) =>
+      record.active
+      && record.mounted
+      && record.enabled
+      && Boolean(
+        record.extension.update
+        || record.extension.beforeRender
+        || record.extension.afterRender,
+      ))
+  }
+
   getUpdateDuration(): number {
     return this.updateDurationMs
   }
@@ -256,6 +270,7 @@ export class ExtensionHost {
       }
     }
     this.syncPaused(record)
+    this.options.requestFrame()
   }
 
   private syncPaused(record: ExtensionRecord, stagePaused = this.options.isPaused()): void {
@@ -373,6 +388,7 @@ export class ExtensionHost {
     if (index >= 0) this.extensions.splice(index, 1)
     record.root.removeFromParent()
     if (record.mounted) this.disposeRecord(record)
+    this.options.requestFrame()
   }
 
   private disposeRecord(record: ExtensionRecord): void {

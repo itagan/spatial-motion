@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+- Stage 在静态布局且没有转场、流式特效、自动旋转、Timeline、活动 Extension 或
+  Renderer 帧任务时停止 RAF 与 WebGL 提交；任一视觉变更会按需唤醒。Renderer 的
+  `frame.needsUpdate()` 可在内部任务排空后进入休眠，旧 frame capability 保持连续模式。
+- 质量降档先用 Shader 比例立即减压，再异步把 resident/submitted 项数收敛到 Profile
+  上限；Cards 对未变化的内容前缀复用既有 Atlas、Geometry 与 Attribute，恢复档位也
+  可直接扩回，不触发 Atlas build 或 Worker 请求。
 - Cards 新增受约束的 Motion/Effect Program；四个内置 GPU 特效迁移为按需动态
   chunk，自定义 Program 可声明私有 Attribute、Uniform、GLSL 和 payload 上传。
 - `StreamingEffectGpuData` 收敛为 `{ kind, activeCount, payload }`，异步特效激活
@@ -70,6 +76,30 @@
   cold-start 的 Atlas build 中位数由 43.2ms 降至 40.6ms。
 - 质量矩阵采集器新增 `--preview` 生产构建模式，并在输出中记录 `serverMode`；动态
   import/Worker 冷启动不再把 Vite 开发服务器的按需 transform 当作浏览器运行时成本。
+- 质量矩阵新增 `--stability` 长时间门禁：保存 JS heap、DOM/Canvas 与 Renderer 资源
+  趋势，在预热后的稳定窗口检查 GPU/纹理/Geometry 增长、资源失败和 context loss。
+- 新增版本化跨设备目标清单与 `benchmark:coverage`：自动匹配浏览器、平台、GPU、规模、
+  场景和长稳结果，区分正式、dirty 开发与缺失证据，并提供严格 CI 退出码。
+- Renderer 诊断指标上限由 64 扩至 96，确保 Cards 的 Program 与资源失败计数不会被
+  Atlas 指标截断；长稳 v2 判定拒绝缺少必要样本或关键计数的历史证据。
+- Benchmark 页面新增真实设备证据导出；`benchmark:import-device` 校验浏览器、矩阵和时长，
+  校验构建指纹与当前代码 SHA，并在仓库端生成 v2 稳定性与质量校准结果，支持 Android/iOS
+  实机闭环且拒绝旧缓存或错版本 capture。
+- 设备覆盖匹配新增 CSS viewport、DPR 与移动 GPU 边界，Android/iOS 证据不再能由桌面
+  浏览器仅修改 UA 误判满足。
+- 设备目标的 steady 与长稳证据必须共享同一干净源码 SHA；不同版本拼接会明确报告
+  `mixed-revision`，采集器仅忽略结果目录变化以支持同 SHA 连续采集。
+- 设备覆盖同时要求匹配的质量校准通过，低 FPS、P95/长帧、Draw Call 或实例覆盖失败的
+  结果不再能仅凭长稳资源趋势满足目标。
+- 覆盖扫描不再单独信任已保存的 `calibration.passed`，会用当前策略从原始 Benchmark
+  重算并拒绝缺失、无效、陈旧或与指标冲突的质量判定。
+- 长稳覆盖也会从 browser/Renderer 原始样本重算当前稳定性规则，存储的 v2 `passed`
+  不能掩盖样本损坏、资源增长或失败计数。
+- 正式设备证据的 SHA 必须能由当前仓库解析为真实 commit，仅格式正确但不存在的修订号
+  会降为开发证据。
+- 证据提交到当前 HEAD 之间若运行时、Benchmark 场景、依赖/构建、采集或判定算法发生变化，
+  或这些路径存在未提交变更，覆盖会标记 `revision:stale`；纯文档、报告和结果文件变化不
+  触发重采。
 
 ### Added
 
@@ -100,8 +130,8 @@
 - Canvas 的 CSS 尺寸现在始终跟随 Stage 容器，避免高 DPR 设备把内部像素尺寸当作布局尺寸，导致画面放大、偏移和裁切。
 - Sphere `surface` 朝向现在让每张卡片的法线精确对齐球面外法线；默认球体与经典 Demo 预设也改用完整球面贴合朝向，`upright-surface` 仍可显式选用。
 - Sphere `surface` 卡片的顶部统一朝向球面北极，避免头像随经纬度发生无规则滚转或倒置。
-- 质量下降保留已有 resident pool，只立即降低 submitted/visible 比例，避免承压时
-  重建 Atlas；从低档启动后升级才异步扩展 resident pool。
+- 质量变化立即调整 shader-visible 比例，并通过受 revision 保护的数据协调收敛
+  resident/submitted pool；Cards 的稳定内容前缀不重建 Atlas。
 - Cards/Points 现在按容量桶复用 Geometry、Material、过渡 Attribute 和 TypedArray；Atlas 相邻单元合并上传范围，模板复用有界文字测量结果。
 - 稳态布局与交互读取直接复用 Stage 持有的 Transform 快照，Stage wait 直接遍历现有集合；高频 `pointermove` 合并到 Stage 下一帧并只拾取最新坐标，避免 hover、pick 和每帧计时产生重复工作或临时数组。
 - Atlas 默认卡片首次构建直接写入整图 Canvas，不再创建逐卡临时 Canvas 或执行逐卡 `drawImage`；`DataTexture` 直接复用整图 `ImageData` 像素缓冲，移除同尺寸 `Uint8Array` 二次复制。

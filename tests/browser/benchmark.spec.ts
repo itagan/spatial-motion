@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
 
 interface BenchmarkSummary {
   contentMode: 'default' | 'template' | 'canvas'
@@ -340,4 +341,146 @@ test('template and canvas partial updates keep readback bounded and visual outpu
   }
 
   expect(errors).toEqual([])
+})
+
+test('exports a repository-importable real-device capture', async ({ page }) => {
+  await page.goto('/benchmark.html')
+  await expect(page.getByText('READY', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '1000', exact: true }).click()
+  await page.getByRole('button', { name: 'MEDIUM', exact: true }).click()
+  await page.locator('#duration').selectOption('3')
+  await page.locator('#scenario').selectOption('steady')
+  await page.getByRole('button', { name: '运行性能采样', exact: true }).click()
+  await expect(page.getByText(/采样完成：/)).toBeVisible({ timeout: 20_000 })
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出设备证据', exact: true }).click()
+  const download = await downloadPromise
+  const path = await download.path()
+  if (!path) throw new Error('Device evidence download path is unavailable')
+  const capture = JSON.parse(await readFile(path, 'utf8'))
+
+  expect(capture).toMatchObject({
+    version: 1,
+    kind: 'spatial-motion-device-capture',
+    sourceRevision: expect.any(String),
+    browser: { name: 'chromium' },
+    matrix: {
+      durationSeconds: 3,
+      itemCounts: [1000],
+      qualities: ['medium'],
+      scenarios: ['steady'],
+      stability: false,
+    },
+    result: {
+      configuration: { itemCount: 1000, qualityMode: 'medium', scenario: 'steady' },
+    },
+  })
+  expect(capture.browserSamples).toHaveLength(2)
+})
+
+test('static layouts stop GPU draw submission and animation wakes it again', async ({ page }) => {
+  await page.addInitScript(() => {
+    const probe = { draws: 0 }
+    Object.defineProperty(window, '__spatialMotionIdleDrawProbe', { value: probe })
+    for (const constructor of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
+      if (!constructor) continue
+      const prototype = constructor.prototype as unknown as Record<string, unknown>
+      for (const name of [
+        'drawArrays',
+        'drawElements',
+        'drawArraysInstanced',
+        'drawElementsInstanced',
+      ]) {
+        const original = prototype[name]
+        if (typeof original !== 'function') continue
+        prototype[name] = function(this: unknown, ...args: unknown[]) {
+          probe.draws += 1
+          return Reflect.apply(original, this, args)
+        }
+      }
+    }
+  })
+  await page.goto('/benchmark.html')
+  await expect(page.getByText('READY', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '平面', exact: true }).click()
+  await page.waitForTimeout(1_200)
+
+  const drawsAfterSettling = await page.evaluate(() =>
+    (window as unknown as { __spatialMotionIdleDrawProbe: { draws: number } })
+      .__spatialMotionIdleDrawProbe.draws)
+  await page.waitForTimeout(500)
+  const drawsWhileIdle = await page.evaluate(() =>
+    (window as unknown as { __spatialMotionIdleDrawProbe: { draws: number } })
+      .__spatialMotionIdleDrawProbe.draws)
+  expect(drawsWhileIdle).toBe(drawsAfterSettling)
+
+  await page.getByRole('button', { name: '球体', exact: true }).click()
+  await page.waitForTimeout(250)
+  const drawsAfterWake = await page.evaluate(() =>
+    (window as unknown as { __spatialMotionIdleDrawProbe: { draws: number } })
+      .__spatialMotionIdleDrawProbe.draws)
+  expect(drawsAfterWake).toBeGreaterThan(drawsWhileIdle)
+})
+
+test('quality pool reconciliation reuses the resident Cards atlas', async ({ page }) => {
+  await page.addInitScript(() => {
+    const probe = { messages: 0 }
+    Object.defineProperty(window, '__spatialMotionWorkerProbe', { value: probe })
+    if (!window.Worker) return
+    const prototype = Worker.prototype as unknown as Record<string, unknown>
+    const original = prototype.postMessage
+    if (typeof original !== 'function') return
+    prototype.postMessage = function(this: Worker, ...args: unknown[]) {
+      probe.messages += 1
+      return Reflect.apply(original, this, args)
+    }
+  })
+  await page.goto('/benchmark.html')
+  await expect(page.getByText('READY', { exact: true })).toBeVisible()
+  await page.evaluate(async () => {
+    const configure = (window as unknown as {
+      __spatialMotionBenchmarkConfigure?: (
+        configuration: { itemCount?: number; qualityMode?: string },
+      ) => Promise<void>
+    }).__spatialMotionBenchmarkConfigure
+    await configure?.({ itemCount: 2000, qualityMode: 'high' })
+  })
+
+  const highAtlasUpdates = await page.locator('#metric-atlas-updates').innerText()
+  const highWorkerMessages = await page.evaluate(() =>
+    (window as unknown as { __spatialMotionWorkerProbe: { messages: number } })
+      .__spatialMotionWorkerProbe.messages)
+
+  await page.evaluate(async () => {
+    const configure = (window as unknown as {
+      __spatialMotionBenchmarkConfigure?: (
+        configuration: { itemCount?: number; qualityMode?: string },
+      ) => Promise<void>
+    }).__spatialMotionBenchmarkConfigure
+    await configure?.({ qualityMode: 'low' })
+  })
+  await expect(page.locator('#metric-items')).toHaveText('500 / 2000')
+  await expect(page.locator('#metric-submitted')).toHaveText('500')
+  expect(await page.locator('#metric-atlas-updates').innerText()).toBe(highAtlasUpdates)
+  expect(await page.evaluate(() =>
+    (window as unknown as { __spatialMotionWorkerProbe: { messages: number } })
+      .__spatialMotionWorkerProbe.messages)).toBe(highWorkerMessages)
+  const lowVisual = await probeStagePixels(page)
+  expect(lowVisual.chromaticPixels).toBeGreaterThan(100)
+
+  await page.evaluate(async () => {
+    const configure = (window as unknown as {
+      __spatialMotionBenchmarkConfigure?: (
+        configuration: { itemCount?: number; qualityMode?: string },
+      ) => Promise<void>
+    }).__spatialMotionBenchmarkConfigure
+    await configure?.({ qualityMode: 'high' })
+  })
+  await expect(page.locator('#metric-items')).toHaveText('2000 / 2000')
+  await expect(page.locator('#metric-submitted')).toHaveText('2000')
+  expect(await page.locator('#metric-atlas-updates').innerText()).toBe(highAtlasUpdates)
+  expect(await page.evaluate(() =>
+    (window as unknown as { __spatialMotionWorkerProbe: { messages: number } })
+      .__spatialMotionWorkerProbe.messages)).toBe(highWorkerMessages)
 })

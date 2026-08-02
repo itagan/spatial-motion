@@ -41,6 +41,7 @@ describe('CompiledRendererRuntime', () => {
     const runtime = compileRendererRuntime(renderer)
 
     expect(runtime.supportsPatch).toBe(false)
+    expect(runtime.needsFrame()).toBe(false)
     expect(runtime.streamingEffects).toBeUndefined()
     expect(await runtime.updateItems([item], [0])).toBe(true)
     expect(renderer.setItems).toHaveBeenCalledWith([item])
@@ -73,6 +74,7 @@ describe('CompiledRendererRuntime', () => {
     const disable = vi.fn()
     const setTime = vi.fn()
     const update = vi.fn()
+    const needsUpdate = vi.fn(() => false)
     const renderer = rendererFixture({
       patch: { updateItems: patch },
       visual: { setVisualState, prepareVisualTransition },
@@ -81,7 +83,7 @@ describe('CompiledRendererRuntime', () => {
       resourceRecovery: { refreshResources },
       resourcePreparation: { prewarm },
       streamingEffects: { enable, disable, setTime },
-      frame: { update },
+      frame: { update, needsUpdate },
     })
     const runtime = compileRendererRuntime(renderer)
     const visual = { billboard: 1, hideBackHemisphere: 0, hemisphereEdgeFade: 0 }
@@ -97,6 +99,7 @@ describe('CompiledRendererRuntime', () => {
     runtime.refreshResources()
     expect(await runtime.prewarm({ textures: true, programs: ['wave'] })).toBe(true)
     runtime.updateFrame(0.016)
+    expect(runtime.needsFrame()).toBe(false)
     await runtime.streamingEffects?.enable({ kind: 'custom', activeCount: 0, payload: null })
     runtime.streamingEffects?.setTime(2)
     runtime.streamingEffects?.disable()
@@ -111,9 +114,16 @@ describe('CompiledRendererRuntime', () => {
     expect(refreshResources).toHaveBeenCalledOnce()
     expect(prewarm).toHaveBeenCalledWith({ textures: true, programs: ['wave'] })
     expect(update).toHaveBeenCalledWith(0.016)
+    expect(needsUpdate).toHaveBeenCalledOnce()
     expect(enable).toHaveBeenCalledWith({ kind: 'custom', activeCount: 0, payload: null })
     expect(setTime).toHaveBeenCalledWith(2)
     expect(disable).toHaveBeenCalledOnce()
+  })
+
+  it('keeps legacy frame capabilities continuous when they cannot report idleness', () => {
+    const runtime = compileRendererRuntime(rendererFixture({ frame: { update: vi.fn() } }))
+
+    expect(runtime.needsFrame()).toBe(true)
   })
 
   it('rejects invalid renderer contracts before a Stage starts', () => {

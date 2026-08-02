@@ -11,6 +11,8 @@ export interface NormalizedRendererStats {
   metrics: Readonly<Record<string, number>>
 }
 
+const MAX_RENDERER_METRICS = 96
+
 export function assertMotionRenderer(value: unknown): asserts value is MotionRenderer {
   if (!value || typeof value !== 'object') {
     throw new TypeError('Motion renderer factory must return a MotionRenderer object')
@@ -71,7 +73,7 @@ export function normalizeRendererStats(stats: MotionRendererStats): NormalizedRe
     : {}
   const metrics = Object.fromEntries(
     Object.entries(metricInput)
-      .slice(0, 64)
+      .slice(0, MAX_RENDERER_METRICS)
       .map(([key, value]) => [key, finiteStat(value)]),
   )
   const instanceCount = finiteStat(input.instanceCount)

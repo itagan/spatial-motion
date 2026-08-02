@@ -21,7 +21,7 @@
 - 运行时帧率监控、自动降级与稳定恢复
 - 自动限制像素比和可见实例数量
 - 自动质量与 high、medium、low 手动质量锁定
-- 页面进入后台时暂停渲染循环，回到前台后平滑恢复
+- 静态场景自动停止 RAF/WebGL 提交；页面后台暂停，视觉变化与动画按需平滑唤醒
 - 独立性能基准页和 JSON 采样结果导出
 - 按稳定 `id` 动态增删数据，并从已有卡片的当前空间位置继续过渡
 - 基于投影四边形和相机深度的精确遮挡拾取、卡片点击回调和任意 `id` 聚焦
@@ -304,7 +304,11 @@ await stage.to(grid({ fit: 'cover' }))   // 铺满相机可视范围
 
 默认 Canvas 可通过 Tab 聚焦，方向键在当前质量档位可见卡片之间循环，Home/End 跳到首尾，Enter/Space 触发 `itemclick`。`itemfocus` 接收键盘焦点变化，`focusItem(id)` 和 `getFocusedItem()` 提供稳定 id 控制；可用 `ariaLabel` 自定义区域名称，或以 `keyboardNavigation: false` 关闭内建键盘行为。
 
-页面隐藏时 Stage 会自动停止唯一的 `requestAnimationFrame`，布局过渡、流式特效和扩展时钟同时冻结；恢复可见时从当前画面继续，后台停留时间不会造成动画跳跃或污染性能样本。手动 `pause()` 和 WebGL context loss 使用相同的时钟语义。
+静态布局在没有转场、流式特效、自动旋转、Timeline、活动帧扩展或 Renderer 帧任务时，
+会自动停止唯一的 `requestAnimationFrame` 与 WebGL scene submission；数据、布局、交互、
+resize 和异步资源提交会按需唤醒。页面隐藏时同样停止循环，布局过渡、流式特效和扩展
+时钟同时冻结；恢复可见时从当前画面继续，后台停留时间不会造成动画跳跃或污染性能样本。
+手动 `pause()` 和 WebGL context loss 使用相同的时钟语义。
 
 浏览器报告 WebGL context loss 时 Stage 会阻止默认销毁行为并暂停循环；context restored 后图集会重新标记上传并恢复运行。`getPerformanceStats().contextLost` 可用于状态面板。若此前由用户主动暂停，context 恢复不会越过该暂停状态。
 
@@ -530,7 +534,7 @@ stage.destroy() // 幂等
 | medium | 1.25 | 1000 | 220 | 45 |
 | low | 1 | 500 | 140 | 30 |
 
-输入数据超过当前质量档位的最大实例数时，尾部数据不会进入纹理图集或 GPU 实例缓冲。运行时切换质量会异步扩缩实例池，并从完整输入数据恢复高质量容量；降级期间先在 Shader 中提前裁剪超额实例，避免旧容量继续产生片元负担。
+输入数据超过当前质量档位的最大实例数时，尾部数据不会进入纹理图集或 GPU 实例缓冲。运行时切换质量会异步扩缩实例池，并从完整输入数据恢复高质量容量；降级期间先在 Shader 中提前裁剪超额实例，避免旧容量继续产生片元负担。Cards 对内容未变化的前缀只调整 active instance，降档与恢复都复用现有 Atlas 和 Geometry，不新增 Worker 栅格或纹理构建。
 
 ## 性能基准
 
@@ -570,6 +574,12 @@ npx spatial-motion-benchmark baseline.json current.json --preset transition-stre
 npm run benchmark:matrix
 npm run benchmark:matrix -- --scenarios steady,transition-stress --duration 10 --headed
 npm run benchmark:matrix -- --preview --scenarios cold-start --duration 10 --headed
+npm run benchmark:matrix -- --preview --stability --stability-interval 5 \
+  --scenarios transition-stress --duration 60 --headed
+npm run benchmark:coverage
+npm run benchmark:coverage -- --strict
+npm run benchmark:import-device -- ~/Downloads/device-capture.json \
+  --output benchmarks/results/device-evidence.json
 ```
 
 矩阵按 GPU、视口和设备 DPR 隔离，完整保存运行环境与原始结果。判定边界与默认
@@ -578,6 +588,15 @@ npm run benchmark:matrix -- --preview --scenarios cold-start --duration 10 --hea
 `benchmarks/README.md`。涉及动态 import、Worker asset 或首次 chunk 求值的 cold-start
 对照应使用 `--preview`，先构建生产 Demo 再从静态 preview 服务采集，避免把开发服务器
 按需 transform 误计为运行时成本。
+长时间切换或局部更新使用 `--stability`；采集器保存 JS heap、DOM/Canvas 和 Renderer
+资源趋势，并在稳定窗口出现持续 GPU/纹理/Geometry 增长、资源失败或意外 context loss
+时返回非零退出码。
+跨设备目标声明在 `benchmarks/device-targets.json`。`benchmark:coverage` 自动扫描已保存
+结果，区分正式提交上的 `qualified`、dirty/缺 SHA 的 `development-only` 和 `missing`；
+`--strict` 仅在全部桌面与移动目标都有正式 steady 与 300 秒长稳证据时通过。
+真实手机无法由本机 Playwright 代表时，可在设备浏览器打开 production Benchmark，完成
+采样后点击“导出设备证据”；`benchmark:import-device` 会在仓库端重算 v2 稳定性、质量建议
+和源码状态，再生成可被覆盖报告识别的正式 JSON。
 
 默认阈值覆盖 FPS、最大帧时间、P95/P99、33ms 长帧、Stage CPU、WebGL 提交、Atlas build/patch、纹理内存与估算上传量。配置不兼容或超过阈值时命令返回非零退出码；自定义阈值可对每个指标设置 `maxRegressionPercent`、`maxRegressionAbsolute` 或两者。随包提供的六个 `--preset` 覆盖 100/500/1000/2000 实例、low/medium/high/auto 质量和四类固定场景，CLI 会拒绝与预设不一致的结果。
 

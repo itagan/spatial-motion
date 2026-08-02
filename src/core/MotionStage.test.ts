@@ -576,7 +576,7 @@ describe('MotionStage', () => {
     stage.destroy()
   })
 
-  it('retains submitted instances while quality reduces shader-visible items', async () => {
+  it('immediately hides and then reconciles submitted instances after quality changes', async () => {
     const stage = createStage({ quality: 'high' })
     const cards = currentCards()
     const items = Array.from({ length: 3000 }, (_, index) => ({ id: `item-${index}` }))
@@ -587,15 +587,20 @@ describe('MotionStage', () => {
     expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
 
     stage.setQuality('medium')
-    expect(cards.setItems).toHaveBeenCalledTimes(1)
     expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(0.5)
+    await vi.waitFor(() =>
+      expect((cards.setItems.mock.calls.at(-1)?.[0] as MotionItem[])).toHaveLength(1000))
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
 
     stage.setQuality('low')
-    expect(cards.setItems).toHaveBeenCalledTimes(1)
-    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(0.25)
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(0.5)
+    await vi.waitFor(() =>
+      expect((cards.setItems.mock.calls.at(-1)?.[0] as MotionItem[])).toHaveLength(500))
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
 
     stage.setQuality('high')
-    expect(cards.setItems).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() =>
+      expect((cards.setItems.mock.calls.at(-1)?.[0] as MotionItem[])).toHaveLength(2000))
     expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
     stage.destroy()
   })
@@ -635,7 +640,7 @@ describe('MotionStage', () => {
     expect(cards.setTransforms.mock.calls.length).toBe(transformsBefore)
   })
 
-  it('patches the resident pool without undoing a lower visible ratio', async () => {
+  it('patches a reconciled lower-quality resident pool', async () => {
     const stage = createStage({ quality: 'high' })
     const cards = currentCards()
     await stage.setItems(Array.from({ length: 3000 }, (_, index) => ({
@@ -644,12 +649,14 @@ describe('MotionStage', () => {
     })))
     stage.setQuality('low')
     expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(0.25)
+    await vi.waitFor(() =>
+      expect((cards.setItems.mock.calls.at(-1)?.[0] as MotionItem[])).toHaveLength(500))
     await expect(stage.updateItem('item-0', { title: 'Updated' })).resolves.toBe(true)
     expect(cards.updateItems).toHaveBeenLastCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'item-0', title: 'Updated' })]),
       [0],
     )
-    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(0.25)
+    expect(cards.setVisibleRatio).toHaveBeenLastCalledWith(1)
     stage.destroy()
   })
 
@@ -675,6 +682,37 @@ describe('MotionStage', () => {
 
     stage.destroy()
     visibilitySpy.mockRestore()
+  })
+
+  it('stops submitting static frames and wakes for visual changes and animation', () => {
+    let frame: FrameRequestCallback | null = null
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return requestFrame.mock.calls.length
+    })
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    const stage = createStage()
+    const renderer = currentRenderer()
+
+    expect(requestFrame).toHaveBeenCalledOnce()
+    ;(frame as unknown as FrameRequestCallback)(16)
+    expect(renderer.render).toHaveBeenCalledOnce()
+    expect(requestFrame).toHaveBeenCalledOnce()
+
+    stage.setRotation(0.1, 0.2)
+    expect(requestFrame).toHaveBeenCalledTimes(2)
+    ;(frame as unknown as FrameRequestCallback)(32)
+    expect(renderer.render).toHaveBeenCalledTimes(2)
+    expect(requestFrame).toHaveBeenCalledTimes(2)
+
+    stage.autoRotate({ y: 0.25 })
+    ;(frame as unknown as FrameRequestCallback)(48)
+    expect(requestFrame).toHaveBeenCalledTimes(4)
+    stage.stopRotation()
+    ;(frame as unknown as FrameRequestCallback)(64)
+    expect(renderer.render).toHaveBeenCalledTimes(4)
+    expect(requestFrame).toHaveBeenCalledTimes(4)
+    stage.destroy()
   })
 
   it('drives transitions from the Stage frame loop and excludes paused time', async () => {
@@ -915,6 +953,35 @@ describe('MotionStage', () => {
     expect(updates.every((update) => update.mock.calls.length === 1)).toBe(true)
     expect(requestFrame).toHaveBeenCalledTimes(2)
     expect(stage.getPerformanceStats().extensions).toBe(5)
+    stage.destroy()
+  })
+
+  it('wakes static extensions for mount, visibility changes, and removal', async () => {
+    let frame: FrameRequestCallback | null = null
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return requestFrame.mock.calls.length
+    })
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    const stage = createStage()
+    ;(frame as unknown as FrameRequestCallback)(16)
+    expect(requestFrame).toHaveBeenCalledOnce()
+
+    const handle = await stage.addExtension({
+      mount: ({ root }) => { root.add(new Object3D()) },
+    })
+    expect(requestFrame).toHaveBeenCalledTimes(2)
+    ;(frame as unknown as FrameRequestCallback)(32)
+    expect(requestFrame).toHaveBeenCalledTimes(2)
+
+    handle.disable()
+    expect(requestFrame).toHaveBeenCalledTimes(3)
+    ;(frame as unknown as FrameRequestCallback)(48)
+    handle.enable()
+    expect(requestFrame).toHaveBeenCalledTimes(4)
+    ;(frame as unknown as FrameRequestCallback)(64)
+    handle.remove()
+    expect(requestFrame).toHaveBeenCalledTimes(5)
     stage.destroy()
   })
 
@@ -2126,7 +2193,7 @@ describe('MotionStage', () => {
 
   it('normalizes renderer metrics and rejects incomplete optional capabilities', () => {
     const metrics = Object.fromEntries(
-      Array.from({ length: 70 }, (_value, index) => [
+      Array.from({ length: 110 }, (_value, index) => [
         `metric-${index}`,
         index === 0 ? Number.NaN : index === 1 ? -2 : index,
       ]),
@@ -2148,7 +2215,7 @@ describe('MotionStage', () => {
         gpuBytes: 0,
       },
     })
-    expect(Object.keys(stats.renderer.metrics)).toHaveLength(64)
+    expect(Object.keys(stats.renderer.metrics)).toHaveLength(96)
     expect(Object.values(stats.renderer.metrics).every((value) => value >= 0)).toBe(true)
     stage.destroy()
 
@@ -2328,6 +2395,7 @@ describe('MotionStage', () => {
 
   it('immediately excludes instances above the pending lower-quality cap from picking', async () => {
     const stage = createStage({ quality: 'high' })
+    const cards = currentCards()
     const items = Array.from({ length: 2000 }, (_, index) => ({ id: `item-${index}` }))
     await stage.setItems(items)
     await stage.to(
@@ -2338,8 +2406,12 @@ describe('MotionStage', () => {
       { duration: 0 },
     )
 
+    const pending = deferred<boolean>()
+    cards.setItems.mockReturnValueOnce(pending.promise)
     stage.setQuality('low')
     expect(await stage.pick(50, 50)).toBeNull()
+    pending.resolve(true)
+    await Promise.resolve()
     stage.destroy()
   })
 
