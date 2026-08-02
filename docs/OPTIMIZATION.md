@@ -1035,3 +1035,26 @@ DOM/Canvas，同时保留 500ms Renderer 样本和运行操作数；独立“导
 单结果导出与基线比较格式。仓库端 `benchmark:import-device` 验证 UA 与环境一致、矩阵与
 结果一致、时长和采样间隔有效，再绑定当前代码 SHA、重算 v2 稳定门禁及质量建议。这样
 Android/iOS 可以用真实 GPU/WebKit/Chromium 数据进入同一覆盖报告，不依赖桌面设备模拟。
+
+## 自动降档提交池收敛
+
+2026-08-02 在本机 Headless Chromium 151、1265×633、DPR 1、ANGLE SwiftShader，用
+2000 items / auto / transition-stress / 10 秒对比 `32aa868` 与实现提交 `5cc15c4`。
+两组都从 high 自动降到 low，并通过公开配置入口等待 2000 项准备完成后再开始采样，
+避免 UI 点击的异步配置竞态：
+
+| 指标 | `32aa868` 保留 2000 submitted | `5cc15c4` 收敛到 500 submitted | 变化 |
+| --- | ---: | ---: | ---: |
+| 全窗口平均 FPS | 48.57 | 59.24 | +22.0% |
+| 最终 low 窗口 FPS | 51.29 | 63.84 | +24.5% |
+| 最终 low 窗口 P95 | 34.92ms | 33.13ms | -5.1% |
+| 24ms 长帧 | 142 | 93 | -34.5% |
+| 33ms 长帧 | 57 | 27 | -52.6% |
+| 50ms 长帧 | 4 | 4 | 不变 |
+| Benchmark 窗口 Atlas build | 0 | 0 | 不变 |
+
+直接让 Stage 收缩列表但重建 Atlas 的中间原型虽有相近稳态收益，却在两次降档中增加约
+188ms Atlas build，并出现额外资源尖峰，因此未采用。最终 Cards 路径保留完整 Atlas、
+Geometry、纹理和指纹，只把 active instance 从 2000→1000→500；内容未变化时恢复档位
+也不发 Worker 请求。真实 Chromium 回归会同时检查 low/high 的 submitted 数、Atlas build
+累计值、Worker 消息数和有效像素，防止后续把提交收益退化成隐藏但仍执行的顶点工作。
