@@ -422,3 +422,65 @@ test('static layouts stop GPU draw submission and animation wakes it again', asy
       .__spatialMotionIdleDrawProbe.draws)
   expect(drawsAfterWake).toBeGreaterThan(drawsWhileIdle)
 })
+
+test('quality pool reconciliation reuses the resident Cards atlas', async ({ page }) => {
+  await page.addInitScript(() => {
+    const probe = { messages: 0 }
+    Object.defineProperty(window, '__spatialMotionWorkerProbe', { value: probe })
+    if (!window.Worker) return
+    const prototype = Worker.prototype as unknown as Record<string, unknown>
+    const original = prototype.postMessage
+    if (typeof original !== 'function') return
+    prototype.postMessage = function(this: Worker, ...args: unknown[]) {
+      probe.messages += 1
+      return Reflect.apply(original, this, args)
+    }
+  })
+  await page.goto('/benchmark.html')
+  await expect(page.getByText('READY', { exact: true })).toBeVisible()
+  await page.evaluate(async () => {
+    const configure = (window as unknown as {
+      __spatialMotionBenchmarkConfigure?: (
+        configuration: { itemCount?: number; qualityMode?: string },
+      ) => Promise<void>
+    }).__spatialMotionBenchmarkConfigure
+    await configure?.({ itemCount: 2000, qualityMode: 'high' })
+  })
+
+  const highAtlasUpdates = await page.locator('#metric-atlas-updates').innerText()
+  const highWorkerMessages = await page.evaluate(() =>
+    (window as unknown as { __spatialMotionWorkerProbe: { messages: number } })
+      .__spatialMotionWorkerProbe.messages)
+
+  await page.evaluate(async () => {
+    const configure = (window as unknown as {
+      __spatialMotionBenchmarkConfigure?: (
+        configuration: { itemCount?: number; qualityMode?: string },
+      ) => Promise<void>
+    }).__spatialMotionBenchmarkConfigure
+    await configure?.({ qualityMode: 'low' })
+  })
+  await expect(page.locator('#metric-items')).toHaveText('500 / 2000')
+  await expect(page.locator('#metric-submitted')).toHaveText('500')
+  expect(await page.locator('#metric-atlas-updates').innerText()).toBe(highAtlasUpdates)
+  expect(await page.evaluate(() =>
+    (window as unknown as { __spatialMotionWorkerProbe: { messages: number } })
+      .__spatialMotionWorkerProbe.messages)).toBe(highWorkerMessages)
+  const lowVisual = await probeStagePixels(page)
+  expect(lowVisual.chromaticPixels).toBeGreaterThan(100)
+
+  await page.evaluate(async () => {
+    const configure = (window as unknown as {
+      __spatialMotionBenchmarkConfigure?: (
+        configuration: { itemCount?: number; qualityMode?: string },
+      ) => Promise<void>
+    }).__spatialMotionBenchmarkConfigure
+    await configure?.({ qualityMode: 'high' })
+  })
+  await expect(page.locator('#metric-items')).toHaveText('2000 / 2000')
+  await expect(page.locator('#metric-submitted')).toHaveText('2000')
+  expect(await page.locator('#metric-atlas-updates').innerText()).toBe(highAtlasUpdates)
+  expect(await page.evaluate(() =>
+    (window as unknown as { __spatialMotionWorkerProbe: { messages: number } })
+      .__spatialMotionWorkerProbe.messages)).toBe(highWorkerMessages)
+})

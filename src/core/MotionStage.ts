@@ -732,7 +732,7 @@ export class MotionStage<TMeta = unknown> {
     this.events.emit('qualitychange', { quality, stats })
     if (
       this.contentState.sourceItems.length
-      && targetCount > this.contentState.items.length
+      && targetCount !== this.contentState.items.length
     ) {
       void this.contentCoordinator.updateItemsInternal(this.contentState.sourceItems, {
         layout: targetLayout ?? undefined,

@@ -101,9 +101,10 @@ Semantic Versioning；发布前若必须改变冻结契约，也需要同步迁�
   destroy 路径都会归还租约，不把可复用缓冲暴露给 Renderer 异步边界之外。
 - 同一同步观察周期的 `getPerformanceStats()` 共享一个规范化只读快照；帧提交和
   Stage 状态变更会使其失效。WebGL 环境能力缓存到 resize 或 pixel ratio 改变。
-- 质量下降保留已有 resident/submitted pool，通过稳定 rank 立即降低 shader-visible
-  数量，避免设备已经承压时重建 Atlas；流式特效会同时降低实际 submitted 数量。
-  从较低初始档位升级时才扩展 resident pool。`QualityProfile.antialias` 只在 Stage
+- 质量下降先通过稳定 rank 立即降低 shader-visible 数量，随后异步把
+  resident/submitted pool 收敛到当前 Profile 上限；流式特效会同步降低实际 submitted
+  数量。Cards 在目标项是既有内容前缀时保留 Atlas、Geometry 和容量 Attribute，只调整
+  active instance count；恢复档位且内容未变时也直接扩回。`QualityProfile.antialias` 只在 Stage
   创建 WebGL context 时读取，运行时切档不会改变 context 的实际抗锯齿状态；该状态
   由 `getPerformanceEnvironment().antialias` 报告。
 - `dev` 导出 Renderer/Layout 验证报告和可挂载到 StageExtension 的布局方向可视化；error 不自动修正，重叠等启发式结果为 warning。

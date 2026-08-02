@@ -7,6 +7,9 @@
 - Stage 在静态布局且没有转场、流式特效、自动旋转、Timeline、活动 Extension 或
   Renderer 帧任务时停止 RAF 与 WebGL 提交；任一视觉变更会按需唤醒。Renderer 的
   `frame.needsUpdate()` 可在内部任务排空后进入休眠，旧 frame capability 保持连续模式。
+- 质量降档先用 Shader 比例立即减压，再异步把 resident/submitted 项数收敛到 Profile
+  上限；Cards 对未变化的内容前缀复用既有 Atlas、Geometry 与 Attribute，恢复档位也
+  可直接扩回，不触发 Atlas build 或 Worker 请求。
 - Cards 新增受约束的 Motion/Effect Program；四个内置 GPU 特效迁移为按需动态
   chunk，自定义 Program 可声明私有 Attribute、Uniform、GLSL 和 payload 上传。
 - `StreamingEffectGpuData` 收敛为 `{ kind, activeCount, payload }`，异步特效激活
@@ -127,8 +130,8 @@
 - Canvas 的 CSS 尺寸现在始终跟随 Stage 容器，避免高 DPR 设备把内部像素尺寸当作布局尺寸，导致画面放大、偏移和裁切。
 - Sphere `surface` 朝向现在让每张卡片的法线精确对齐球面外法线；默认球体与经典 Demo 预设也改用完整球面贴合朝向，`upright-surface` 仍可显式选用。
 - Sphere `surface` 卡片的顶部统一朝向球面北极，避免头像随经纬度发生无规则滚转或倒置。
-- 质量下降保留已有 resident pool，只立即降低 submitted/visible 比例，避免承压时
-  重建 Atlas；从低档启动后升级才异步扩展 resident pool。
+- 质量变化立即调整 shader-visible 比例，并通过受 revision 保护的数据协调收敛
+  resident/submitted pool；Cards 的稳定内容前缀不重建 Atlas。
 - Cards/Points 现在按容量桶复用 Geometry、Material、过渡 Attribute 和 TypedArray；Atlas 相邻单元合并上传范围，模板复用有界文字测量结果。
 - 稳态布局与交互读取直接复用 Stage 持有的 Transform 快照，Stage wait 直接遍历现有集合；高频 `pointermove` 合并到 Stage 下一帧并只拾取最新坐标，避免 hover、pick 和每帧计时产生重复工作或临时数组。
 - Atlas 默认卡片首次构建直接写入整图 Canvas，不再创建逐卡临时 Canvas 或执行逐卡 `drawImage`；`DataTexture` 直接复用整图 `ImageData` 像素缓冲，移除同尺寸 `Uint8Array` 二次复制。

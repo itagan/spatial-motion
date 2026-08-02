@@ -4,15 +4,17 @@
 
 ## v2 resident / submitted / visible 模型
 
-运行中从高档降到中、低档时，Stage 保留已经创建的 Renderer resident pool，并立即
-降低 Shader visible ratio 和实际特效提交量；布局卡片的 submitted pool 保持不变，
-避免非连续 rank 裁剪破坏空间分布、拾取索引和自定义 Program 数据顺序。降级不再在性能已经承压的时间点重建
-Atlas、Geometry 或 Attribute。局部 item patch 继续更新 resident pool，不会把质量
-裁剪误写成数据裁剪。
+运行中从高档降到中、低档时，Stage 先同步降低 Shader visible ratio 和流式特效提交量，
+保证当前帧立即减压；随后通过同一受 revision 保护的内容协调器，把布局
+resident/submitted pool 收敛到 Profile 上限。非连续 rank 只存在于协调完成前，提交新
+pool 后重新计算该规模的完整 Layout，因此空间分布、拾取索引和 Program 数据顺序一致。
 
-从低档启动后升级到更高档位时，Stage 才异步扩展 resident pool；revision 继续保证
-旧结果不能覆盖新质量或数据状态。后续基准需要分别记录 resident instance、
-submitted instance 和 visible instance，不能再用单个 item count 解释性能。
+Cards 若目标列表是当前 Atlas 内容的未变化前缀，只调整 active item/instance count 并
+重新上传必要的 Motion 属性；Atlas、Geometry、纹理和完整内容指纹继续保留。恢复到已
+保留的前缀范围同样无需 Atlas build，隐藏期间发生内容变化则由指纹不匹配触发正常重建。
+Points 在容量桶内复用 Attribute，自定义 Renderer 继续通过既有 `setItems()` 契约协调。
+后续基准仍需分别记录 resident、submitted、visible 与 GPU bytes，不能用单个 item count
+解释逻辑提交量和保留的纹理容量。
 
 ## v1.2 可观测性基线
 

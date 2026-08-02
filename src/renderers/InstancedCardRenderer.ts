@@ -18,7 +18,6 @@ import type {
 import {
   createItemFingerprint,
   createItemFingerprints,
-  equalFingerprints,
   resolveAspectRatio,
   resolveAtlasResolution,
   type CardRendererOptions,
@@ -178,9 +177,15 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     const fingerprints = createItemFingerprints(items, this.atlasOptions)
     if (
       this.mesh
-      && equalFingerprints(fingerprints, this.itemFingerprints)
       && !this.resourceScheduler.isPending('cards-content')
-    ) return true
+      && matchesFingerprintPrefix(fingerprints, this.itemFingerprints)
+    ) {
+      if (items.length === this.itemCount) return true
+      this.itemCount = items.length
+      this.mesh.geometry.instanceCount = items.length
+      this.materialRuntime.uploadMotion(items)
+      return true
+    }
     const result = await this.resourceScheduler.scheduleLatest('cards-content', {
       prepare: (signal) => this.atlasBackend.build(
         items,
@@ -699,6 +704,15 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
     scales[index] = buffer.scales[index]
     opacities[index] = buffer.opacities[index]
   }
+}
+
+function matchesFingerprintPrefix(
+  candidate: readonly string[],
+  retained: readonly string[],
+): boolean {
+  return candidate.length > 0
+    && candidate.length <= retained.length
+    && candidate.every((value, index) => value === retained[index])
 }
 
 function markAttributePair(
