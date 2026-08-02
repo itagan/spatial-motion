@@ -535,6 +535,7 @@ describe('InstancedCardRenderer item loading', () => {
     expect(texture.layerUpdates).toEqual(new Set(
       Array.from({ length: 12 }, (_value, index) => index),
     ))
+    expect(renderer.capabilities.frame?.needsUpdate?.()).toBe(true)
     renderer.capabilities.frame?.update(1 / 60)
     expect(renderer.getStats().metrics).toMatchObject({
       atlasCpuBytes: texture.image.data.byteLength,
@@ -566,6 +567,7 @@ describe('InstancedCardRenderer item loading', () => {
     })
     renderer.capabilities.frame?.update(1 / 60)
     expect(mesh.material.uniforms.uLayers.value).toBe(20)
+    expect(renderer.capabilities.frame?.needsUpdate?.()).toBe(false)
     expect(renderer.getStats().metrics).toMatchObject({
       layerUploadFrames: 2,
       totalLayerUploadFrames: 2,

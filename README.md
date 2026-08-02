@@ -21,7 +21,7 @@
 - 运行时帧率监控、自动降级与稳定恢复
 - 自动限制像素比和可见实例数量
 - 自动质量与 high、medium、low 手动质量锁定
-- 页面进入后台时暂停渲染循环，回到前台后平滑恢复
+- 静态场景自动停止 RAF/WebGL 提交；页面后台暂停，视觉变化与动画按需平滑唤醒
 - 独立性能基准页和 JSON 采样结果导出
 - 按稳定 `id` 动态增删数据，并从已有卡片的当前空间位置继续过渡
 - 基于投影四边形和相机深度的精确遮挡拾取、卡片点击回调和任意 `id` 聚焦
@@ -304,7 +304,11 @@ await stage.to(grid({ fit: 'cover' }))   // 铺满相机可视范围
 
 默认 Canvas 可通过 Tab 聚焦，方向键在当前质量档位可见卡片之间循环，Home/End 跳到首尾，Enter/Space 触发 `itemclick`。`itemfocus` 接收键盘焦点变化，`focusItem(id)` 和 `getFocusedItem()` 提供稳定 id 控制；可用 `ariaLabel` 自定义区域名称，或以 `keyboardNavigation: false` 关闭内建键盘行为。
 
-页面隐藏时 Stage 会自动停止唯一的 `requestAnimationFrame`，布局过渡、流式特效和扩展时钟同时冻结；恢复可见时从当前画面继续，后台停留时间不会造成动画跳跃或污染性能样本。手动 `pause()` 和 WebGL context loss 使用相同的时钟语义。
+静态布局在没有转场、流式特效、自动旋转、Timeline、活动帧扩展或 Renderer 帧任务时，
+会自动停止唯一的 `requestAnimationFrame` 与 WebGL scene submission；数据、布局、交互、
+resize 和异步资源提交会按需唤醒。页面隐藏时同样停止循环，布局过渡、流式特效和扩展
+时钟同时冻结；恢复可见时从当前画面继续，后台停留时间不会造成动画跳跃或污染性能样本。
+手动 `pause()` 和 WebGL context loss 使用相同的时钟语义。
 
 浏览器报告 WebGL context loss 时 Stage 会阻止默认销毁行为并暂停循环；context restored 后图集会重新标记上传并恢复运行。`getPerformanceStats().contextLost` 可用于状态面板。若此前由用户主动暂停，context 恢复不会越过该暂停状态。
 

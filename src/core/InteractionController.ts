@@ -27,6 +27,7 @@ interface InteractionControllerOptions<TMeta> {
   hasScheduledFrame: () => boolean
   isDestroyed: () => boolean
   setHighlightIndex: (index: number | null) => void
+  requestFrame: () => void
   onItemClick?: (item: MotionItem<TMeta>, index: number) => void
   onItemHover?: (item: MotionItem<TMeta> | null, index: number | null) => void
   onItemFocus?: (item: MotionItem<TMeta> | null, index: number | null) => void
@@ -353,6 +354,7 @@ export class InteractionController<TMeta> {
     const index = (this.options.hoverEffect === 'highlight' ? this.hoveredIndex : null)
       ?? focusedIndex
     this.options.setHighlightIndex(index)
+    this.options.requestFrame()
   }
 
   private updateAriaLabel(

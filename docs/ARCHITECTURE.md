@@ -69,6 +69,12 @@ Renderer 通过可异步的 `streamingEffects.enable()` 协商特效 program key
 Stage 热路径只调用已解析的方法，不逐帧执行可选链或重新探测 capability；自定义
 Renderer 仍只需实现它实际支持的公开能力。
 
+StageRuntime 在一帧完成后汇总 Motion、Effect、Rotation、Timeline、Extension 与
+Renderer 的活动状态。全部静止时不再安排下一次 RAF；数据、布局、交互高亮、resize、
+质量变化或异步资源提交会请求一帧并重新判断。Renderer 若声明 `frame.update()`，默认
+仍被视为持续活动；只有同时实现 `frame.needsUpdate()` 并返回 `false` 才允许休眠，
+因此既有自定义 Renderer 不会因升级而被错误停帧。
+
 `resourcePreparation.prewarm()` 是通用的显式准备边界。Stage 只传递纹理开关和
 Renderer 私有 Program kind，不读取 Cards 实现；销毁后完成的异步准备不得发布。
 
@@ -178,6 +184,7 @@ Stage 统一使用类型化多订阅事件。框架适配器、调试面板和�
 - 高频 pointermove 合并到 Stage RAF。
 - Extension 顺序仅在增删时计算，frame context 和有界性能采样缓冲按实例复用。
 - Renderer capability 只在构造期编译一次；Stage 热路径使用稳定方法表。
+- 静态场景不保留 RAF 或 WebGL 提交；活动边界统一按需唤醒，异步资源完成后至少提交一帧。
 - Layout `calculateInto()` 使用 SoA 容量缓冲复用生成阶段内存。
 - 图集构建必须支持取消；失效结果不得覆盖新 revision。
 - 质量下降先减少 shader-visible 数量和流式特效提交量，布局 resident/submitted pool

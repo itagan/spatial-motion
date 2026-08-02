@@ -79,6 +79,11 @@ export interface MotionRendererStreamingEffectsCapability {
 
 export interface MotionRendererFrameCapability {
   update(deltaSeconds: number): void
+  /**
+   * Return false once renderer-owned frame work is drained. Renderers that omit
+   * this hook retain continuous rendering for backward compatibility.
+   */
+  needsUpdate?(): boolean
 }
 
 export interface MotionRendererCapabilities<TMeta = unknown> {

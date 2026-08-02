@@ -34,6 +34,7 @@ export interface CompiledRendererRuntime<TMeta = unknown> {
   refreshResources(): void
   prewarm(request: MotionRendererPrewarmRequest): Promise<boolean>
   updateFrame(deltaSeconds: number): void
+  needsFrame(): boolean
   getStats(): MotionRendererStats
   dispose(): void
 }
@@ -95,6 +96,11 @@ export function compileRendererRuntime<TMeta = unknown>(
     updateFrame: frame
       ? (deltaSeconds) => frame.update(deltaSeconds)
       : noop,
+    needsFrame: frame
+      ? frame.needsUpdate
+        ? () => frame.needsUpdate!()
+        : () => true
+      : () => false,
     getStats: () => renderer.getStats(),
     dispose: () => renderer.dispose(),
   }

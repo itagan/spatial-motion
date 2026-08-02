@@ -677,6 +677,37 @@ describe('MotionStage', () => {
     visibilitySpy.mockRestore()
   })
 
+  it('stops submitting static frames and wakes for visual changes and animation', () => {
+    let frame: FrameRequestCallback | null = null
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return requestFrame.mock.calls.length
+    })
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    const stage = createStage()
+    const renderer = currentRenderer()
+
+    expect(requestFrame).toHaveBeenCalledOnce()
+    ;(frame as unknown as FrameRequestCallback)(16)
+    expect(renderer.render).toHaveBeenCalledOnce()
+    expect(requestFrame).toHaveBeenCalledOnce()
+
+    stage.setRotation(0.1, 0.2)
+    expect(requestFrame).toHaveBeenCalledTimes(2)
+    ;(frame as unknown as FrameRequestCallback)(32)
+    expect(renderer.render).toHaveBeenCalledTimes(2)
+    expect(requestFrame).toHaveBeenCalledTimes(2)
+
+    stage.autoRotate({ y: 0.25 })
+    ;(frame as unknown as FrameRequestCallback)(48)
+    expect(requestFrame).toHaveBeenCalledTimes(4)
+    stage.stopRotation()
+    ;(frame as unknown as FrameRequestCallback)(64)
+    expect(renderer.render).toHaveBeenCalledTimes(4)
+    expect(requestFrame).toHaveBeenCalledTimes(4)
+    stage.destroy()
+  })
+
   it('drives transitions from the Stage frame loop and excludes paused time', async () => {
     let now = 0
     let frame: FrameRequestCallback | null = null
@@ -915,6 +946,35 @@ describe('MotionStage', () => {
     expect(updates.every((update) => update.mock.calls.length === 1)).toBe(true)
     expect(requestFrame).toHaveBeenCalledTimes(2)
     expect(stage.getPerformanceStats().extensions).toBe(5)
+    stage.destroy()
+  })
+
+  it('wakes static extensions for mount, visibility changes, and removal', async () => {
+    let frame: FrameRequestCallback | null = null
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return requestFrame.mock.calls.length
+    })
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    const stage = createStage()
+    ;(frame as unknown as FrameRequestCallback)(16)
+    expect(requestFrame).toHaveBeenCalledOnce()
+
+    const handle = await stage.addExtension({
+      mount: ({ root }) => { root.add(new Object3D()) },
+    })
+    expect(requestFrame).toHaveBeenCalledTimes(2)
+    ;(frame as unknown as FrameRequestCallback)(32)
+    expect(requestFrame).toHaveBeenCalledTimes(2)
+
+    handle.disable()
+    expect(requestFrame).toHaveBeenCalledTimes(3)
+    ;(frame as unknown as FrameRequestCallback)(48)
+    handle.enable()
+    expect(requestFrame).toHaveBeenCalledTimes(4)
+    ;(frame as unknown as FrameRequestCallback)(64)
+    handle.remove()
+    expect(requestFrame).toHaveBeenCalledTimes(5)
     stage.destroy()
   })
 

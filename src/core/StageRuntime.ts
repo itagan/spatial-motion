@@ -1,6 +1,7 @@
 interface StageRuntimeOptions {
   element: HTMLCanvasElement
-  onFrame: (now: number, rawFrameMs: number, deltaSeconds: number) => void
+  /** Return false when no continuous frame is needed. */
+  onFrame: (now: number, rawFrameMs: number, deltaSeconds: number) => boolean | void
   onPauseChange: (paused: boolean) => void
   onResume: (now: number) => void
   onContextLost: () => void
@@ -50,6 +51,10 @@ export class StageRuntime {
     return Boolean(this.frameId)
   }
 
+  requestFrame(): void {
+    this.syncLoop()
+  }
+
   dispose(): void {
     if (this.destroyed) return
     this.destroyed = true
@@ -81,8 +86,17 @@ export class StageRuntime {
     this.frameId = 0
     const rawFrameMs = now - this.lastFrame || 0
     this.lastFrame = now
-    this.options.onFrame(now, rawFrameMs, Math.min(0.05, rawFrameMs / 1000))
-    if (!this.destroyed && !this.isPaused()) {
+    const keepRunning = this.options.onFrame(
+      now,
+      rawFrameMs,
+      Math.min(0.05, rawFrameMs / 1000),
+    )
+    if (
+      keepRunning !== false
+      && !this.frameId
+      && !this.destroyed
+      && !this.isPaused()
+    ) {
       this.frameId = requestAnimationFrame(this.render)
     }
   }

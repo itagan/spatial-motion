@@ -160,7 +160,10 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       viewport: { resize: (viewport) => this.resize(viewport) },
       resourceRecovery: { refreshResources: () => this.refreshResources() },
       resourcePreparation: { prewarm: (request) => this.prewarm(request) },
-      frame: { update: (deltaSeconds) => this.advanceAtlasUploads(deltaSeconds) },
+      frame: {
+        update: (deltaSeconds) => this.advanceAtlasUploads(deltaSeconds),
+        needsUpdate: () => this.hasPendingAtlasUploads(),
+      },
       streamingEffects: {
         enable: (data) => this.enableEffect(data),
         disable: () => this.disableEffect(),
@@ -557,6 +560,14 @@ export class InstancedCardRenderer<TMeta = unknown> implements MotionRenderer<TM
       this.layerUploadFrames += 1
       this.totalLayerUploadFrames += 1
     }
+  }
+
+  private hasPendingAtlasUploads(): boolean {
+    return Boolean(
+      this.atlas
+      && this.atlas.mode === 'array'
+      && this.nextLayer < this.atlas.depth,
+    )
   }
 
   private layersPerUpload(atlas: TextureAtlasResult, byteBudget: number): number {

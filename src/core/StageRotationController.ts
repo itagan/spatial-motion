@@ -30,6 +30,10 @@ export class StageRotationController {
     this.speedY = 0
   }
 
+  isActive(): boolean {
+    return this.speedX !== 0 || this.speedY !== 0
+  }
+
   set(x: number, y: number): void {
     this.x = x
     this.y = y

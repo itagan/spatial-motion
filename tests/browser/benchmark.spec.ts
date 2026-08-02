@@ -378,3 +378,47 @@ test('exports a repository-importable real-device capture', async ({ page }) => 
   })
   expect(capture.browserSamples).toHaveLength(2)
 })
+
+test('static layouts stop GPU draw submission and animation wakes it again', async ({ page }) => {
+  await page.addInitScript(() => {
+    const probe = { draws: 0 }
+    Object.defineProperty(window, '__spatialMotionIdleDrawProbe', { value: probe })
+    for (const constructor of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
+      if (!constructor) continue
+      const prototype = constructor.prototype as unknown as Record<string, unknown>
+      for (const name of [
+        'drawArrays',
+        'drawElements',
+        'drawArraysInstanced',
+        'drawElementsInstanced',
+      ]) {
+        const original = prototype[name]
+        if (typeof original !== 'function') continue
+        prototype[name] = function(this: unknown, ...args: unknown[]) {
+          probe.draws += 1
+          return Reflect.apply(original, this, args)
+        }
+      }
+    }
+  })
+  await page.goto('/benchmark.html')
+  await expect(page.getByText('READY', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '平面', exact: true }).click()
+  await page.waitForTimeout(1_200)
+
+  const drawsAfterSettling = await page.evaluate(() =>
+    (window as unknown as { __spatialMotionIdleDrawProbe: { draws: number } })
+      .__spatialMotionIdleDrawProbe.draws)
+  await page.waitForTimeout(500)
+  const drawsWhileIdle = await page.evaluate(() =>
+    (window as unknown as { __spatialMotionIdleDrawProbe: { draws: number } })
+      .__spatialMotionIdleDrawProbe.draws)
+  expect(drawsWhileIdle).toBe(drawsAfterSettling)
+
+  await page.getByRole('button', { name: '球体', exact: true }).click()
+  await page.waitForTimeout(250)
+  const drawsAfterWake = await page.evaluate(() =>
+    (window as unknown as { __spatialMotionIdleDrawProbe: { draws: number } })
+      .__spatialMotionIdleDrawProbe.draws)
+  expect(drawsAfterWake).toBeGreaterThan(drawsWhileIdle)
+})

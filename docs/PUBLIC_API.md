@@ -25,7 +25,7 @@ Semantic Versioning；发布前若必须改变冻结契约，也需要同步迁�
 - 构造参数提供 `items` 时通过 `stage.ready` 等待初始 Renderer 数据准备；后续数据使用 `setItems()` / `updateItem(s)`。
 - `MotionItem<TMeta>`、Renderer/Layout 输入及更新索引使用只读契约；Stage、Cards/Points Resolver 和 item 回调共享同一泛型 meta。
 - Factory 只获得隔离内容 `Group`、GPU 限制（含 `maxTextureSize`、`maxTextureLayers`）、受限纹理准备函数和 destroy `AbortSignal`，不能接管 Scene、Camera、WebGLRenderer 或 RAF。
-- 核心协议负责数据、Transform Buffer、GPU 过渡进度、质量可见比例、统计和销毁；patch、visual、highlight、viewport、resource recovery、resource preparation、streaming effects 与逐帧 `frame.update()` 是可选能力。
+- 核心协议负责数据、Transform Buffer、GPU 过渡进度、质量可见比例、统计和销毁；patch、visual、highlight、viewport、resource recovery、resource preparation、streaming effects 与逐帧 `frame.update()` 是可选能力。声明 frame capability 的 Renderer 默认保持连续帧；实现 `frame.needsUpdate()` 后可在内部任务排空时返回 `false`，让静态 Stage 停止 RAF，并在 Stage 状态变化时自动唤醒。
 - `setTransforms(buffer)` 与 `prepareTransition(from, to)` 强制接收
   `TransformBufferView`。视图包含 position/rotation 的三分量 Float32Array、
   scale/opacity 的单分量 Float32Array 和有效 `count`；Renderer 必须同步读取或复制，
@@ -93,6 +93,9 @@ Semantic Versioning；发布前若必须改变冻结契约，也需要同步迁�
 ## 性能与扩展
 
 - Cards 与 Points 主体各保持单一批量对象；默认布局、过渡和质量裁剪不为每项增加 Draw Call。
+- 没有转场、流式特效、自动旋转、Timeline、活动帧扩展或 Renderer 帧任务时，Stage
+  停止安排 RAF 和 WebGL scene submission；数据、布局、交互、resize 与资源提交会
+  自动请求下一帧。Extension 若提供 update/render hook，会继续保持连续帧。
 - Stage 内容更新通过共享稳定 id 索引继承 Transform；并发更新使用有界
   `TransformBuffer` 租约池，Cards patch 使用独立的索引/指纹工作区池。过期、失败和
   destroy 路径都会归还租约，不把可复用缓冲暴露给 Renderer 异步边界之外。

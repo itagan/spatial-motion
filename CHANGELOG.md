@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Stage 在静态布局且没有转场、流式特效、自动旋转、Timeline、活动 Extension 或
+  Renderer 帧任务时停止 RAF 与 WebGL 提交；任一视觉变更会按需唤醒。Renderer 的
+  `frame.needsUpdate()` 可在内部任务排空后进入休眠，旧 frame capability 保持连续模式。
 - Cards 新增受约束的 Motion/Effect Program；四个内置 GPU 特效迁移为按需动态
   chunk，自定义 Program 可声明私有 Attribute、Uniform、GLSL 和 payload 上传。
 - `StreamingEffectGpuData` 收敛为 `{ kind, activeCount, payload }`，异步特效激活
